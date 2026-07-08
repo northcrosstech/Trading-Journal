@@ -126,7 +126,66 @@ def test_pull_all_orders_respects_max_pages_cap(monkeypatch, capsys):
         (datetime(2026, 7, 8, 16, 59, tzinfo=ZoneInfo("America/New_York")), True),  # Wed 4:59pm, just inside
         (datetime(2026, 7, 11, 10, 0, tzinfo=ZoneInfo("America/New_York")), False),  # Saturday
         (datetime(2026, 7, 12, 10, 0, tzinfo=ZoneInfo("America/New_York")), False),  # Sunday
+        (datetime(2026, 7, 3, 10, 0, tzinfo=ZoneInfo("America/New_York")), False),  # Independence Day (observed)
+        (datetime(2026, 11, 26, 10, 0, tzinfo=ZoneInfo("America/New_York")), False),  # Thanksgiving
     ],
 )
 def test_is_market_hours(when, expected):
     assert sync.is_market_hours(when) is expected
+
+
+@pytest.fixture(autouse=True)
+def _reset_taper_state(monkeypatch):
+    monkeypatch.setattr(sync, "_taper_date", None)
+    monkeypatch.setattr(sync, "_taper_count", 0)
+
+
+def test_should_sync_now_true_during_regular_hours():
+    when = datetime(2026, 7, 8, 10, 0, tzinfo=ZoneInfo("America/New_York"))  # Wed 10am
+    should_run, _ = sync._should_sync_now(when)
+    assert should_run is True
+
+
+def test_should_sync_now_false_on_weekend():
+    when = datetime(2026, 7, 11, 10, 0, tzinfo=ZoneInfo("America/New_York"))  # Saturday
+    should_run, reason = sync._should_sync_now(when)
+    assert should_run is False
+    assert "trading day" in reason
+
+
+def test_should_sync_now_false_on_market_holiday():
+    when = datetime(2026, 12, 25, 10, 0, tzinfo=ZoneInfo("America/New_York"))  # Christmas
+    should_run, reason = sync._should_sync_now(when)
+    assert should_run is False
+    assert "trading day" in reason
+
+
+def test_should_sync_now_allows_limited_taper_syncs_after_close():
+    close = datetime(2026, 7, 8, 17, 0, tzinfo=ZoneInfo("America/New_York"))  # Wed 5pm, right at close
+
+    first_should_run, _ = sync._should_sync_now(close)
+    second_should_run, _ = sync._should_sync_now(close.replace(minute=20))
+    third_should_run, reason = sync._should_sync_now(close.replace(minute=40))
+
+    assert first_should_run is True
+    assert second_should_run is True
+    assert third_should_run is False  # AFTER_CLOSE_MAX_SYNCS default is 2
+    assert "taper budget" in reason
+
+
+def test_should_sync_now_false_after_taper_window_ends():
+    late_night = datetime(2026, 7, 8, 20, 0, tzinfo=ZoneInfo("America/New_York"))  # Wed 8pm, well past the 1h taper
+    should_run, reason = sync._should_sync_now(late_night)
+    assert should_run is False
+    assert "taper window" in reason
+
+
+def test_should_sync_now_taper_budget_resets_on_a_new_day():
+    day1_close = datetime(2026, 7, 8, 17, 10, tzinfo=ZoneInfo("America/New_York"))
+    day2_close = datetime(2026, 7, 9, 17, 10, tzinfo=ZoneInfo("America/New_York"))
+
+    assert sync._should_sync_now(day1_close)[0] is True
+    assert sync._should_sync_now(day1_close.replace(minute=30))[0] is True
+    assert sync._should_sync_now(day1_close.replace(minute=50))[0] is False  # budget used up on day 1
+
+    assert sync._should_sync_now(day2_close)[0] is True  # fresh budget on day 2

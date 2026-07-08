@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { supabase } from '../lib/supabase'
 import { currency } from '../lib/format'
+import { SyncStatus } from './SyncStatus'
 
 const navItems = [
   { to: '/', label: 'Dashboard', end: true },
@@ -48,6 +49,8 @@ export function Layout() {
             </div>
           </div>
         </div>
+
+        <SyncStatus />
 
         <nav className="flex flex-1 flex-col gap-0.5 px-2">
           {navItems.map((item) => (

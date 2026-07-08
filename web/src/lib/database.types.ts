@@ -91,6 +91,19 @@ export type DailyJournalRow = {
   created_at: string
 }
 
+export type TargetSettingsRow = {
+  id: string
+  user_id: string
+  profit_target_value: number | null
+  loss_limit_value: number | null
+  // Scaffolded for a future percent-of-capital mode -- unused by any current UI or
+  // computation. See migration 20260709010000_target_settings.sql. TODO(percent-mode).
+  profit_target_pct: number | null
+  loss_limit_pct: number | null
+  created_at: string
+  updated_at: string
+}
+
 export type SyncLogRow = {
   id: string
   user_id: string
@@ -118,6 +131,7 @@ export type Database = {
       trade_rules: ReturnType<typeof table<TradeRuleRow>>
       daily_journal: ReturnType<typeof table<DailyJournalRow>>
       sync_log: ReturnType<typeof table<SyncLogRow>>
+      target_settings: ReturnType<typeof table<TargetSettingsRow>>
     }
     Views: Record<string, never>
     Functions: Record<string, never>
@@ -132,6 +146,8 @@ export type OptionsDetail = OptionsDetailRow
 export type Strategy = StrategyRow
 export type Rule = RuleRow
 export type DailyJournal = DailyJournalRow
+export type TargetSettings = TargetSettingsRow
+export type SyncLog = SyncLogRow
 
 export type TradeWithDetails = Trade & {
   options_detail: OptionsDetail | null

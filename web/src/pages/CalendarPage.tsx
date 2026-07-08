@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../auth/AuthContext'
-import { fetchAllDailyJournal, upsertDailyJournal } from '../lib/queries'
-import type { Trade, DailyJournal } from '../lib/database.types'
-import { computeCalendarDays } from '../lib/metrics'
+import { fetchAllDailyJournal, upsertDailyJournal, fetchTargetSettings } from '../lib/queries'
+import type { Trade, DailyJournal, TargetSettings } from '../lib/database.types'
+import { computeCalendarDays, computeDailyTargetStats } from '../lib/metrics'
 import { PnlCalendarHeatmap } from '../components/PnlCalendarHeatmap'
 
 export function CalendarPage() {
   const { user } = useAuth()
   const [trades, setTrades] = useState<Trade[] | null>(null)
   const [journalByDate, setJournalByDate] = useState<Map<string, DailyJournal>>(new Map())
+  const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -25,6 +26,10 @@ export function CalendarPage() {
     fetchAllDailyJournal().then((entries) => {
       if (cancelled) return
       setJournalByDate(new Map(entries.map((e) => [e.entry_date, e])))
+    })
+
+    fetchTargetSettings().then((s) => {
+      if (!cancelled) setTargetSettings(s)
     })
 
     return () => {
@@ -59,11 +64,17 @@ export function CalendarPage() {
   }
 
   const calendarData = computeCalendarDays(trades)
+  const targetsByDate = computeDailyTargetStats(trades, targetSettings)
 
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-lg font-semibold text-neutral-100">Calendar</h1>
-      <PnlCalendarHeatmap daysByDate={calendarData} journalByDate={journalByDate} onSaveNote={handleSaveNote} />
+      <PnlCalendarHeatmap
+        daysByDate={calendarData}
+        journalByDate={journalByDate}
+        targetsByDate={targetsByDate}
+        onSaveNote={handleSaveNote}
+      />
     </div>
   )
 }

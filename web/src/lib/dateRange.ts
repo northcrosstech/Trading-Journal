@@ -27,7 +27,7 @@ export const DATE_RANGE_PRESETS: { value: DateRangePreset; label: string }[] = [
  * date string elsewhere, but "today"/"yesterday" etc. must reflect the user's actual
  * local day, or these presets drift a day off in US timezones during evening hours
  * (UTC has already rolled to the next day while it's still "today" locally). */
-function toDateStr(d: Date): string {
+export function toDateStr(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')

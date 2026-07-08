@@ -25,7 +25,7 @@ import argparse
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -36,7 +36,9 @@ from webull.trade.trade_client import TradeClient
 
 from db_writer import get_client, write_sync_log, write_trades
 from fees import DEFAULT_MAX_FETCHES_PER_CYCLE, FeesCache, annotate_execution_fees
+from market_calendar import is_trading_day
 from rate_limiter import RateLimiter
+from sync_trigger_server import start_http_server
 from transform import extract_orders, group_trades, normalize_orders, open_trade_warnings
 
 load_dotenv()
@@ -62,6 +64,11 @@ MARKET_START_HOUR = int(os.environ.get("SYNC_MARKET_START_HOUR", "9"))
 MARKET_END_HOUR = int(os.environ.get("SYNC_MARKET_END_HOUR", "17"))
 MARKET_TZ = ZoneInfo("America/New_York")
 
+# After the regular session ends, allow a couple more syncs (to catch fills/fees still
+# settling) before going fully quiet overnight -- see _should_sync_now.
+AFTER_CLOSE_TAPER_HOURS = float(os.environ.get("SYNC_AFTER_CLOSE_TAPER_HOURS", "1"))
+AFTER_CLOSE_MAX_SYNCS = int(os.environ.get("SYNC_AFTER_CLOSE_MAX_SYNCS", "2"))
+
 MAX_PAGES = 50  # safety cap against a runaway pagination loop
 
 
@@ -75,13 +82,51 @@ class SyncSummary:
 
 
 def is_market_hours(now: Optional[datetime] = None) -> bool:
-    """Mon-Fri, [MARKET_START_HOUR, MARKET_END_HOUR) America/New_York. Does not account
-    for market holidays -- good enough to skip nights/weekends, not a full trading
-    calendar."""
+    """Mon-Fri, [MARKET_START_HOUR, MARKET_END_HOUR) America/New_York, excluding US
+    market holidays (see market_calendar.py). Does not account for early-close
+    half-days."""
     now = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
-    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+    if not is_trading_day(now.date()):
         return False
     return MARKET_START_HOUR <= now.hour < MARKET_END_HOUR
+
+
+def _in_after_close_taper_window(now: datetime) -> bool:
+    close = now.replace(hour=MARKET_END_HOUR, minute=0, second=0, microsecond=0)
+    taper_end = close + timedelta(hours=AFTER_CLOSE_TAPER_HOURS)
+    return close <= now < taper_end
+
+
+# In-memory only -- resets on every deploy/restart, which just means a fresh taper
+# budget for that day. Fine for a single-process worker with one machine running.
+_taper_date = None
+_taper_count = 0
+
+
+def _should_sync_now(now: Optional[datetime] = None) -> tuple[bool, str]:
+    """Gate used by the scheduled job (not the manual-refresh endpoint, which always
+    runs on demand regardless of market hours). Regular session -> always sync. After
+    close -> a capped number of taper syncs to catch fills/fees still settling, then
+    quiet for the rest of the night. Weekends and US market holidays -> off entirely."""
+    global _taper_date, _taper_count
+    now = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
+
+    if not is_trading_day(now.date()):
+        return False, "not a trading day (weekend or US market holiday)"
+
+    if MARKET_START_HOUR <= now.hour < MARKET_END_HOUR:
+        return True, ""
+
+    if _in_after_close_taper_window(now):
+        if _taper_date != now.date():
+            _taper_date = now.date()
+            _taper_count = 0
+        if _taper_count < AFTER_CLOSE_MAX_SYNCS:
+            _taper_count += 1
+            return True, ""
+        return False, f"after-close taper budget ({AFTER_CLOSE_MAX_SYNCS}) already used today"
+
+    return False, "outside market hours and the after-close taper window"
 
 
 def _build_trade_client() -> tuple[TradeClient, str]:
@@ -221,12 +266,11 @@ def _print_summary(summary: SyncSummary) -> None:
 
 
 def _scheduled_job() -> None:
-    if MARKET_HOURS_ONLY and not is_market_hours():
-        print(
-            f"[{datetime.now().isoformat()}] outside configured market hours "
-            f"({MARKET_START_HOUR}-{MARKET_END_HOUR} America/New_York, Mon-Fri) -- skipping this cycle."
-        )
-        return
+    if MARKET_HOURS_ONLY:
+        should_run, reason = _should_sync_now()
+        if not should_run:
+            print(f"[{datetime.now().isoformat()}] skipping this cycle -- {reason}.")
+            return
     _print_summary(run_sync())
 
 
@@ -243,11 +287,15 @@ def main() -> None:
     print(
         f"Starting scheduled sync worker: every {SYNC_INTERVAL_MINUTES} min"
         + (
-            f", market-hours only ({MARKET_START_HOUR}-{MARKET_END_HOUR} America/New_York, Mon-Fri)"
+            f", market-hours only ({MARKET_START_HOUR}-{MARKET_END_HOUR} America/New_York, Mon-Fri, "
+            f"excluding US market holidays) + up to {AFTER_CLOSE_MAX_SYNCS} taper syncs in the "
+            f"{AFTER_CLOSE_TAPER_HOURS}h after close"
             if MARKET_HOURS_ONLY
             else ""
         )
     )
+    start_http_server(run_sync, _print_summary, port=int(os.environ.get("PORT", "8080")))
+
     scheduler = BlockingScheduler()
     scheduler.add_job(
         _scheduled_job,

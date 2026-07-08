@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../auth/AuthContext'
-import { fetchAllDailyJournal, upsertDailyJournal } from '../lib/queries'
-import type { Trade, DailyJournal } from '../lib/database.types'
-import { computeEquityCurve, computeStatStrip, computeCalendarDays } from '../lib/metrics'
-import { filterTradesByDateRange, presetRange, type DateRangePreset } from '../lib/dateRange'
+import { fetchAllDailyJournal, upsertDailyJournal, fetchTargetSettings } from '../lib/queries'
+import type { Trade, DailyJournal, TargetSettings } from '../lib/database.types'
+import { computeEquityCurve, computeStatStrip, computeCalendarDays, computeDailyTargetStats } from '../lib/metrics'
+import { filterTradesByDateRange, presetRange, toDateStr, type DateRangePreset } from '../lib/dateRange'
 import { DateRangePresetBar } from '../components/DateRangePresetBar'
 import { StatStripBar } from '../components/StatStripBar'
 import { EquityCurveChart } from '../components/EquityCurveChart'
 import { PnlCalendarHeatmap } from '../components/PnlCalendarHeatmap'
 import { RecentTradesList } from '../components/RecentTradesList'
+import { TodayTargetBenchmark } from '../components/TodayTargetBenchmark'
 
 export function DashboardPage() {
   const { user } = useAuth()
   const [trades, setTrades] = useState<Trade[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [journalByDate, setJournalByDate] = useState<Map<string, DailyJournal>>(new Map())
+  const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null)
   const [preset, setPreset] = useState<DateRangePreset | null>(null)
 
   useEffect(() => {
@@ -37,6 +39,10 @@ export function DashboardPage() {
     fetchAllDailyJournal().then((entries) => {
       if (cancelled) return
       setJournalByDate(new Map(entries.map((e) => [e.entry_date, e])))
+    })
+
+    fetchTargetSettings().then((s) => {
+      if (!cancelled) setTargetSettings(s)
     })
 
     return () => {
@@ -90,6 +96,8 @@ export function DashboardPage() {
   const stripStats = computeStatStrip(filtered)
   const equityData = computeEquityCurve(filtered)
   const calendarData = computeCalendarDays(trades) // calendar is its own navigable view, unaffected by the range preset
+  const targetsByDate = computeDailyTargetStats(trades, targetSettings) // all-time, same reasoning
+  const today = targetsByDate.get(toDateStr(new Date()))
 
   return (
     <div className="flex flex-col gap-5">
@@ -106,6 +114,13 @@ export function DashboardPage() {
         <DateRangePresetBar value={preset} onChange={setPreset} />
       </div>
 
+      {targetSettings && (
+        <TodayTargetBenchmark
+          settings={{ profit_target_value: targetSettings.profit_target_value, loss_limit_value: targetSettings.loss_limit_value }}
+          today={today}
+        />
+      )}
+
       <StatStripBar stats={stripStats} />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -119,7 +134,12 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <PnlCalendarHeatmap daysByDate={calendarData} journalByDate={journalByDate} onSaveNote={handleSaveNote} />
+      <PnlCalendarHeatmap
+        daysByDate={calendarData}
+        journalByDate={journalByDate}
+        targetsByDate={targetsByDate}
+        onSaveNote={handleSaveNote}
+      />
     </div>
   )
 }

@@ -1,8 +1,4 @@
 # Fly.io config for the Webull -> Supabase sync worker.
-# No http_service on purpose: this isn't a web server, it's a long-running background
-# process (sync.py's BlockingScheduler). Without http_service there's no idle-based
-# auto-stop to worry about -- the machine stays up as long as the process is running,
-# which is what keeps the SDK's cached token warm and the 15-min schedule ticking.
 #
 # Replace `app` with your own app name (must be globally unique) before first deploy.
 app = "trading-journal-worker"
@@ -20,6 +16,21 @@ primary_region = "iad"
 [[mounts]]
   source = "worker_data"
   destination = "/data"
+
+# Exposes POST /sync/trigger (manual refresh) and GET /healthz. Auth is the
+# SYNC_TRIGGER_SECRET header check in sync_trigger_server.py, not anything at this
+# layer -- `fly secrets set SYNC_TRIGGER_SECRET=...` before deploying, and set the
+# same value as a Vercel env var so web/api/trigger-sync.ts can call in.
+#
+# min_machines_running = 1 keeps the machine up continuously (same as before this
+# block existed) -- auto-stop would drop the SDK's warm cached token and the
+# scheduler's in-memory state, which this app depends on staying alive.
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
 
 [[vm]]
   size = "shared-cpu-1x"

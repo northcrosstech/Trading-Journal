@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { CalendarDay } from '../lib/metrics'
+import type { CalendarDay, DailyTargetResult } from '../lib/metrics'
 import type { DailyJournal } from '../lib/database.types'
 import { compactCurrency } from '../lib/format'
 import { DayNoteModal } from './DayNoteModal'
+import { TargetMarkerIcon } from './TargetMarkerIcon'
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_LABELS = [
@@ -104,12 +105,14 @@ function MonthView({
   setCursor,
   daysByDate,
   journalByDate,
+  targetsByDate,
   onOpenNote,
 }: {
   cursor: { year: number; month: number }
   setCursor: React.Dispatch<React.SetStateAction<{ year: number; month: number }>>
   daysByDate: Map<string, CalendarDay>
   journalByDate: Map<string, DailyJournal>
+  targetsByDate: Map<string, DailyTargetResult>
   onOpenNote: (date: string) => void
 }) {
   const navigate = useNavigate()
@@ -198,6 +201,7 @@ function MonthView({
                   const dayNum = Number(day.date.slice(-2))
                   const hasTrades = day.tradeCount > 0
                   const hasNote = !!journalByDate.get(day.date)?.notes?.trim()
+                  const targetStatus = targetsByDate.get(day.date)?.status ?? 'neutral'
                   return (
                     <div
                       key={day.date}
@@ -215,8 +219,9 @@ function MonthView({
                       style={{ background: monthDayBg(day.netPnl, maxAbs) }}
                       className="group relative flex h-16 cursor-pointer flex-col justify-between rounded-md p-1.5 text-left transition hover:ring-2 hover:ring-neutral-600"
                     >
-                      <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-1">
                         <span className="text-xs text-neutral-500">{dayNum}</span>
+                        <TargetMarkerIcon status={targetStatus} />
                       </div>
                       <NoteIcon hasNote={hasNote} onClick={() => onOpenNote(day.date)} />
                       {hasTrades ? (
@@ -360,10 +365,11 @@ function YearView({
 type Props = {
   daysByDate: Map<string, CalendarDay>
   journalByDate?: Map<string, DailyJournal>
+  targetsByDate?: Map<string, DailyTargetResult>
   onSaveNote?: (date: string, fields: { notes?: string; mood_rating?: number | null }) => void
 }
 
-export function PnlCalendarHeatmap({ daysByDate, journalByDate, onSaveNote }: Props) {
+export function PnlCalendarHeatmap({ daysByDate, journalByDate, targetsByDate, onSaveNote }: Props) {
   const navigate = useNavigate()
   const [mode, setMode] = useState<'month' | 'year'>('month')
   const [cursor, setCursor] = useState(() => {
@@ -373,6 +379,7 @@ export function PnlCalendarHeatmap({ daysByDate, journalByDate, onSaveNote }: Pr
   const [noteDate, setNoteDate] = useState<string | null>(null)
 
   const journalMap = journalByDate ?? new Map<string, DailyJournal>()
+  const targetsMap = targetsByDate ?? new Map<string, DailyTargetResult>()
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -399,6 +406,7 @@ export function PnlCalendarHeatmap({ daysByDate, journalByDate, onSaveNote }: Pr
           setCursor={setCursor}
           daysByDate={daysByDate}
           journalByDate={journalMap}
+          targetsByDate={targetsMap}
           onOpenNote={setNoteDate}
         />
       ) : (

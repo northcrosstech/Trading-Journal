@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { fetchTradesWithDetails, fetchStrategies } from '../lib/queries'
-import type { TradeWithDetails, Strategy } from '../lib/database.types'
+import { fetchTradesWithDetails, fetchStrategies, fetchTargetSettings } from '../lib/queries'
+import type { TradeWithDetails, Strategy, TargetSettings } from '../lib/database.types'
 import {
   computeStatsTiles,
   computeEquityCurve,
@@ -8,6 +8,8 @@ import {
   computeHourOfDayStats,
   computeStrategyStats,
   computeSymbolStats,
+  computeDailyTargetStats,
+  computeTargetSummary,
   type BucketStat,
 } from '../lib/metrics'
 import { filterTradesByDateRange, presetRange, type DateRangePreset } from '../lib/dateRange'
@@ -107,11 +109,13 @@ function GroupTable({
 export function StatsPage() {
   const [trades, setTrades] = useState<TradeWithDetails[] | null>(null)
   const [strategies, setStrategies] = useState<Strategy[]>([])
+  const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null)
   const [preset, setPreset] = useState<DateRangePreset | null>(null)
 
   useEffect(() => {
     fetchTradesWithDetails().then(setTrades)
     fetchStrategies().then((s) => setStrategies(s ?? []))
+    fetchTargetSettings().then(setTargetSettings)
   }, [])
 
   const filtered = useMemo(() => {
@@ -125,6 +129,10 @@ export function StatsPage() {
   const hourOfDay = useMemo(() => computeHourOfDayStats(filtered), [filtered])
   const strategyStats = useMemo(() => computeStrategyStats(filtered, strategies), [filtered, strategies])
   const symbolStats = useMemo(() => computeSymbolStats(filtered), [filtered])
+  const targetSummary = useMemo(
+    () => computeTargetSummary(computeDailyTargetStats(filtered, targetSettings)),
+    [filtered, targetSettings],
+  )
 
   if (trades === null) {
     return <div className="text-neutral-500">Loading stats…</div>
@@ -151,6 +159,20 @@ export function StatsPage() {
         <StatTile label="Top Loss" value={tiles.topLoss === null ? '—' : currency(tiles.topLoss)} tone="critical" />
         <StatTile label="Avg Daily Vol" value={tiles.avgDailyVolume === null ? '—' : tiles.avgDailyVolume.toFixed(1)} />
         <StatTile label="Avg Size" value={tiles.avgSize === null ? '—' : currency(tiles.avgSize)} />
+        {targetSettings?.profit_target_value !== null && targetSettings?.profit_target_value !== undefined && (
+          <>
+            <StatTile
+              label="Target Hit"
+              value={
+                targetSummary.totalDays === 0
+                  ? '—'
+                  : `${targetSummary.hitDays}/${targetSummary.totalDays} (${Math.round((targetSummary.hitPct ?? 0) * 100)}%)`
+              }
+              tone="good"
+            />
+            <StatTile label="Gave It Back" value={String(targetSummary.gaveBackDays)} tone={targetSummary.gaveBackDays > 0 ? 'critical' : 'neutral'} />
+          </>
+        )}
       </div>
 
       <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
