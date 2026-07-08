@@ -8,6 +8,7 @@ secrets/
 did.bin
 token.json
 *.token
+worker/.fees_cache.json
 
 # ---- Python (worker/) ----
 __pycache__/
