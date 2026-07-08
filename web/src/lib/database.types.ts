@@ -57,6 +57,7 @@ export type StrategyRow = {
   id: string
   user_id: string
   name: string
+  color: string
   archived: boolean
   created_at: string
 }
@@ -64,6 +65,21 @@ export type StrategyRow = {
 export type TradeStrategyRow = {
   trade_id: string
   strategy_id: string
+}
+
+export type RuleRow = {
+  id: string
+  user_id: string
+  name: string
+  type: 'entry' | 'exit'
+  archived: boolean
+  created_at: string
+}
+
+export type TradeRuleRow = {
+  trade_id: string
+  rule_id: string
+  status: 'followed' | 'broken' | 'na'
 }
 
 export type DailyJournalRow = {
@@ -98,6 +114,8 @@ export type Database = {
       options_detail: ReturnType<typeof table<OptionsDetailRow>>
       strategies: ReturnType<typeof table<StrategyRow>>
       trade_strategies: ReturnType<typeof table<TradeStrategyRow>>
+      rules: ReturnType<typeof table<RuleRow>>
+      trade_rules: ReturnType<typeof table<TradeRuleRow>>
       daily_journal: ReturnType<typeof table<DailyJournalRow>>
       sync_log: ReturnType<typeof table<SyncLogRow>>
     }
@@ -112,10 +130,12 @@ export type Trade = TradeRow
 export type Execution = ExecutionRow
 export type OptionsDetail = OptionsDetailRow
 export type Strategy = StrategyRow
+export type Rule = RuleRow
 export type DailyJournal = DailyJournalRow
 
 export type TradeWithDetails = Trade & {
   options_detail: OptionsDetail | null
   executions: Execution[]
   trade_strategies: { strategy_id: string; strategies: Strategy | null }[]
+  trade_rules: { rule_id: string; status: TradeRuleRow['status']; rules: Rule | null }[]
 }

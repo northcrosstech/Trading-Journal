@@ -8,6 +8,20 @@ export const priceFmt = (n: number | null | undefined) => {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+/** Compact currency for tight spaces (calendar cells): "$1.2K", "-$430". */
+export const compactCurrency = (n: number | null | undefined) => {
+  if (n === null || n === undefined) return '—'
+  const sign = n < 0 ? '-' : ''
+  const abs = Math.abs(n)
+  const formatted = abs.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  })
+  return sign + formatted
+}
+
 export const percentFmt = (n: number | null | undefined) => {
   if (n === null || n === undefined) return '—'
   return `${n >= 0 ? '+' : ''}${(n * 100).toFixed(1)}%`

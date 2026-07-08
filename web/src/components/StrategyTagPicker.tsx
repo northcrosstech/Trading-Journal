@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Strategy } from '../lib/database.types'
+import { StrategyChip } from './StrategyChip'
 
 type Props = {
   assigned: { strategy_id: string; strategies: Strategy | null }[]
@@ -18,19 +19,7 @@ export function StrategyTagPicker({ assigned, allStrategies, onAdd, onRemove }: 
     <div className="flex flex-wrap items-center gap-1.5">
       {assigned.map((a) =>
         a.strategies ? (
-          <span
-            key={a.strategy_id}
-            className="group flex items-center gap-1 rounded-full bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200"
-          >
-            {a.strategies.name}
-            <button
-              onClick={() => onRemove(a.strategy_id)}
-              className="text-neutral-500 opacity-60 hover:text-red-400 hover:opacity-100"
-              aria-label={`Remove ${a.strategies.name}`}
-            >
-              ×
-            </button>
-          </span>
+          <StrategyChip key={a.strategy_id} strategy={a.strategies} onRemove={() => onRemove(a.strategy_id)} />
         ) : null,
       )}
 
