@@ -64,3 +64,16 @@ export function timeOnlyFmt(iso: string | null | undefined): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
 }
+
+export function relativeTimeFmt(iso: string | null | undefined): string {
+  if (!iso) return 'never'
+  const diffSeconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000)
+  if (diffSeconds < 10) return 'just now'
+  if (diffSeconds < 60) return `${diffSeconds}s ago`
+  const minutes = Math.floor(diffSeconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}

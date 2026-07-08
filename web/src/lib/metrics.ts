@@ -505,6 +505,93 @@ export function computeStatsTiles(trades: TradeWithDetails[]): StatsTiles {
   }
 }
 
+export type DailyTargetStatus = 'hit_target' | 'gave_it_back' | 'breached_loss' | 'neutral'
+
+export type DailyTargetResult = {
+  date: string
+  netPnlClose: number // end-of-day realized net P&L
+  intradayPeakRealized: number // max cumulative realized P&L seen while walking the day's closes in order
+  hitTargetClosed: boolean
+  reachedTargetIntraday: boolean // peak >= target but close < target -- "gave it back"
+  breachedLossLimit: boolean
+  status: DailyTargetStatus // single marker for calendar display; breach > hit > gave-back
+}
+
+export type TargetSettingsInput = { profit_target_value: number | null; loss_limit_value: number | null }
+
+/**
+ * Realized-P&L-only approximation of intraday performance -- NOT mark-to-market
+ * unrealized P&L. `intradayPeakRealized` only moves when a trade actually closes and
+ * books P&L, so it can't reflect an open position's paper gains/losses; it answers
+ * "how far ahead did booked profit get before end of day," which is enough to detect
+ * "was green then gave it back" without needing any live/unrealized price feed.
+ */
+export function computeDailyTargetStats(
+  trades: Trade[],
+  settings: TargetSettingsInput | null,
+): Map<string, DailyTargetResult> {
+  const result = new Map<string, DailyTargetResult>()
+  if (!settings || (settings.profit_target_value === null && settings.loss_limit_value === null)) return result
+
+  const target = settings.profit_target_value
+  const lossLimit = settings.loss_limit_value
+
+  const closed = trades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null && t.last_out_at)
+  const byDate = new Map<string, Trade[]>()
+  for (const t of closed) {
+    const date = t.last_out_at!.slice(0, 10)
+    const list = byDate.get(date)
+    if (list) list.push(t)
+    else byDate.set(date, [t])
+  }
+
+  for (const [date, dayTrades] of byDate) {
+    const ordered = [...dayTrades].sort((a, b) => new Date(a.last_out_at!).getTime() - new Date(b.last_out_at!).getTime())
+    let cumulative = 0
+    let peak = 0 // starts at 0 (the day's baseline), not -Infinity, since "peak" means best point reached
+    for (const t of ordered) {
+      cumulative += t.realized_pnl_net ?? 0
+      peak = Math.max(peak, cumulative)
+    }
+
+    const netPnlClose = cumulative
+    const intradayPeakRealized = peak
+    const hitTargetClosed = target !== null && netPnlClose >= target
+    const reachedTargetIntraday = target !== null && intradayPeakRealized >= target && netPnlClose < target
+    const breachedLossLimit = lossLimit !== null && netPnlClose <= -lossLimit
+
+    let status: DailyTargetStatus = 'neutral'
+    if (breachedLossLimit) status = 'breached_loss'
+    else if (hitTargetClosed) status = 'hit_target'
+    else if (reachedTargetIntraday) status = 'gave_it_back'
+
+    result.set(date, { date, netPnlClose, intradayPeakRealized, hitTargetClosed, reachedTargetIntraday, breachedLossLimit, status })
+  }
+
+  return result
+}
+
+export type TargetSummary = {
+  totalDays: number
+  hitDays: number
+  hitPct: number | null
+  gaveBackDays: number
+}
+
+/** Rolled up over whatever set of daily results is passed in -- callers filter by
+ * date range first (Stats page) or pass the full set (all-time). */
+export function computeTargetSummary(dailyResults: Map<string, DailyTargetResult>): TargetSummary {
+  const days = Array.from(dailyResults.values())
+  const hitDays = days.filter((d) => d.hitTargetClosed).length
+  const gaveBackDays = days.filter((d) => d.reachedTargetIntraday).length
+  return {
+    totalDays: days.length,
+    hitDays,
+    hitPct: days.length > 0 ? hitDays / days.length : null,
+    gaveBackDays,
+  }
+}
+
 export function computeCalendarDays(trades: Trade[]): Map<string, CalendarDay> {
   const closed = closedTradesByCloseDate(trades)
   const byDay = new Map<string, CalendarDay>()

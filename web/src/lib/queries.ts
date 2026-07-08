@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { TradeWithDetails, DailyJournal } from './database.types'
+import type { TradeWithDetails, DailyJournal, TargetSettings, SyncLog } from './database.types'
 
 const TRADE_WITH_DETAILS_SELECT =
   '*, options_detail(*), executions(*), trade_strategies(strategy_id, strategies(*)), trade_rules(rule_id, status, rules(*))'
@@ -163,4 +163,34 @@ export async function upsertDailyJournal(
     .from('daily_journal')
     .upsert({ user_id: userId, entry_date: entryDate, ...fields }, { onConflict: 'user_id,entry_date' })
   if (error) throw error
+}
+
+export async function fetchTargetSettings(): Promise<TargetSettings | null> {
+  const { data, error } = await supabase.from('target_settings').select('*').maybeSingle()
+  if (error) throw error
+  return data
+}
+
+export async function upsertTargetSettings(
+  userId: string,
+  fields: { profit_target_value: number | null; loss_limit_value: number | null },
+) {
+  const { error } = await supabase
+    .from('target_settings')
+    .upsert(
+      { user_id: userId, ...fields, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    )
+  if (error) throw error
+}
+
+export async function fetchLatestSyncLog(): Promise<SyncLog | null> {
+  const { data, error } = await supabase
+    .from('sync_log')
+    .select('*')
+    .order('ran_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data
 }
