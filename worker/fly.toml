@@ -1,0 +1,26 @@
+# Fly.io config for the Webull -> Supabase sync worker.
+# No http_service on purpose: this isn't a web server, it's a long-running background
+# process (sync.py's BlockingScheduler). Without http_service there's no idle-based
+# auto-stop to worry about -- the machine stays up as long as the process is running,
+# which is what keeps the SDK's cached token warm and the 15-min schedule ticking.
+#
+# Replace `app` with your own app name (must be globally unique) before first deploy.
+app = "trading-journal-worker"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PYTHONUNBUFFERED = "1"
+  # Persist the Webull SDK's token cache and the fees cache across restarts/redeploys --
+  # both live on the mounted volume below, not on the ephemeral container filesystem.
+  WEBULL_OPENAPI_TOKEN_DIR = "/data/webull_token"
+  WEBULL_FEES_CACHE_PATH = "/data/fees_cache.json"
+
+[[mounts]]
+  source = "worker_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
