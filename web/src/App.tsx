@@ -7,7 +7,11 @@ import { DashboardPage } from './pages/DashboardPage'
 import { TradeLogPage } from './pages/TradeLogPage'
 import { TradeDetailPage } from './pages/TradeDetailPage'
 import { JournalPage } from './pages/JournalPage'
+import { CalendarPage } from './pages/CalendarPage'
+import { StatsPage } from './pages/StatsPage'
 import { StrategiesPage } from './pages/StrategiesPage'
+import { RulesPage } from './pages/RulesPage'
+import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
   return (
@@ -26,7 +30,11 @@ function App() {
             <Route path="/trades" element={<TradeLogPage />} />
             <Route path="/trades/:tradeId" element={<TradeDetailPage />} />
             <Route path="/journal" element={<JournalPage />} />
+            <Route path="/calendar" element={<CalendarPage />} />
+            <Route path="/stats" element={<StatsPage />} />
             <Route path="/strategies" element={<StrategiesPage />} />
+            <Route path="/rules" element={<RulesPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>
       </AuthProvider>

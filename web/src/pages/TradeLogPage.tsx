@@ -1,34 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchTradesWithDetails } from '../lib/queries'
 import type { TradeWithDetails } from '../lib/database.types'
-import { currency, holdTimeFmt, optionLabel, dateFmt, percentFmt } from '../lib/format'
-import { returnOnCapitalPct } from '../lib/metrics'
+import { currency, priceFmt, holdTimeFmt, optionLabel, dateFmt, percentFmt } from '../lib/format'
+import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd } from '../lib/metrics'
+import { DATE_RANGE_PRESETS, presetRange, type DateRangePreset } from '../lib/dateRange'
 
 type SortKey = 'date' | 'holdTime' | 'netPnl' | 'symbol' | 'returnPct'
 type WinLossFilter = 'all' | 'win' | 'loss'
-type DatePreset = 'today' | 'yesterday' | 'week'
 
-function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10)
-}
-
-function presetRange(preset: DatePreset): { from: string; to: string } {
-  const now = new Date()
-  if (preset === 'today') {
-    const today = toDateStr(now)
-    return { from: today, to: today }
-  }
-  if (preset === 'yesterday') {
-    const y = new Date(now)
-    y.setDate(y.getDate() - 1)
-    const ys = toDateStr(y)
-    return { from: ys, to: ys }
-  }
-  // 'week' -- Sunday through today, matching the dashboard calendar's week convention
-  const start = new Date(now)
-  start.setDate(start.getDate() - start.getDay())
-  return { from: toDateStr(start), to: toDateStr(now) }
+/** Peak capital committed to the position -- the larger of what was deployed at
+ * entry vs. exit (they can differ if size was added/trimmed along the way). */
+function posSize(t: TradeWithDetails): number | null {
+  const entry = entrySizeUsd(t)
+  const exit = exitSizeUsd(t)
+  if (entry === null) return exit
+  if (exit === null) return entry
+  return Math.max(entry, exit)
 }
 
 export function TradeLogPage() {
@@ -96,6 +84,32 @@ export function TradeLogPage() {
     return copy
   }, [filtered, sortKey, sortDir])
 
+  // Day-grouping subtotals only make sense in chronological order -- grouping a
+  // netPnl- or symbol-sorted list would scatter a single day's trades across
+  // non-adjacent rows, so grouping is shown only while sorted by date.
+  const dayGroups = useMemo(() => {
+    if (sortKey !== 'date') return null
+    const groups: { date: string; trades: TradeWithDetails[]; netPnl: number; closedCount: number }[] = []
+    const indexByDate = new Map<string, number>()
+    for (const t of sorted) {
+      const date = t.status === 'CLOSED' ? t.last_out_at?.slice(0, 10) : t.first_in_at?.slice(0, 10)
+      if (!date) continue
+      let idx = indexByDate.get(date)
+      if (idx === undefined) {
+        idx = groups.length
+        indexByDate.set(date, idx)
+        groups.push({ date, trades: [], netPnl: 0, closedCount: 0 })
+      }
+      const group = groups[idx]
+      group.trades.push(t)
+      if (t.status === 'CLOSED') {
+        group.netPnl += t.realized_pnl_net ?? 0
+        group.closedCount += 1
+      }
+    }
+    return groups
+  }, [sorted, sortKey])
+
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -113,21 +127,22 @@ export function TradeLogPage() {
 
   // Derived, not stored -- avoids a separate "which preset is active" state going out
   // of sync with dateFrom/dateTo (e.g. if someone edits the date inputs directly).
-  const activeDatePreset = useMemo<DatePreset | null>(() => {
-    for (const preset of ['today', 'yesterday', 'week'] as const) {
-      const r = presetRange(preset)
-      if (r.from === dateFrom && r.to === dateTo) return preset
+  const activeDatePreset = useMemo<DateRangePreset | null>(() => {
+    for (const { value } of DATE_RANGE_PRESETS) {
+      const r = presetRange(value)
+      if (r && r.from === dateFrom && r.to === dateTo) return value
     }
     return null
   }, [dateFrom, dateTo])
 
-  function applyDatePreset(preset: DatePreset) {
+  function applyDatePreset(preset: DateRangePreset) {
     if (activeDatePreset === preset) {
       setDateFrom('')
       setDateTo('')
       return
     }
     const r = presetRange(preset)
+    if (!r) return
     setDateFrom(r.from)
     setDateTo(r.to)
   }
@@ -140,6 +155,7 @@ export function TradeLogPage() {
   }
 
   const sortIndicator = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '')
+  const COLUMN_COUNT = 13
 
   return (
     <div className="flex flex-col gap-4">
@@ -185,16 +201,16 @@ export function TradeLogPage() {
             </button>
           ))}
         </div>
-        <div className="flex overflow-hidden rounded-md border border-neutral-700">
-          {(['today', 'yesterday', 'week'] as const).map((preset) => (
+        <div className="flex flex-wrap overflow-hidden rounded-md border border-neutral-700">
+          {DATE_RANGE_PRESETS.map((p) => (
             <button
-              key={preset}
-              onClick={() => applyDatePreset(preset)}
-              className={`px-3 py-1.5 text-sm transition ${
-                activeDatePreset === preset ? 'bg-neutral-700 text-neutral-50' : 'bg-neutral-950 text-neutral-400 hover:bg-neutral-800'
+              key={p.value}
+              onClick={() => applyDatePreset(p.value)}
+              className={`px-2.5 py-1.5 text-xs font-medium transition ${
+                activeDatePreset === p.value ? 'bg-neutral-700 text-neutral-50' : 'bg-neutral-950 text-neutral-400 hover:bg-neutral-800'
               }`}
             >
-              {preset === 'today' ? 'Today' : preset === 'yesterday' ? 'Yesterday' : 'This Week'}
+              {p.label}
             </button>
           ))}
         </div>
@@ -227,83 +243,123 @@ export function TradeLogPage() {
         )}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
+      <div className="overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-900">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500">
-              <th className="cursor-pointer select-none px-4 py-2.5" onClick={() => toggleSort('symbol')}>
+              <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('date')}>
+                Date{sortIndicator('date')}
+              </th>
+              <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('symbol')}>
                 Symbol{sortIndicator('symbol')}
               </th>
-              <th className="px-4 py-2.5">Contract</th>
-              <th className="cursor-pointer select-none px-4 py-2.5" onClick={() => toggleSort('date')}>
-                Entry{sortIndicator('date')}
-              </th>
-              <th className="px-4 py-2.5">Exit</th>
-              <th className="cursor-pointer select-none px-4 py-2.5" onClick={() => toggleSort('holdTime')}>
+              <th className="px-3 py-2.5">Status</th>
+              <th className="px-3 py-2.5">Side</th>
+              <th className="px-3 py-2.5 text-right">Qty</th>
+              <th className="px-3 py-2.5 text-right">Entry</th>
+              <th className="px-3 py-2.5 text-right">Exit</th>
+              <th className="px-3 py-2.5 text-right">Ent Tot</th>
+              <th className="px-3 py-2.5 text-right">Ext Tot</th>
+              <th className="px-3 py-2.5 text-right">Pos</th>
+              <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('holdTime')}>
                 Hold{sortIndicator('holdTime')}
               </th>
-              <th className="px-4 py-2.5">Tags</th>
-              <th className="cursor-pointer select-none px-4 py-2.5 text-right" onClick={() => toggleSort('netPnl')}>
-                Net P&L{sortIndicator('netPnl')}
+              <th className="cursor-pointer select-none px-3 py-2.5 text-right" onClick={() => toggleSort('netPnl')}>
+                Return{sortIndicator('netPnl')}
               </th>
-              <th className="cursor-pointer select-none px-4 py-2.5 text-right" onClick={() => toggleSort('returnPct')}>
+              <th className="cursor-pointer select-none px-3 py-2.5 text-right" onClick={() => toggleSort('returnPct')}>
                 Return %{sortIndicator('returnPct')}
               </th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((t) => {
-              const returnPct = returnOnCapitalPct(t)
-              return (
-                <tr
-                  key={t.id}
-                  onClick={() => navigate(`/trades/${t.id}`)}
-                  className="cursor-pointer border-b border-neutral-800/60 transition last:border-0 hover:bg-neutral-800/40"
-                >
-                  <td className="px-4 py-2.5 font-medium text-neutral-100">{t.symbol}</td>
-                  <td className="px-4 py-2.5 text-neutral-300">
-                    {optionLabel(t.options_detail?.strike, t.options_detail?.option_type)}
-                    <span className="ml-1 text-xs text-neutral-500">{t.options_detail?.expiration}</span>
-                  </td>
-                  <td className="px-4 py-2.5 text-neutral-400">{dateFmt(t.first_in_at)}</td>
-                  <td className="px-4 py-2.5 text-neutral-400">{t.status === 'CLOSED' ? dateFmt(t.last_out_at) : '—'}</td>
-                  <td className="px-4 py-2.5 text-neutral-400">{holdTimeFmt(t.hold_seconds)}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex flex-wrap gap-1">
-                      {t.trade_strategies.map((ts) =>
-                        ts.strategies ? (
-                          <span key={ts.strategy_id} className="rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300">
-                            {ts.strategies.name}
-                          </span>
-                        ) : null,
+            {(dayGroups ?? [{ date: null, trades: sorted, netPnl: 0, closedCount: 0 }]).map((group) => (
+              <Fragment key={group.date ?? 'all'}>
+                {group.date && (
+                  <tr className="border-b border-neutral-800/60 bg-neutral-800/30">
+                    <td colSpan={11} className="px-3 py-1.5 text-xs font-medium text-neutral-400">
+                      {dateFmt(group.date)}
+                      <span className="ml-2 text-neutral-600">
+                        {group.trades.length} trade{group.trades.length === 1 ? '' : 's'}
+                        {group.closedCount > 0 ? ` · ${group.closedCount} closed` : ''}
+                      </span>
+                    </td>
+                    <td colSpan={2} className="px-3 py-1.5 text-right text-xs font-semibold tabular-nums">
+                      {group.closedCount > 0 && (
+                        <span className={group.netPnl >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
+                          {currency(group.netPnl)}
+                        </span>
                       )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
-                    {t.status === 'OPEN' ? (
-                      <span className="text-neutral-500">OPEN</span>
-                    ) : (
-                      <span className={(t.realized_pnl_net ?? 0) >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
-                        {currency(t.realized_pnl_net)}
-                        {t.fee_source === 'estimated' && <span className="ml-0.5 text-amber-400/80" title="fee estimated">*</span>}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
-                    {t.status === 'OPEN' || returnPct === null ? (
-                      <span className="text-neutral-500">—</span>
-                    ) : (
-                      <span className={returnPct >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
-                        {percentFmt(returnPct)}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
+                    </td>
+                  </tr>
+                )}
+                {group.trades.map((t) => {
+                  const returnPct = returnOnCapitalPct(t)
+                  const date = t.status === 'CLOSED' ? t.last_out_at : t.first_in_at
+                  const pos = posSize(t)
+                  return (
+                    <tr
+                      key={t.id}
+                      onClick={() => navigate(`/trades/${t.id}`)}
+                      className="cursor-pointer border-b border-neutral-800/60 transition last:border-0 hover:bg-neutral-800/40"
+                    >
+                      <td className="px-3 py-2.5 text-neutral-400">{dateFmt(date)}</td>
+                      <td className="px-3 py-2.5 font-medium text-neutral-100">
+                        {t.symbol}
+                        {t.options_detail && (
+                          <span className="ml-1.5 text-xs font-normal text-neutral-500">
+                            {optionLabel(t.options_detail.strike, t.options_detail.option_type)} {t.options_detail.expiration}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase ${
+                            t.status === 'OPEN' ? 'bg-blue-950 text-blue-300' : 'bg-neutral-800 text-neutral-400'
+                          }`}
+                        >
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 capitalize text-neutral-400">{t.side}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-neutral-300">{t.total_contracts ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-neutral-300">{priceFmt(t.avg_entry)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-neutral-300">
+                        {t.status === 'CLOSED' ? priceFmt(t.avg_exit) : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-neutral-400">{currency(entrySizeUsd(t))}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-neutral-400">
+                        {t.status === 'CLOSED' ? currency(exitSizeUsd(t)) : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-neutral-300">{currency(pos)}</td>
+                      <td className="px-3 py-2.5 text-neutral-400">{holdTimeFmt(t.hold_seconds)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {t.status === 'OPEN' ? (
+                          <span className="text-neutral-500">OPEN</span>
+                        ) : (
+                          <span className={(t.realized_pnl_net ?? 0) >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
+                            {currency(t.realized_pnl_net)}
+                            {t.fee_source === 'estimated' && <span className="ml-0.5 text-amber-400/80" title="fee estimated">*</span>}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {t.status === 'OPEN' || returnPct === null ? (
+                          <span className="text-neutral-500">—</span>
+                        ) : (
+                          <span className={returnPct >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
+                            {percentFmt(returnPct)}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </Fragment>
+            ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-neutral-500">
+                <td colSpan={COLUMN_COUNT} className="px-4 py-8 text-center text-neutral-500">
                   No trades match these filters.
                 </td>
               </tr>

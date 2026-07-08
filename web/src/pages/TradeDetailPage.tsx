@@ -4,18 +4,21 @@ import { useAuth } from '../auth/AuthContext'
 import {
   fetchTradeWithDetails,
   fetchStrategies,
+  fetchRules,
   addTradeStrategy,
   removeTradeStrategy,
+  setTradeRuleStatus,
   updateTradeNotes,
   uploadTradeScreenshot,
   updateTradeScreenshot,
   getTradeScreenshotUrl,
   deleteTradeScreenshot,
 } from '../lib/queries'
-import type { TradeWithDetails, Strategy } from '../lib/database.types'
+import type { TradeWithDetails, Strategy, Rule } from '../lib/database.types'
 import { fetchCandles, type CandleInterval, type CandleResult } from '../lib/candles'
 import { CandlestickChart, type ChartMarker } from '../components/CandlestickChart'
 import { StrategyTagPicker } from '../components/StrategyTagPicker'
+import { RuleChecklist } from '../components/RuleChecklist'
 import { currency, holdTimeFmt, optionLabel, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt } from '../lib/format'
 import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd } from '../lib/metrics'
 
@@ -27,6 +30,7 @@ export function TradeDetailPage() {
 
   const [trade, setTrade] = useState<TradeWithDetails | null>(null)
   const [strategies, setStrategies] = useState<Strategy[]>([])
+  const [rules, setRules] = useState<Rule[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const [notes, setNotes] = useState('')
@@ -54,6 +58,7 @@ export function TradeDetailPage() {
   useEffect(() => {
     load().catch((e) => setError(e.message))
     fetchStrategies().then((s) => setStrategies(s ?? []))
+    fetchRules().then((r) => setRules(r ?? []))
   }, [load])
 
   useEffect(() => {
@@ -121,6 +126,18 @@ export function TradeDetailPage() {
     } finally {
       setUploading(false)
     }
+  }
+
+  async function handleSetRuleStatus(ruleId: string, status: 'followed' | 'broken' | 'na') {
+    if (!trade) return
+    await setTradeRuleStatus(trade.id, ruleId, status)
+    setTrade((t) => {
+      if (!t) return t
+      const next = t.trade_rules.filter((tr) => tr.rule_id !== ruleId)
+      const rule = rules.find((r) => r.id === ruleId) ?? null
+      next.push({ rule_id: ruleId, status, rules: rule })
+      return { ...t, trade_rules: next }
+    })
   }
 
   async function handleRemoveScreenshot() {
@@ -282,6 +299,13 @@ export function TradeDetailPage() {
                 load()
               }}
             />
+          </div>
+
+          <div>
+            <h2 className="mb-2 text-sm font-medium text-neutral-300">Rules</h2>
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+              <RuleChecklist rules={rules} tradeRules={trade.trade_rules} onSetStatus={handleSetRuleStatus} />
+            </div>
           </div>
 
           <div>

@@ -21,7 +21,9 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: { payl
   const p = payload[0].payload
   return (
     <div className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs shadow-lg">
-      <div className="text-neutral-400">{p.date}</div>
+      <div className="text-neutral-400">
+        {new Date(p.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+      </div>
       <div className="mt-1 font-medium text-neutral-100">
         Cumulative: <span className="tabular-nums">{currency(p.cumulativeNetPnl)}</span>
       </div>
@@ -44,12 +46,27 @@ export function EquityCurveChart({ data }: { data: EquityPoint[] }) {
     )
   }
 
+  // A plain calendar-date x-axis collapses every point onto one tick when a range is
+  // narrowed to a single day (e.g. "Today"/"Yesterday"), which reads as noise rather
+  // than a curve. Use the real timestamp on a continuous scale instead, and format
+  // ticks as time-of-day when every point falls on the same day, or as a date
+  // otherwise -- so the axis stays meaningful at any zoom level.
+  const sameDay = new Date(data[0].timestamp).toDateString() === new Date(data[data.length - 1].timestamp).toDateString()
+  const tickFormatter = (ts: number) =>
+    sameDay
+      ? new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      : new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
   return (
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
         <CartesianGrid stroke="var(--gridline)" vertical={false} />
         <XAxis
-          dataKey="date"
+          dataKey="timestamp"
+          type="number"
+          domain={['dataMin', 'dataMax']}
+          scale="time"
+          tickFormatter={tickFormatter}
           tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
           stroke="var(--baseline)"
           tickLine={false}

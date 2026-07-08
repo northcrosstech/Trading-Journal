@@ -1,14 +1,19 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/AuthContext'
-import { fetchStrategies, createStrategy, renameStrategy, setStrategyArchived } from '../lib/queries'
+import { fetchStrategies, createStrategy, renameStrategy, setStrategyArchived, updateStrategyColor } from '../lib/queries'
 import type { Strategy } from '../lib/database.types'
+import { TAG_COLORS } from '../lib/tagColors'
+import { StrategyColorPicker } from '../components/StrategyColorPicker'
+import { StrategyChip } from '../components/StrategyChip'
 
 export function StrategiesPage() {
   const { user } = useAuth()
   const [strategies, setStrategies] = useState<Strategy[] | null>(null)
   const [newName, setNewName] = useState('')
+  const [newColor, setNewColor] = useState<string>(TAG_COLORS[8]) // blue default
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
+  const [colorPickerId, setColorPickerId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
 
   function reload() {
@@ -22,7 +27,7 @@ export function StrategiesPage() {
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
     if (!user || !newName.trim()) return
-    await createStrategy(user.id, newName.trim())
+    await createStrategy(user.id, newName.trim(), newColor)
     setNewName('')
     reload()
   }
@@ -58,20 +63,23 @@ export function StrategiesPage() {
         </p>
       </div>
 
-      <form onSubmit={handleCreate} className="flex gap-2">
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="New strategy name…"
-          className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
-        />
-        <button
-          type="submit"
-          disabled={!newName.trim()}
-          className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
-        >
-          Add
-        </button>
+      <form onSubmit={handleCreate} className="flex flex-col gap-2 rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+        <div className="flex gap-2">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="New strategy name…"
+            className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          />
+          <button
+            type="submit"
+            disabled={!newName.trim()}
+            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
+          >
+            Add
+          </button>
+        </div>
+        <StrategyColorPicker value={newColor} onChange={setNewColor} />
       </form>
 
       <div className="rounded-xl border border-neutral-800 bg-neutral-900">
@@ -87,36 +95,53 @@ export function StrategiesPage() {
         <div className="flex flex-col divide-y divide-neutral-800/60">
           {visible.length === 0 && <div className="px-4 py-6 text-center text-sm text-neutral-500">No strategies yet.</div>}
           {visible.map((s) => (
-            <div key={s.id} className="flex items-center justify-between px-4 py-2.5">
-              {editingId === s.id ? (
-                <input
-                  autoFocus
-                  value={editingName}
-                  onChange={(e) => setEditingName(e.target.value)}
-                  onBlur={() => handleRename(s.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRename(s.id)
-                    if (e.key === 'Escape') setEditingId(null)
-                  }}
-                  className="rounded-md border border-blue-500 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none"
-                />
-              ) : (
+            <div key={s.id} className="flex flex-col gap-2 px-4 py-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setColorPickerId(colorPickerId === s.id ? null : s.id)}
+                    title="Change color"
+                    style={{ backgroundColor: s.color }}
+                    className="h-3.5 w-3.5 shrink-0 rounded-full transition hover:scale-110"
+                  />
+                  {editingId === s.id ? (
+                    <input
+                      autoFocus
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onBlur={() => handleRename(s.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRename(s.id)
+                        if (e.key === 'Escape') setEditingId(null)
+                      }}
+                      className="rounded-md border border-blue-500 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setEditingId(s.id)
+                        setEditingName(s.name)
+                      }}
+                      className={s.archived ? 'opacity-50' : ''}
+                      title="Click to rename"
+                    >
+                      <StrategyChip strategy={s} />
+                    </button>
+                  )}
+                </div>
                 <button
-                  onClick={() => {
-                    setEditingId(s.id)
-                    setEditingName(s.name)
-                  }}
-                  className={`text-sm hover:text-neutral-100 ${s.archived ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}
+                  onClick={() => toggleArchived(s)}
+                  className="text-xs text-neutral-500 hover:text-neutral-300"
                 >
-                  {s.name}
+                  {s.archived ? 'Unarchive' : 'Archive'}
                 </button>
+              </div>
+              {colorPickerId === s.id && (
+                <StrategyColorPicker
+                  value={s.color}
+                  onChange={(color) => updateStrategyColor(s.id, color).then(reload)}
+                />
               )}
-              <button
-                onClick={() => toggleArchived(s)}
-                className="text-xs text-neutral-500 hover:text-neutral-300"
-              >
-                {s.archived ? 'Unarchive' : 'Archive'}
-              </button>
             </div>
           ))}
         </div>
