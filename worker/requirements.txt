@@ -1,0 +1,5 @@
+webull-openapi-python-sdk
+python-dotenv
+supabase
+pytest
+APScheduler
