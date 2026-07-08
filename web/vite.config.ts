@@ -1,0 +1,53 @@
+import { defineConfig, loadEnv, type Plugin } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import { getCandlesFromProvider, type CandleInterval } from './server/candleProviders.ts'
+
+// Mirrors web/api/candles.ts (the Vercel function) so `npm run dev` works without
+// `vercel dev` -- same handler logic, just invoked via Vite's middleware instead of
+// Vercel's Node runtime.
+function candlesApiDevMiddleware(): Plugin {
+  return {
+    name: 'candles-api-dev-middleware',
+    configureServer(server) {
+      server.middlewares.use('/api/candles', async (req, res) => {
+        const url = new URL(req.url ?? '', 'http://localhost')
+        const symbol = url.searchParams.get('symbol')
+        const from = url.searchParams.get('from')
+        const to = url.searchParams.get('to')
+        const interval: CandleInterval = url.searchParams.get('interval') === '5min' ? '5min' : '1min'
+
+        if (!symbol || !from || !to) {
+          res.statusCode = 400
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: 'symbol, from, to query params are required' }))
+          return
+        }
+
+        try {
+          const candles = await getCandlesFromProvider({ symbol, from: new Date(from), to: new Date(to), interval })
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ candles }))
+        } catch (err) {
+          res.statusCode = 502
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }))
+        }
+      })
+    },
+  }
+}
+
+// https://vite.dev/config/
+export default defineConfig(({ mode }) => {
+  // Load ALL env vars (empty prefix), not just VITE_-prefixed ones, so the dev
+  // middleware above can see server-only vars like TWELVEDATA_API_KEY. These are
+  // only ever read here in Node context -- never bundled into client code.
+  const env = loadEnv(mode, process.cwd(), '')
+  process.env.CANDLE_PROVIDER ??= env.CANDLE_PROVIDER
+  process.env.TWELVEDATA_API_KEY ??= env.TWELVEDATA_API_KEY
+
+  return {
+    plugins: [react(), tailwindcss(), candlesApiDevMiddleware()],
+  }
+})
