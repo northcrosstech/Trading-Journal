@@ -3,22 +3,22 @@ import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import {
   fetchTradeWithDetails,
-  fetchStrategies,
-  fetchRules,
-  addTradeStrategy,
-  removeTradeStrategy,
-  setTradeRuleStatus,
+  fetchPlaybooks,
+  fetchPlaybookWithRules,
+  setTradePlaybook,
+  removeTradePlaybook,
+  setTradeRuleCheckStatus,
   updateTradeNotes,
   uploadTradeScreenshot,
   updateTradeScreenshot,
   getTradeScreenshotUrl,
   deleteTradeScreenshot,
 } from '../lib/queries'
-import type { TradeWithDetails, Strategy, Rule } from '../lib/database.types'
+import type { TradeWithDetails, Playbook, PlaybookWithRules } from '../lib/database.types'
 import { fetchCandles, type CandleInterval, type CandleResult } from '../lib/candles'
 import { CandlestickChart, type ChartMarker } from '../components/CandlestickChart'
-import { StrategyTagPicker } from '../components/StrategyTagPicker'
-import { RuleChecklist } from '../components/RuleChecklist'
+import { PlaybookPicker } from '../components/PlaybookPicker'
+import { PlaybookRuleChecklist } from '../components/PlaybookRuleChecklist'
 import { currency, holdTimeFmt, optionLabel, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt } from '../lib/format'
 import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd } from '../lib/metrics'
 
@@ -29,8 +29,6 @@ export function TradeDetailPage() {
   const { user } = useAuth()
 
   const [trade, setTrade] = useState<TradeWithDetails | null>(null)
-  const [strategies, setStrategies] = useState<Strategy[]>([])
-  const [rules, setRules] = useState<Rule[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const [notes, setNotes] = useState('')
@@ -43,6 +41,9 @@ export function TradeDetailPage() {
   const [candleInterval, setCandleInterval] = useState<CandleInterval>('1min')
   const [candleResult, setCandleResult] = useState<CandleResult | null>(null)
 
+  const [allPlaybooks, setAllPlaybooks] = useState<Playbook[]>([])
+  const [linkedPlaybook, setLinkedPlaybook] = useState<PlaybookWithRules | null>(null)
+
   const load = useCallback(async () => {
     if (!tradeId) return
     const t = await fetchTradeWithDetails(tradeId)
@@ -53,13 +54,41 @@ export function TradeDetailPage() {
     } else {
       setScreenshotUrl(null)
     }
+    if (t?.trade_playbooks) {
+      fetchPlaybookWithRules(t.trade_playbooks.playbook_id).then(setLinkedPlaybook)
+    } else {
+      setLinkedPlaybook(null)
+    }
   }, [tradeId])
 
   useEffect(() => {
     load().catch((e) => setError(e.message))
-    fetchStrategies().then((s) => setStrategies(s ?? []))
-    fetchRules().then((r) => setRules(r ?? []))
+    fetchPlaybooks().then((p) => setAllPlaybooks(p ?? []))
   }, [load])
+
+  async function handleSelectPlaybook(playbookId: string) {
+    if (!tradeId) return
+    await setTradePlaybook(tradeId, playbookId)
+    load()
+  }
+
+  async function handleClearPlaybook() {
+    if (!tradeId) return
+    await removeTradePlaybook(tradeId)
+    load()
+  }
+
+  async function handleSetRuleStatus(ruleId: string, status: 'followed' | 'broken' | 'na') {
+    if (!trade) return
+    await setTradeRuleCheckStatus(trade.id, ruleId, status)
+    setTrade((t) => {
+      if (!t) return t
+      const next = t.trade_rule_checks.filter((tr) => tr.rule_id !== ruleId)
+      const rule = linkedPlaybook?.playbook_rule_groups.flatMap((g) => g.playbook_rules).find((r) => r.id === ruleId) ?? null
+      next.push({ rule_id: ruleId, status, playbook_rules: rule })
+      return { ...t, trade_rule_checks: next }
+    })
+  }
 
   useEffect(() => {
     if (!trade) return
@@ -126,18 +155,6 @@ export function TradeDetailPage() {
     } finally {
       setUploading(false)
     }
-  }
-
-  async function handleSetRuleStatus(ruleId: string, status: 'followed' | 'broken' | 'na') {
-    if (!trade) return
-    await setTradeRuleStatus(trade.id, ruleId, status)
-    setTrade((t) => {
-      if (!t) return t
-      const next = t.trade_rules.filter((tr) => tr.rule_id !== ruleId)
-      const rule = rules.find((r) => r.id === ruleId) ?? null
-      next.push({ rule_id: ruleId, status, rules: rule })
-      return { ...t, trade_rules: next }
-    })
   }
 
   async function handleRemoveScreenshot() {
@@ -283,28 +300,22 @@ export function TradeDetailPage() {
           </div>
         </div>
 
-        {/* sidebar: tags, notes, screenshot */}
+        {/* sidebar: playbook, rules, notes, screenshot */}
         <div className="flex flex-col gap-5 lg:col-span-2">
           <div>
-            <h2 className="mb-2 text-sm font-medium text-neutral-300">Strategies</h2>
-            <StrategyTagPicker
-              assigned={trade.trade_strategies}
-              allStrategies={strategies}
-              onAdd={async (strategyId) => {
-                await addTradeStrategy(trade.id, strategyId)
-                load()
-              }}
-              onRemove={async (strategyId) => {
-                await removeTradeStrategy(trade.id, strategyId)
-                load()
-              }}
+            <h2 className="mb-2 text-sm font-medium text-neutral-300">Playbook</h2>
+            <PlaybookPicker
+              assigned={trade.trade_playbooks}
+              allPlaybooks={allPlaybooks}
+              onSelect={handleSelectPlaybook}
+              onClear={handleClearPlaybook}
             />
           </div>
 
           <div>
             <h2 className="mb-2 text-sm font-medium text-neutral-300">Rules</h2>
             <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
-              <RuleChecklist rules={rules} tradeRules={trade.trade_rules} onSetStatus={handleSetRuleStatus} />
+              <PlaybookRuleChecklist playbook={linkedPlaybook} tradeRuleChecks={trade.trade_rule_checks} onSetStatus={handleSetRuleStatus} />
             </div>
           </div>
 

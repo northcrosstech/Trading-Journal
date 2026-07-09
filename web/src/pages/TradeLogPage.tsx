@@ -26,7 +26,7 @@ export function TradeLogPage() {
   const [searchParams] = useSearchParams()
 
   const [symbolFilter, setSymbolFilter] = useState('')
-  const [strategyFilter, setStrategyFilter] = useState<string>('all')
+  const [playbookFilter, setPlaybookFilter] = useState<string>('all')
   const [winLossFilter, setWinLossFilter] = useState<WinLossFilter>('all')
   const [dateFrom, setDateFrom] = useState(searchParams.get('from') ?? '')
   const [dateTo, setDateTo] = useState(searchParams.get('to') ?? '')
@@ -39,13 +39,12 @@ export function TradeLogPage() {
       .catch((e) => setError(e.message))
   }, [])
 
-  const allStrategies = useMemo(() => {
+  const allPlaybooks = useMemo(() => {
     if (!trades) return []
     const map = new Map<string, string>()
     for (const t of trades) {
-      for (const ts of t.trade_strategies) {
-        if (ts.strategies) map.set(ts.strategies.id, ts.strategies.name)
-      }
+      const linked = t.trade_playbooks?.playbooks
+      if (linked) map.set(linked.id, linked.name)
     }
     return Array.from(map.entries())
   }, [trades])
@@ -54,14 +53,14 @@ export function TradeLogPage() {
     if (!trades) return []
     return trades.filter((t) => {
       if (symbolFilter && !t.symbol.toLowerCase().includes(symbolFilter.toLowerCase())) return false
-      if (strategyFilter !== 'all' && !t.trade_strategies.some((ts) => ts.strategy_id === strategyFilter)) return false
+      if (playbookFilter !== 'all' && t.trade_playbooks?.playbook_id !== playbookFilter) return false
       if (winLossFilter === 'win' && !(t.status === 'CLOSED' && (t.realized_pnl_net ?? 0) > 0)) return false
       if (winLossFilter === 'loss' && !(t.status === 'CLOSED' && (t.realized_pnl_net ?? 0) < 0)) return false
       if (dateFrom && (!t.first_in_at || t.first_in_at.slice(0, 10) < dateFrom)) return false
       if (dateTo && (!t.first_in_at || t.first_in_at.slice(0, 10) > dateTo)) return false
       return true
     })
-  }, [trades, symbolFilter, strategyFilter, winLossFilter, dateFrom, dateTo])
+  }, [trades, symbolFilter, playbookFilter, winLossFilter, dateFrom, dateTo])
 
   const sorted = useMemo(() => {
     const copy = [...filtered]
@@ -179,12 +178,12 @@ export function TradeLogPage() {
           className="w-28 rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
         />
         <select
-          value={strategyFilter}
-          onChange={(e) => setStrategyFilter(e.target.value)}
+          value={playbookFilter}
+          onChange={(e) => setPlaybookFilter(e.target.value)}
           className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
         >
-          <option value="all">All strategies</option>
-          {allStrategies.map(([id, name]) => (
+          <option value="all">All playbooks</option>
+          {allPlaybooks.map(([id, name]) => (
             <option key={id} value={id}>{name}</option>
           ))}
         </select>
@@ -227,11 +226,11 @@ export function TradeLogPage() {
           onChange={(e) => setDateTo(e.target.value)}
           className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
         />
-        {(symbolFilter || strategyFilter !== 'all' || winLossFilter !== 'all' || dateFrom || dateTo) && (
+        {(symbolFilter || playbookFilter !== 'all' || winLossFilter !== 'all' || dateFrom || dateTo) && (
           <button
             onClick={() => {
               setSymbolFilter('')
-              setStrategyFilter('all')
+              setPlaybookFilter('all')
               setWinLossFilter('all')
               setDateFrom('')
               setDateTo('')

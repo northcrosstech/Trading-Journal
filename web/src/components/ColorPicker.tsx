@@ -1,6 +1,6 @@
 import { TAG_COLORS } from '../lib/tagColors'
 
-export function StrategyColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+export function ColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {TAG_COLORS.map((hex) => (
