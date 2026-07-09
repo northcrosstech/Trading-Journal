@@ -91,6 +91,22 @@ export type DailyJournalRow = {
   created_at: string
 }
 
+export type DailyPlanRow = {
+  id: string
+  user_id: string
+  plan_date: string
+  planned_max_trades: number | null
+  planned_max_loss: number | null
+  plan_notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type DailyPlanStrategyRow = {
+  daily_plan_id: string
+  strategy_id: string
+}
+
 export type TargetSettingsRow = {
   id: string
   user_id: string
@@ -132,6 +148,8 @@ export type Database = {
       daily_journal: ReturnType<typeof table<DailyJournalRow>>
       sync_log: ReturnType<typeof table<SyncLogRow>>
       target_settings: ReturnType<typeof table<TargetSettingsRow>>
+      daily_plans: ReturnType<typeof table<DailyPlanRow>>
+      daily_plan_strategies: ReturnType<typeof table<DailyPlanStrategyRow>>
     }
     Views: Record<string, never>
     Functions: Record<string, never>
@@ -148,10 +166,28 @@ export type Rule = RuleRow
 export type DailyJournal = DailyJournalRow
 export type TargetSettings = TargetSettingsRow
 export type SyncLog = SyncLogRow
+export type DailyPlan = DailyPlanRow
 
 export type TradeWithDetails = Trade & {
   options_detail: OptionsDetail | null
   executions: Execution[]
   trade_strategies: { strategy_id: string; strategies: Strategy | null }[]
   trade_rules: { rule_id: string; status: TradeRuleRow['status']; rules: Rule | null }[]
+}
+
+/** Leaner than TradeWithDetails -- just the strategy join, for pages (like the
+ * Dashboard) that need "which setups were traded" without the full executions/
+ * options_detail/trade_rules joins. */
+export type TradeWithStrategies = Trade & {
+  trade_strategies: { strategy_id: string; strategies: Strategy | null }[]
+}
+
+/** Leaner than TradeWithDetails -- just the rules join, for pages that need
+ * followed/broken status without the other joins. */
+export type TradeWithRules = Trade & {
+  trade_rules: { rule_id: string; status: TradeRuleRow['status']; rules: Rule | null }[]
+}
+
+export type DailyPlanWithStrategies = DailyPlan & {
+  daily_plan_strategies: { strategy_id: string; strategies: Strategy | null }[]
 }

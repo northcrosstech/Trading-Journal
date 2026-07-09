@@ -1,9 +1,36 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../auth/AuthContext'
-import { fetchAllDailyJournal, upsertDailyJournal, fetchTargetSettings } from '../lib/queries'
-import type { Trade, DailyJournal, TargetSettings } from '../lib/database.types'
-import { computeEquityCurve, computeStatStrip, computeCalendarDays, computeDailyTargetStats } from '../lib/metrics'
+import {
+  fetchAllDailyJournal,
+  upsertDailyJournal,
+  fetchTargetSettings,
+  fetchTradesWithStrategies,
+  fetchStrategies,
+  fetchDailyPlan,
+  fetchAllDailyPlans,
+  fetchTradesWithRules,
+  fetchRules,
+} from '../lib/queries'
+import type {
+  Trade,
+  DailyJournal,
+  TargetSettings,
+  TradeWithStrategies,
+  Strategy,
+  DailyPlanWithStrategies,
+  TradeWithRules,
+  Rule,
+} from '../lib/database.types'
+import {
+  computeEquityCurve,
+  computeStatStrip,
+  computeCalendarDays,
+  computeDailyTargetStats,
+  computePlanVsActual,
+  computeRuleStats,
+  computeMostExpensiveRule,
+} from '../lib/metrics'
 import { filterTradesByDateRange, presetRange, toDateStr, type DateRangePreset } from '../lib/dateRange'
 import { DateRangePresetBar } from '../components/DateRangePresetBar'
 import { StatStripBar } from '../components/StatStripBar'
@@ -11,6 +38,8 @@ import { EquityCurveChart } from '../components/EquityCurveChart'
 import { PnlCalendarHeatmap } from '../components/PnlCalendarHeatmap'
 import { RecentTradesList } from '../components/RecentTradesList'
 import { TodayTargetBenchmark } from '../components/TodayTargetBenchmark'
+import { TodayPlanCard } from '../components/TodayPlanCard'
+import { MostExpensiveRuleCard } from '../components/MostExpensiveRuleCard'
 
 export function DashboardPage() {
   const { user } = useAuth()
@@ -19,6 +48,60 @@ export function DashboardPage() {
   const [journalByDate, setJournalByDate] = useState<Map<string, DailyJournal>>(new Map())
   const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null)
   const [preset, setPreset] = useState<DateRangePreset | null>(null)
+
+  // Pre-market plan feature -- kept as its own state/effect, independent of the
+  // trades/journal/target-settings fetch above, so nothing about the existing
+  // dashboard load path changes.
+  const [tradesWithStrategies, setTradesWithStrategies] = useState<TradeWithStrategies[] | null>(null)
+  const [allStrategies, setAllStrategies] = useState<Strategy[]>([])
+  const [dailyPlan, setDailyPlan] = useState<DailyPlanWithStrategies | null>(null)
+  const [plannedDates, setPlannedDates] = useState<Set<string>>(new Set())
+  const todayStr = toDateStr(new Date())
+
+  useEffect(() => {
+    let cancelled = false
+    fetchTradesWithStrategies().then((t) => {
+      if (!cancelled) setTradesWithStrategies(t)
+    })
+    fetchStrategies().then((s) => {
+      if (!cancelled) setAllStrategies(s ?? [])
+    })
+    fetchDailyPlan(todayStr).then((p) => {
+      if (!cancelled) setDailyPlan(p)
+    })
+    fetchAllDailyPlans().then((plans) => {
+      if (!cancelled) setPlannedDates(new Set(plans.map((p) => p.plan_date)))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [todayStr])
+
+  const handlePlanSaved = useCallback(
+    (plan: DailyPlanWithStrategies) => {
+      setDailyPlan(plan)
+      setPlannedDates((prev) => (prev.has(plan.plan_date) ? prev : new Set(prev).add(plan.plan_date)))
+    },
+    [],
+  )
+
+  // Rule-violation cost accounting -- also its own state/effect, independent of
+  // everything above, same reasoning (don't touch the existing fetch paths).
+  const [tradesWithRules, setTradesWithRules] = useState<TradeWithRules[] | null>(null)
+  const [rules, setRules] = useState<Rule[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchTradesWithRules().then((t) => {
+      if (!cancelled) setTradesWithRules(t)
+    })
+    fetchRules().then((r) => {
+      if (!cancelled) setRules(r ?? [])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -97,7 +180,9 @@ export function DashboardPage() {
   const equityData = computeEquityCurve(filtered)
   const calendarData = computeCalendarDays(trades) // calendar is its own navigable view, unaffected by the range preset
   const targetsByDate = computeDailyTargetStats(trades, targetSettings) // all-time, same reasoning
-  const today = targetsByDate.get(toDateStr(new Date()))
+  const today = targetsByDate.get(todayStr)
+  const todayPlanComparison = tradesWithStrategies ? computePlanVsActual(todayStr, tradesWithStrategies, dailyPlan) : null
+  const mostExpensiveRule = tradesWithRules ? computeMostExpensiveRule(computeRuleStats(tradesWithRules, rules)) : null
 
   return (
     <div className="flex flex-col gap-5">
@@ -121,6 +206,19 @@ export function DashboardPage() {
         />
       )}
 
+      {user && todayPlanComparison && (
+        <TodayPlanCard
+          date={todayStr}
+          userId={user.id}
+          plan={dailyPlan}
+          allStrategies={allStrategies}
+          comparison={todayPlanComparison}
+          onSaved={handlePlanSaved}
+        />
+      )}
+
+      {tradesWithRules && <MostExpensiveRuleCard rule={mostExpensiveRule} />}
+
       <StatStripBar stats={stripStats} />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -138,6 +236,7 @@ export function DashboardPage() {
         daysByDate={calendarData}
         journalByDate={journalByDate}
         targetsByDate={targetsByDate}
+        plannedDates={plannedDates}
         onSaveNote={handleSaveNote}
       />
     </div>

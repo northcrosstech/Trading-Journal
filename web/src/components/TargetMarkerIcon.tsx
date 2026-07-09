@@ -2,8 +2,20 @@ import type { DailyTargetStatus } from '../lib/metrics'
 
 /** Calendar-day marker for the daily target/loss-limit feature: solid green check =
  * hit target at close, hollow amber check = reached target intraday but gave it
- * back, red flag = breached the loss limit. Nothing rendered for 'neutral'. */
+ * back, red flag = breached the loss limit, red spike-crash (with an amber peak dot)
+ * = hit target intraday, gave it back, AND kept going all the way to breach the loss
+ * limit -- the worst-case reversal, so it gets its own marker rather than reading as
+ * a plain breach. Nothing rendered for 'neutral'. */
 export function TargetMarkerIcon({ status }: { status: DailyTargetStatus }) {
+  if (status === 'reversal_breach') {
+    return (
+      <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+        <title>Hit target intraday, gave it back, then breached the loss limit</title>
+        <path d="M3 13 L8 4 L17 17" stroke="var(--status-critical)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="8" cy="4" r="1.6" fill="#fbbf24" />
+      </svg>
+    )
+  }
   if (status === 'hit_target') {
     return (
       <svg width="11" height="11" viewBox="0 0 20 20" fill="none">

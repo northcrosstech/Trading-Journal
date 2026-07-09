@@ -1,5 +1,15 @@
 import { supabase } from './supabase'
-import type { TradeWithDetails, DailyJournal, TargetSettings, SyncLog } from './database.types'
+import type {
+  TradeWithDetails,
+  TradeWithStrategies,
+  TradeWithRules,
+  DailyJournal,
+  TargetSettings,
+  SyncLog,
+  DailyPlanWithStrategies,
+} from './database.types'
+
+const DAILY_PLAN_WITH_STRATEGIES_SELECT = '*, daily_plan_strategies(strategy_id, strategies(*))'
 
 const TRADE_WITH_DETAILS_SELECT =
   '*, options_detail(*), executions(*), trade_strategies(strategy_id, strategies(*)), trade_rules(rule_id, status, rules(*))'
@@ -12,6 +22,31 @@ export async function fetchTradesWithDetails(): Promise<TradeWithDetails[]> {
 
   if (error) throw error
   return (data ?? []) as unknown as TradeWithDetails[]
+}
+
+/** Lighter than fetchTradesWithDetails -- just the strategy join. Used by the daily
+ * plan feature (Dashboard's Today's Plan card) which only needs "which setups were
+ * traded," not executions/options_detail/trade_rules. */
+export async function fetchTradesWithStrategies(): Promise<TradeWithStrategies[]> {
+  const { data, error } = await supabase
+    .from('trades')
+    .select('*, trade_strategies(strategy_id, strategies(*))')
+    .order('first_in_at', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as unknown as TradeWithStrategies[]
+}
+
+/** Lighter than fetchTradesWithDetails -- just the rules join. Used by the Dashboard's
+ * most-expensive-rule card. */
+export async function fetchTradesWithRules(): Promise<TradeWithRules[]> {
+  const { data, error } = await supabase
+    .from('trades')
+    .select('*, trade_rules(rule_id, status, rules(*))')
+    .order('first_in_at', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as unknown as TradeWithRules[]
 }
 
 export async function fetchTradeWithDetails(tradeId: string): Promise<TradeWithDetails | null> {
@@ -193,4 +228,53 @@ export async function fetchLatestSyncLog(): Promise<SyncLog | null> {
     .maybeSingle()
   if (error) throw error
   return data
+}
+
+export async function fetchDailyPlan(planDate: string): Promise<DailyPlanWithStrategies | null> {
+  const { data, error } = await supabase
+    .from('daily_plans')
+    .select(DAILY_PLAN_WITH_STRATEGIES_SELECT)
+    .eq('plan_date', planDate)
+    .maybeSingle()
+  if (error) throw error
+  return data as unknown as DailyPlanWithStrategies | null
+}
+
+export async function fetchAllDailyPlans(): Promise<DailyPlanWithStrategies[]> {
+  const { data, error } = await supabase.from('daily_plans').select(DAILY_PLAN_WITH_STRATEGIES_SELECT)
+  if (error) throw error
+  return (data ?? []) as unknown as DailyPlanWithStrategies[]
+}
+
+/** Upserts the plan row and returns it (with its id) so the caller can then set
+ * daily_plan_strategies -- a separate step, same two-step shape as trade_strategies. */
+export async function upsertDailyPlan(
+  userId: string,
+  planDate: string,
+  fields: { planned_max_trades?: number | null; planned_max_loss?: number | null; plan_notes?: string | null },
+): Promise<DailyPlanWithStrategies> {
+  const { data, error } = await supabase
+    .from('daily_plans')
+    .upsert(
+      { user_id: userId, plan_date: planDate, ...fields, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id,plan_date' },
+    )
+    .select(DAILY_PLAN_WITH_STRATEGIES_SELECT)
+    .single()
+  if (error) throw error
+  return data as unknown as DailyPlanWithStrategies
+}
+
+export async function addDailyPlanStrategy(dailyPlanId: string, strategyId: string) {
+  const { error } = await supabase.from('daily_plan_strategies').insert({ daily_plan_id: dailyPlanId, strategy_id: strategyId })
+  if (error) throw error
+}
+
+export async function removeDailyPlanStrategy(dailyPlanId: string, strategyId: string) {
+  const { error } = await supabase
+    .from('daily_plan_strategies')
+    .delete()
+    .eq('daily_plan_id', dailyPlanId)
+    .eq('strategy_id', strategyId)
+  if (error) throw error
 }

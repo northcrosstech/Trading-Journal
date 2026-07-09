@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { fetchTradesWithDetails, fetchAllDailyJournal, upsertDailyJournal } from '../lib/queries'
-import type { TradeWithDetails, DailyJournal } from '../lib/database.types'
-import { computeDailyFeed } from '../lib/metrics'
+import { fetchTradesWithDetails, fetchAllDailyJournal, upsertDailyJournal, fetchAllDailyPlans } from '../lib/queries'
+import type { TradeWithDetails, DailyJournal, DailyPlanWithStrategies } from '../lib/database.types'
+import { computeDailyFeed, computePlanVsActual } from '../lib/metrics'
 import { DailyFeedCard } from '../components/DailyFeedCard'
 
 export function JournalPage() {
@@ -13,6 +13,7 @@ export function JournalPage() {
 
   const [trades, setTrades] = useState<TradeWithDetails[] | null>(null)
   const [journalByDate, setJournalByDate] = useState<Map<string, DailyJournal>>(new Map())
+  const [planByDate, setPlanByDate] = useState<Map<string, DailyPlanWithStrategies>>(new Map())
   const [expandedDate, setExpandedDate] = useState<string | null>(focusDate)
 
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -21,6 +22,9 @@ export function JournalPage() {
     fetchTradesWithDetails().then(setTrades)
     fetchAllDailyJournal().then((entries) => {
       setJournalByDate(new Map(entries.map((e) => [e.entry_date, e])))
+    })
+    fetchAllDailyPlans().then((plans) => {
+      setPlanByDate(new Map(plans.map((p) => [p.plan_date, p])))
     })
   }, [])
 
@@ -100,6 +104,11 @@ export function JournalPage() {
           }}
           entry={entry}
           journal={journalByDate.get(entry.date) ?? null}
+          planComparison={
+            planByDate.has(entry.date) && trades
+              ? computePlanVsActual(entry.date, trades, planByDate.get(entry.date)!)
+              : undefined
+          }
           expanded={expandedDate === entry.date}
           onToggle={() => {
             const next = expandedDate === entry.date ? null : entry.date
