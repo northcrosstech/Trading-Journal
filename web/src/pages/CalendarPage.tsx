@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../auth/AuthContext'
-import { fetchAllDailyJournal, upsertDailyJournal, fetchTargetSettings } from '../lib/queries'
+import { fetchAllDailyJournal, upsertDailyJournal, fetchTargetSettings, fetchAllDailyPlans } from '../lib/queries'
 import type { Trade, DailyJournal, TargetSettings } from '../lib/database.types'
 import { computeCalendarDays, computeDailyTargetStats } from '../lib/metrics'
 import { PnlCalendarHeatmap } from '../components/PnlCalendarHeatmap'
@@ -11,6 +11,7 @@ export function CalendarPage() {
   const [trades, setTrades] = useState<Trade[] | null>(null)
   const [journalByDate, setJournalByDate] = useState<Map<string, DailyJournal>>(new Map())
   const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null)
+  const [plannedDates, setPlannedDates] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -30,6 +31,10 @@ export function CalendarPage() {
 
     fetchTargetSettings().then((s) => {
       if (!cancelled) setTargetSettings(s)
+    })
+
+    fetchAllDailyPlans().then((plans) => {
+      if (!cancelled) setPlannedDates(new Set(plans.map((p) => p.plan_date)))
     })
 
     return () => {
@@ -73,6 +78,7 @@ export function CalendarPage() {
         daysByDate={calendarData}
         journalByDate={journalByDate}
         targetsByDate={targetsByDate}
+        plannedDates={plannedDates}
         onSaveNote={handleSaveNote}
       />
     </div>

@@ -100,12 +100,29 @@ function NoteIcon({ hasNote, onClick }: { hasNote: boolean; onClick: (e: React.M
   )
 }
 
+/** Small clipboard glyph -- shown (violet, always-visible) when a pre-market plan
+ * was set for that day, distinct from the note icon's document glyph and blue so the
+ * two "did I write something today" signals stay visually separable. Purely
+ * informational (not a button): clicking the day cell already navigates to the
+ * Journal, where the full Plan vs Reality comparison lives. */
+function PlanIcon() {
+  return (
+    <span title="Plan set for this day" className="text-violet-400">
+      <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+        <rect x="4" y="3" width="12" height="15" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M7 8h6M7 11h6M7 14h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    </span>
+  )
+}
+
 function MonthView({
   cursor,
   setCursor,
   daysByDate,
   journalByDate,
   targetsByDate,
+  plannedDates,
   onOpenNote,
 }: {
   cursor: { year: number; month: number }
@@ -113,6 +130,7 @@ function MonthView({
   daysByDate: Map<string, CalendarDay>
   journalByDate: Map<string, DailyJournal>
   targetsByDate: Map<string, DailyTargetResult>
+  plannedDates: Set<string>
   onOpenNote: (date: string) => void
 }) {
   const navigate = useNavigate()
@@ -202,6 +220,7 @@ function MonthView({
                   const hasTrades = day.tradeCount > 0
                   const hasNote = !!journalByDate.get(day.date)?.notes?.trim()
                   const targetStatus = targetsByDate.get(day.date)?.status ?? 'neutral'
+                  const hasPlan = plannedDates.has(day.date)
                   return (
                     <div
                       key={day.date}
@@ -222,6 +241,7 @@ function MonthView({
                       <div className="flex items-center gap-1">
                         <span className="text-xs text-neutral-500">{dayNum}</span>
                         <TargetMarkerIcon status={targetStatus} />
+                        {hasPlan && <PlanIcon />}
                       </div>
                       <NoteIcon hasNote={hasNote} onClick={() => onOpenNote(day.date)} />
                       {hasTrades ? (
@@ -366,10 +386,11 @@ type Props = {
   daysByDate: Map<string, CalendarDay>
   journalByDate?: Map<string, DailyJournal>
   targetsByDate?: Map<string, DailyTargetResult>
+  plannedDates?: Set<string>
   onSaveNote?: (date: string, fields: { notes?: string; mood_rating?: number | null }) => void
 }
 
-export function PnlCalendarHeatmap({ daysByDate, journalByDate, targetsByDate, onSaveNote }: Props) {
+export function PnlCalendarHeatmap({ daysByDate, journalByDate, targetsByDate, plannedDates, onSaveNote }: Props) {
   const navigate = useNavigate()
   const [mode, setMode] = useState<'month' | 'year'>('month')
   const [cursor, setCursor] = useState(() => {
@@ -380,6 +401,7 @@ export function PnlCalendarHeatmap({ daysByDate, journalByDate, targetsByDate, o
 
   const journalMap = journalByDate ?? new Map<string, DailyJournal>()
   const targetsMap = targetsByDate ?? new Map<string, DailyTargetResult>()
+  const plannedSet = plannedDates ?? new Set<string>()
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -407,6 +429,7 @@ export function PnlCalendarHeatmap({ daysByDate, journalByDate, targetsByDate, o
           daysByDate={daysByDate}
           journalByDate={journalMap}
           targetsByDate={targetsMap}
+          plannedDates={plannedSet}
           onOpenNote={setNoteDate}
         />
       ) : (

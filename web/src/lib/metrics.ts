@@ -1,4 +1,4 @@
-import type { Trade, TradeWithDetails, Strategy, Rule } from './database.types'
+import type { Trade, TradeWithDetails, Strategy, Rule, DailyPlanWithStrategies } from './database.types'
 
 // Standard US equity option contract multiplier. Not currently persisted per-trade
 // (options_detail stores strike/expiration/type/premium but not the multiplier), so
@@ -317,10 +317,17 @@ export type RuleStat = {
   profitFactorBroken: number | null
 }
 
+// Structurally narrow rather than TradeWithDetails specifically, so callers (e.g. the
+// Dashboard's most-expensive-rule card) can pass a lighter fetch that only joins
+// trade_rules, without needing executions/options_detail/trade_strategies too.
+type TradeForRuleStats = Pick<Trade, 'status' | 'realized_pnl_net'> & {
+  trade_rules: { rule_id: string; status: 'followed' | 'broken' | 'na' }[]
+}
+
 /** Per-rule rollup: how often a rule was followed, and the P&L/win-rate/profit-factor
  * delta between trades where it was followed vs. broken -- the discipline-to-outcome
  * link (e.g. "I make money when I follow X and lose when I break it"). */
-export function computeRuleStats(trades: TradeWithDetails[], rules: Rule[]): RuleStat[] {
+export function computeRuleStats(trades: TradeForRuleStats[], rules: Rule[]): RuleStat[] {
   const closed = trades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null)
 
   return rules.map((rule) => {
@@ -378,6 +385,16 @@ export function computeRuleStats(trades: TradeWithDetails[], rules: Rule[]): Rul
       profitFactorBroken: grossLossBroken > 0 ? grossWinBroken / grossLossBroken : grossWinBroken > 0 ? Infinity : null,
     }
   })
+}
+
+/** The rule that has cost the most money when broken -- the single headline number
+ * for "your most expensive broken rule: -$X across N trades." Just picks the worst
+ * `pnlBroken` among rules that have actually been broken at least once; doesn't
+ * re-derive anything computeRuleStats doesn't already compute. */
+export function computeMostExpensiveRule(ruleStats: RuleStat[]): RuleStat | null {
+  const withBreaks = ruleStats.filter((s) => s.brokenCount > 0 && s.pnlBroken < 0)
+  if (withBreaks.length === 0) return null
+  return withBreaks.reduce((worst, s) => (s.pnlBroken < worst.pnlBroken ? s : worst))
 }
 
 export type BucketStat = {
@@ -505,16 +522,18 @@ export function computeStatsTiles(trades: TradeWithDetails[]): StatsTiles {
   }
 }
 
-export type DailyTargetStatus = 'hit_target' | 'gave_it_back' | 'breached_loss' | 'neutral'
+export type DailyTargetStatus = 'hit_target' | 'gave_it_back' | 'breached_loss' | 'reversal_breach' | 'neutral'
 
 export type DailyTargetResult = {
   date: string
   netPnlClose: number // end-of-day realized net P&L
   intradayPeakRealized: number // max cumulative realized P&L seen while walking the day's closes in order
   hitTargetClosed: boolean
-  reachedTargetIntraday: boolean // peak >= target but close < target -- "gave it back"
+  reachedTargetIntraday: boolean // peak >= target but close < target -- "gave it back" (also true for a reversal_breach day)
   breachedLossLimit: boolean
-  status: DailyTargetStatus // single marker for calendar display; breach > hit > gave-back
+  // single marker for calendar display, priority: reversal (hit target, gave it back,
+  // AND breached the loss limit) > plain breach > hit > gave-back
+  status: DailyTargetStatus
 }
 
 export type TargetSettingsInput = { profit_target_value: number | null; loss_limit_value: number | null }
@@ -526,6 +545,40 @@ export type TargetSettingsInput = { profit_target_value: number | null; loss_lim
  * "how far ahead did booked profit get before end of day," which is enough to detect
  * "was green then gave it back" without needing any live/unrealized price feed.
  */
+/** Closed trades (with a defined P&L and close time) grouped by the date their P&L
+ * booked -- the shared bucketing step behind both computeDailyTargetStats and
+ * computePlanVsActual. */
+function groupClosedTradesByDate(trades: Trade[]): Map<string, Trade[]> {
+  const closed = trades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null && t.last_out_at)
+  const byDate = new Map<string, Trade[]>()
+  for (const t of closed) {
+    const date = t.last_out_at!.slice(0, 10)
+    const list = byDate.get(date)
+    if (list) list.push(t)
+    else byDate.set(date, [t])
+  }
+  return byDate
+}
+
+type DayWalk = { close: number; peak: number; trough: number }
+
+/** Walks a day's closed trades in timestamp order, accumulating realized net P&L.
+ * `peak`/`trough` both start at 0 (the day's flat baseline before any trade closes)
+ * rather than the first trade's own P&L, so "best/worst point reached" stays
+ * meaningful even for a day that only ever moved one direction. */
+function walkDayCumulative(dayTrades: Pick<Trade, 'realized_pnl_net' | 'last_out_at'>[]): DayWalk {
+  const ordered = [...dayTrades].sort((a, b) => new Date(a.last_out_at!).getTime() - new Date(b.last_out_at!).getTime())
+  let cumulative = 0
+  let peak = 0
+  let trough = 0
+  for (const t of ordered) {
+    cumulative += t.realized_pnl_net ?? 0
+    peak = Math.max(peak, cumulative)
+    trough = Math.min(trough, cumulative)
+  }
+  return { close: cumulative, peak, trough }
+}
+
 export function computeDailyTargetStats(
   trades: Trade[],
   settings: TargetSettingsInput | null,
@@ -535,33 +588,20 @@ export function computeDailyTargetStats(
 
   const target = settings.profit_target_value
   const lossLimit = settings.loss_limit_value
-
-  const closed = trades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null && t.last_out_at)
-  const byDate = new Map<string, Trade[]>()
-  for (const t of closed) {
-    const date = t.last_out_at!.slice(0, 10)
-    const list = byDate.get(date)
-    if (list) list.push(t)
-    else byDate.set(date, [t])
-  }
+  const byDate = groupClosedTradesByDate(trades)
 
   for (const [date, dayTrades] of byDate) {
-    const ordered = [...dayTrades].sort((a, b) => new Date(a.last_out_at!).getTime() - new Date(b.last_out_at!).getTime())
-    let cumulative = 0
-    let peak = 0 // starts at 0 (the day's baseline), not -Infinity, since "peak" means best point reached
-    for (const t of ordered) {
-      cumulative += t.realized_pnl_net ?? 0
-      peak = Math.max(peak, cumulative)
-    }
+    const { close, peak } = walkDayCumulative(dayTrades)
 
-    const netPnlClose = cumulative
+    const netPnlClose = close
     const intradayPeakRealized = peak
     const hitTargetClosed = target !== null && netPnlClose >= target
     const reachedTargetIntraday = target !== null && intradayPeakRealized >= target && netPnlClose < target
     const breachedLossLimit = lossLimit !== null && netPnlClose <= -lossLimit
 
     let status: DailyTargetStatus = 'neutral'
-    if (breachedLossLimit) status = 'breached_loss'
+    if (breachedLossLimit && reachedTargetIntraday) status = 'reversal_breach' // hit target, gave it back, kept going all the way to breach
+    else if (breachedLossLimit) status = 'breached_loss'
     else if (hitTargetClosed) status = 'hit_target'
     else if (reachedTargetIntraday) status = 'gave_it_back'
 
@@ -569,6 +609,73 @@ export function computeDailyTargetStats(
   }
 
   return result
+}
+
+export type PlanVsActual = {
+  date: string
+  plannedMaxTrades: number | null
+  actualTradeCount: number
+  plannedMaxLoss: number | null
+  actualWorstPoint: number // most negative cumulative realized P&L reached that day (0 if it never went red)
+  actualNetPnl: number
+  plannedSetupIds: string[]
+  actualSetupIds: string[]
+  offPlanSetupIds: string[] // traded but not planned
+  untradedSetupIds: string[] // planned but never traded
+  followedTradeLimit: boolean | null // null when no trade-count limit was planned
+  followedLossLimit: boolean | null // null when no loss limit was planned
+  followedPlan: boolean | null // null when no plan exists for this day at all
+}
+
+// Structurally narrow rather than TradeWithDetails specifically, so callers can pass
+// either the full join (Journal, which already fetches it) or the lighter
+// TradeWithStrategies (Dashboard) without an unnecessary executions/options_detail
+// fetch just to satisfy this function's type.
+type TradeForPlanCompare = Pick<Trade, 'status' | 'last_out_at' | 'first_in_at' | 'realized_pnl_net'> & {
+  trade_strategies: { strategy_id: string }[]
+}
+
+/** Compares a day's plan (if any) against what actually happened, reusing the same
+ * trade data and bucketing convention as everywhere else in the app -- no separate
+ * P&L computation. `dayTrades` bucketing matches the calendar/journal rule: closed
+ * trades count under their close date, open trades under their entry date, so a
+ * trade opened today that's still open still counts toward "trades taken." */
+export function computePlanVsActual(date: string, trades: TradeForPlanCompare[], plan: DailyPlanWithStrategies | null): PlanVsActual {
+  const dayTrades = trades.filter((t) => {
+    const bucket = t.status === 'CLOSED' ? t.last_out_at?.slice(0, 10) : t.first_in_at?.slice(0, 10)
+    return bucket === date
+  })
+
+  const closedDayTrades = dayTrades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null && t.last_out_at)
+  const { close, trough } = walkDayCumulative(closedDayTrades)
+
+  const actualSetupIds = new Set<string>()
+  for (const t of dayTrades) {
+    for (const ts of t.trade_strategies) actualSetupIds.add(ts.strategy_id)
+  }
+  const plannedSetupIds = new Set((plan?.daily_plan_strategies ?? []).map((s) => s.strategy_id))
+
+  const plannedMaxTrades = plan?.planned_max_trades ?? null
+  const plannedMaxLoss = plan?.planned_max_loss ?? null
+
+  const followedTradeLimit = plannedMaxTrades === null ? null : dayTrades.length <= plannedMaxTrades
+  const followedLossLimit = plannedMaxLoss === null ? null : trough >= -plannedMaxLoss
+
+  return {
+    date,
+    plannedMaxTrades,
+    actualTradeCount: dayTrades.length,
+    plannedMaxLoss,
+    actualWorstPoint: trough,
+    actualNetPnl: close,
+    plannedSetupIds: Array.from(plannedSetupIds),
+    actualSetupIds: Array.from(actualSetupIds),
+    offPlanSetupIds: Array.from(actualSetupIds).filter((id) => !plannedSetupIds.has(id)),
+    untradedSetupIds: Array.from(plannedSetupIds).filter((id) => !actualSetupIds.has(id)),
+    followedTradeLimit,
+    followedLossLimit,
+    followedPlan: plan === null ? null : (followedTradeLimit ?? true) && (followedLossLimit ?? true),
+  }
 }
 
 export type TargetSummary = {

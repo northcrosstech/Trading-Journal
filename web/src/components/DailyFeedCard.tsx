@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { DailyFeedEntry } from '../lib/metrics'
+import type { DailyFeedEntry, PlanVsActual } from '../lib/metrics'
 import type { DailyJournal } from '../lib/database.types'
 import { currency, optionLabel, timeOnlyFmt } from '../lib/format'
 import { MiniSparkline } from './MiniSparkline'
@@ -28,10 +28,11 @@ type Props = {
   expanded: boolean
   onToggle: () => void
   onSave: (date: string, fields: { notes?: string; mood_rating?: number | null }) => void
+  planComparison?: PlanVsActual // only passed when a pre-market plan exists for this day
 }
 
 export const DailyFeedCard = forwardRef<HTMLDivElement, Props>(function DailyFeedCard(
-  { entry, journal, expanded, onToggle, onSave },
+  { entry, journal, expanded, onToggle, onSave, planComparison },
   ref,
 ) {
   const [notes, setNotes] = useState(journal?.notes ?? '')
@@ -99,6 +100,39 @@ export const DailyFeedCard = forwardRef<HTMLDivElement, Props>(function DailyFee
 
       {expanded && (
         <div className="mt-4 flex flex-col gap-4 border-t border-neutral-800 pt-4">
+          {planComparison && (
+            <div className="rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
+              <div className="mb-1.5 text-xs font-medium text-neutral-400">Plan vs Reality</div>
+              <div className="flex flex-col gap-1 text-sm text-neutral-300">
+                {planComparison.plannedMaxTrades !== null && (
+                  <div>
+                    Planned {planComparison.plannedMaxTrades} trade{planComparison.plannedMaxTrades === 1 ? '' : 's'}, took{' '}
+                    <span className={planComparison.followedTradeLimit === false ? 'font-medium text-(--status-critical)' : ''}>
+                      {planComparison.actualTradeCount}
+                    </span>
+                  </div>
+                )}
+                {planComparison.plannedMaxLoss !== null && (
+                  <div>
+                    Planned {currency(-planComparison.plannedMaxLoss)} max, hit{' '}
+                    <span className={planComparison.followedLossLimit === false ? 'font-medium text-(--status-critical)' : ''}>
+                      {currency(planComparison.actualWorstPoint)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {(planComparison.offPlanSetupIds.length > 0 || planComparison.untradedSetupIds.length > 0) && (
+                <div className="mt-1.5 text-xs text-neutral-500">
+                  {planComparison.untradedSetupIds.length > 0 &&
+                    `${planComparison.untradedSetupIds.length} planned setup${planComparison.untradedSetupIds.length === 1 ? '' : 's'} not traded`}
+                  {planComparison.untradedSetupIds.length > 0 && planComparison.offPlanSetupIds.length > 0 && ' · '}
+                  {planComparison.offPlanSetupIds.length > 0 &&
+                    `${planComparison.offPlanSetupIds.length} off-plan setup${planComparison.offPlanSetupIds.length === 1 ? '' : 's'} traded`}
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-medium text-neutral-400">Mood</span>
