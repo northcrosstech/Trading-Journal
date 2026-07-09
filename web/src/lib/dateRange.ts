@@ -1,4 +1,5 @@
 import type { Trade } from './database.types'
+import { centralDateStr } from './format'
 
 export type DateRangePreset =
   | 'today'
@@ -23,15 +24,12 @@ export const DATE_RANGE_PRESETS: { value: DateRangePreset; label: string }[] = [
   { value: 'lastYear', label: 'Last Yr' },
 ]
 
-/** Local calendar date, not UTC -- trade timestamps are bucketed by their raw (UTC)
- * date string elsewhere, but "today"/"yesterday" etc. must reflect the user's actual
- * local day, or these presets drift a day off in US timezones during evening hours
- * (UTC has already rolled to the next day while it's still "today" locally). */
+/** Central Time calendar date (the exchange's own timezone), not the viewer's
+ * browser timezone and not UTC -- "today"/"yesterday" etc. must reflect the trading
+ * day, which is the same single source of truth used to bucket trades themselves
+ * (see bucketDate below), or presets and trade buckets can disagree. */
 export function toDateStr(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  return centralDateStr(d)
 }
 
 function startOfWeek(d: Date): Date {
@@ -98,7 +96,7 @@ export function presetRange(preset: DateRangePreset | null): { from: string; to:
  * date. Matches the bucketing convention used by the calendar and journal feed. */
 function bucketDate(trade: Pick<Trade, 'status' | 'first_in_at' | 'last_out_at'>): string | null {
   const iso = trade.status === 'CLOSED' ? trade.last_out_at : trade.first_in_at
-  return iso ? iso.slice(0, 10) : null
+  return iso ? centralDateStr(new Date(iso)) : null
 }
 
 export function filterTradesByDateRange<T extends Pick<Trade, 'status' | 'first_in_at' | 'last_out_at'>>(

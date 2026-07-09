@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchTradesWithDetails } from '../lib/queries'
 import type { TradeWithDetails } from '../lib/database.types'
-import { currency, priceFmt, holdTimeFmt, optionLabel, dateFmt, percentFmt } from '../lib/format'
+import { currency, priceFmt, holdTimeFmt, optionLabel, dateFmt, percentFmt, dteLabel, centralDateStr } from '../lib/format'
 import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd } from '../lib/metrics'
 import { DATE_RANGE_PRESETS, presetRange, type DateRangePreset } from '../lib/dateRange'
 
@@ -32,6 +32,19 @@ export function TradeLogPage() {
   const [dateTo, setDateTo] = useState(searchParams.get('to') ?? '')
   const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  // Collapsed by default -- tracks which dates have been explicitly expanded, rather
+  // than the reverse, so newly-loaded dates start collapsed without needing to be
+  // pre-seeded into a "collapsed" set as trades load in.
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set())
+
+  function toggleDateExpanded(date: string) {
+    setExpandedDates((prev) => {
+      const next = new Set(prev)
+      if (next.has(date)) next.delete(date)
+      else next.add(date)
+      return next
+    })
+  }
 
   useEffect(() => {
     fetchTradesWithDetails()
@@ -56,8 +69,9 @@ export function TradeLogPage() {
       if (playbookFilter !== 'all' && t.trade_playbooks?.playbook_id !== playbookFilter) return false
       if (winLossFilter === 'win' && !(t.status === 'CLOSED' && (t.realized_pnl_net ?? 0) > 0)) return false
       if (winLossFilter === 'loss' && !(t.status === 'CLOSED' && (t.realized_pnl_net ?? 0) < 0)) return false
-      if (dateFrom && (!t.first_in_at || t.first_in_at.slice(0, 10) < dateFrom)) return false
-      if (dateTo && (!t.first_in_at || t.first_in_at.slice(0, 10) > dateTo)) return false
+      const entryDateCT = t.first_in_at ? centralDateStr(new Date(t.first_in_at)) : null
+      if (dateFrom && (!entryDateCT || entryDateCT < dateFrom)) return false
+      if (dateTo && (!entryDateCT || entryDateCT > dateTo)) return false
       return true
     })
   }, [trades, symbolFilter, playbookFilter, winLossFilter, dateFrom, dateTo])
@@ -91,7 +105,8 @@ export function TradeLogPage() {
     const groups: { date: string; trades: TradeWithDetails[]; netPnl: number; closedCount: number }[] = []
     const indexByDate = new Map<string, number>()
     for (const t of sorted) {
-      const date = t.status === 'CLOSED' ? t.last_out_at?.slice(0, 10) : t.first_in_at?.slice(0, 10)
+      const iso = t.status === 'CLOSED' ? t.last_out_at : t.first_in_at
+      const date = iso ? centralDateStr(new Date(iso)) : null
       if (!date) continue
       let idx = indexByDate.get(date)
       if (idx === undefined) {
@@ -247,7 +262,7 @@ export function TradeLogPage() {
           <thead>
             <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500">
               <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('date')}>
-                Date{sortIndicator('date')}
+                Date (CT){sortIndicator('date')}
               </th>
               <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('symbol')}>
                 Symbol{sortIndicator('symbol')}
@@ -272,11 +287,19 @@ export function TradeLogPage() {
             </tr>
           </thead>
           <tbody>
-            {(dayGroups ?? [{ date: null, trades: sorted, netPnl: 0, closedCount: 0 }]).map((group) => (
+            {(dayGroups ?? [{ date: null, trades: sorted, netPnl: 0, closedCount: 0 }]).map((group) => {
+              const collapsed = group.date !== null && !expandedDates.has(group.date)
+              return (
               <Fragment key={group.date ?? 'all'}>
                 {group.date && (
-                  <tr className="border-b border-neutral-800/60 bg-neutral-800/30">
+                  <tr
+                    onClick={() => toggleDateExpanded(group.date!)}
+                    className="cursor-pointer border-b border-neutral-800/60 bg-neutral-800/30 hover:bg-neutral-800/50"
+                  >
                     <td colSpan={11} className="px-3 py-1.5 text-xs font-medium text-neutral-400">
+                      <span className={`mr-1.5 inline-block text-neutral-600 transition-transform ${collapsed ? '-rotate-90' : ''}`}>
+                        ▾
+                      </span>
                       {dateFmt(group.date)}
                       <span className="ml-2 text-neutral-600">
                         {group.trades.length} trade{group.trades.length === 1 ? '' : 's'}
@@ -292,7 +315,7 @@ export function TradeLogPage() {
                     </td>
                   </tr>
                 )}
-                {group.trades.map((t) => {
+                {!collapsed && group.trades.map((t) => {
                   const returnPct = returnOnCapitalPct(t)
                   const date = t.status === 'CLOSED' ? t.last_out_at : t.first_in_at
                   const pos = posSize(t)
@@ -307,7 +330,8 @@ export function TradeLogPage() {
                         {t.symbol}
                         {t.options_detail && (
                           <span className="ml-1.5 text-xs font-normal text-neutral-500">
-                            {optionLabel(t.options_detail.strike, t.options_detail.option_type)} {t.options_detail.expiration}
+                            {optionLabel(t.options_detail.strike, t.options_detail.option_type)}{' '}
+                            {dteLabel(t.first_in_at, t.options_detail.expiration)}
                           </span>
                         )}
                       </td>
@@ -355,7 +379,8 @@ export function TradeLogPage() {
                   )
                 })}
               </Fragment>
-            ))}
+              )
+            })}
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={COLUMN_COUNT} className="px-4 py-8 text-center text-neutral-500">

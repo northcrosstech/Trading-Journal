@@ -19,7 +19,7 @@ import { fetchCandles, type CandleInterval, type CandleResult } from '../lib/can
 import { CandlestickChart, type ChartMarker } from '../components/CandlestickChart'
 import { PlaybookPicker } from '../components/PlaybookPicker'
 import { PlaybookRuleChecklist } from '../components/PlaybookRuleChecklist'
-import { currency, holdTimeFmt, optionLabel, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt } from '../lib/format'
+import { currency, holdTimeFmt, optionLabel, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt, dteLabel } from '../lib/format'
 import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd } from '../lib/metrics'
 
 const ACTION_LABEL: Record<string, string> = { entry: 'Open', add: 'Add', trim: 'Trim', exit: 'Close' }
@@ -190,7 +190,9 @@ export function TradeDetailPage() {
           <h1 className="text-xl font-semibold text-neutral-100">
             {trade.symbol} {optionLabel(trade.options_detail?.strike, trade.options_detail?.option_type)}
           </h1>
-          <span className="text-sm text-neutral-500">exp {trade.options_detail?.expiration}</span>
+          {trade.options_detail && (
+            <span className="text-sm text-neutral-500">{dteLabel(trade.first_in_at, trade.options_detail.expiration)}</span>
+          )}
           <span
             className={`rounded-full px-2 py-0.5 text-xs font-medium ${
               trade.status === 'OPEN' ? 'bg-blue-950 text-blue-300' : 'bg-neutral-800 text-neutral-300'
@@ -276,7 +278,7 @@ export function TradeDetailPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500">
-                  <th className="px-4 py-2">Time</th>
+                  <th className="px-4 py-2">Time (CT)</th>
                   <th className="px-4 py-2">Action</th>
                   <th className="px-4 py-2">Side</th>
                   <th className="px-4 py-2 text-right">Qty</th>

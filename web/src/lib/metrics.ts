@@ -1,4 +1,5 @@
 import type { Trade, TradeWithDetails, Playbook, PlaybookRule, DailyRule, DailyPlanWithPlaybooks } from './database.types'
+import { centralDateStr } from './format'
 
 // Standard US equity option contract multiplier. Not currently persisted per-trade
 // (options_detail stores strike/expiration/type/premium but not the multiplier), so
@@ -68,7 +69,7 @@ export function computeEquityCurve(trades: Trade[]): EquityPoint[] {
   return closed.map((t) => {
     cumulative += t.realized_pnl_net ?? 0
     return {
-      date: t.last_out_at!.slice(0, 10),
+      date: centralDateStr(new Date(t.last_out_at!)),
       timestamp: new Date(t.last_out_at!).getTime(),
       cumulativeNetPnl: cumulative,
       tradeNetPnl: t.realized_pnl_net ?? 0,
@@ -99,7 +100,8 @@ export type DailyFeedEntry = {
 export function computeDailyFeed(trades: TradeWithDetails[]): DailyFeedEntry[] {
   const byDate = new Map<string, TradeWithDetails[]>()
   for (const t of trades) {
-    const date = t.status === 'CLOSED' ? t.last_out_at?.slice(0, 10) : t.first_in_at?.slice(0, 10)
+    const iso = t.status === 'CLOSED' ? t.last_out_at : t.first_in_at
+    const date = iso ? centralDateStr(new Date(iso)) : null
     if (!date) continue
     const list = byDate.get(date)
     if (list) list.push(t)
@@ -566,7 +568,7 @@ export function computeStatsTiles(trades: TradeWithDetails[]): StatsTiles {
     maxLossStreak = Math.max(maxLossStreak, curLoss)
   }
 
-  const tradingDays = new Set(closed.map((t) => t.last_out_at!.slice(0, 10)))
+  const tradingDays = new Set(closed.map((t) => centralDateStr(new Date(t.last_out_at!))))
   const sizes = closed.map((t) => entrySizeUsd(t)).filter((v): v is number => v !== null)
 
   return {
@@ -616,7 +618,7 @@ function groupClosedTradesByDate(trades: Trade[]): Map<string, Trade[]> {
   const closed = trades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null && t.last_out_at)
   const byDate = new Map<string, Trade[]>()
   for (const t of closed) {
-    const date = t.last_out_at!.slice(0, 10)
+    const date = centralDateStr(new Date(t.last_out_at!))
     const list = byDate.get(date)
     if (list) list.push(t)
     else byDate.set(date, [t])
@@ -710,7 +712,8 @@ type TradeForPlanCompare = Pick<Trade, 'status' | 'last_out_at' | 'first_in_at' 
  * trade opened today that's still open still counts toward "trades taken." */
 export function computePlanVsActual(date: string, trades: TradeForPlanCompare[], plan: DailyPlanWithPlaybooks | null): PlanVsActual {
   const dayTrades = trades.filter((t) => {
-    const bucket = t.status === 'CLOSED' ? t.last_out_at?.slice(0, 10) : t.first_in_at?.slice(0, 10)
+    const iso = t.status === 'CLOSED' ? t.last_out_at : t.first_in_at
+    const bucket = iso ? centralDateStr(new Date(iso)) : null
     return bucket === date
   })
 
@@ -772,7 +775,7 @@ export function computeCalendarDays(trades: Trade[]): Map<string, CalendarDay> {
   const byDay = new Map<string, CalendarDay>()
 
   for (const t of closed) {
-    const date = t.last_out_at!.slice(0, 10)
+    const date = centralDateStr(new Date(t.last_out_at!))
     const existing = byDay.get(date)
     const netPnl = t.realized_pnl_net ?? 0
     if (existing) {
