@@ -5,22 +5,22 @@ import {
   fetchAllDailyJournal,
   upsertDailyJournal,
   fetchTargetSettings,
-  fetchTradesWithStrategies,
-  fetchStrategies,
+  fetchTradesWithPlaybook,
+  fetchTradesWithDetails,
+  fetchPlaybooks,
+  fetchAllPlaybookRules,
   fetchDailyPlan,
   fetchAllDailyPlans,
-  fetchTradesWithRules,
-  fetchRules,
 } from '../lib/queries'
 import type {
   Trade,
   DailyJournal,
   TargetSettings,
-  TradeWithStrategies,
-  Strategy,
-  DailyPlanWithStrategies,
-  TradeWithRules,
-  Rule,
+  TradeWithPlaybook,
+  TradeWithDetails,
+  Playbook,
+  PlaybookRule,
+  DailyPlanWithPlaybooks,
 } from '../lib/database.types'
 import {
   computeEquityCurve,
@@ -28,7 +28,7 @@ import {
   computeCalendarDays,
   computeDailyTargetStats,
   computePlanVsActual,
-  computeRuleStats,
+  computePlaybookRuleStats,
   computeMostExpensiveRule,
 } from '../lib/metrics'
 import { filterTradesByDateRange, presetRange, toDateStr, type DateRangePreset } from '../lib/dateRange'
@@ -40,6 +40,7 @@ import { RecentTradesList } from '../components/RecentTradesList'
 import { TodayTargetBenchmark } from '../components/TodayTargetBenchmark'
 import { TodayPlanCard } from '../components/TodayPlanCard'
 import { MostExpensiveRuleCard } from '../components/MostExpensiveRuleCard'
+import { DailyRulesChecklist } from '../components/DailyRulesChecklist'
 
 export function DashboardPage() {
   const { user } = useAuth()
@@ -52,19 +53,24 @@ export function DashboardPage() {
   // Pre-market plan feature -- kept as its own state/effect, independent of the
   // trades/journal/target-settings fetch above, so nothing about the existing
   // dashboard load path changes.
-  const [tradesWithStrategies, setTradesWithStrategies] = useState<TradeWithStrategies[] | null>(null)
-  const [allStrategies, setAllStrategies] = useState<Strategy[]>([])
-  const [dailyPlan, setDailyPlan] = useState<DailyPlanWithStrategies | null>(null)
+  const [tradesWithPlaybook, setTradesWithPlaybook] = useState<TradeWithPlaybook[] | null>(null)
+  const [allPlaybooks, setAllPlaybooks] = useState<Playbook[]>([])
+  const [dailyPlan, setDailyPlan] = useState<DailyPlanWithPlaybooks | null>(null)
   const [plannedDates, setPlannedDates] = useState<Set<string>>(new Set())
   const todayStr = toDateStr(new Date())
 
+  // Cross-playbook "most expensive broken rule" headline -- its own state/effect,
+  // independent of the trades/journal/target-settings fetch above.
+  const [tradesWithDetails, setTradesWithDetails] = useState<TradeWithDetails[] | null>(null)
+  const [allPlaybookRules, setAllPlaybookRules] = useState<PlaybookRule[]>([])
+
   useEffect(() => {
     let cancelled = false
-    fetchTradesWithStrategies().then((t) => {
-      if (!cancelled) setTradesWithStrategies(t)
+    fetchTradesWithPlaybook().then((t) => {
+      if (!cancelled) setTradesWithPlaybook(t)
     })
-    fetchStrategies().then((s) => {
-      if (!cancelled) setAllStrategies(s ?? [])
+    fetchPlaybooks().then((p) => {
+      if (!cancelled) setAllPlaybooks(p ?? [])
     })
     fetchDailyPlan(todayStr).then((p) => {
       if (!cancelled) setDailyPlan(p)
@@ -72,36 +78,24 @@ export function DashboardPage() {
     fetchAllDailyPlans().then((plans) => {
       if (!cancelled) setPlannedDates(new Set(plans.map((p) => p.plan_date)))
     })
+    fetchTradesWithDetails().then((t) => {
+      if (!cancelled) setTradesWithDetails(t)
+    })
+    fetchAllPlaybookRules().then((r) => {
+      if (!cancelled) setAllPlaybookRules(r)
+    })
     return () => {
       cancelled = true
     }
   }, [todayStr])
 
   const handlePlanSaved = useCallback(
-    (plan: DailyPlanWithStrategies) => {
+    (plan: DailyPlanWithPlaybooks) => {
       setDailyPlan(plan)
       setPlannedDates((prev) => (prev.has(plan.plan_date) ? prev : new Set(prev).add(plan.plan_date)))
     },
     [],
   )
-
-  // Rule-violation cost accounting -- also its own state/effect, independent of
-  // everything above, same reasoning (don't touch the existing fetch paths).
-  const [tradesWithRules, setTradesWithRules] = useState<TradeWithRules[] | null>(null)
-  const [rules, setRules] = useState<Rule[]>([])
-
-  useEffect(() => {
-    let cancelled = false
-    fetchTradesWithRules().then((t) => {
-      if (!cancelled) setTradesWithRules(t)
-    })
-    fetchRules().then((r) => {
-      if (!cancelled) setRules(r ?? [])
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -181,8 +175,10 @@ export function DashboardPage() {
   const calendarData = computeCalendarDays(trades) // calendar is its own navigable view, unaffected by the range preset
   const targetsByDate = computeDailyTargetStats(trades, targetSettings) // all-time, same reasoning
   const today = targetsByDate.get(todayStr)
-  const todayPlanComparison = tradesWithStrategies ? computePlanVsActual(todayStr, tradesWithStrategies, dailyPlan) : null
-  const mostExpensiveRule = tradesWithRules ? computeMostExpensiveRule(computeRuleStats(tradesWithRules, rules)) : null
+  const todayPlanComparison = tradesWithPlaybook ? computePlanVsActual(todayStr, tradesWithPlaybook, dailyPlan) : null
+  const mostExpensiveRule = tradesWithDetails
+    ? computeMostExpensiveRule(computePlaybookRuleStats(tradesWithDetails, allPlaybookRules))
+    : null
 
   return (
     <div className="flex flex-col gap-5">
@@ -211,15 +207,17 @@ export function DashboardPage() {
           date={todayStr}
           userId={user.id}
           plan={dailyPlan}
-          allStrategies={allStrategies}
+          allPlaybooks={allPlaybooks}
           comparison={todayPlanComparison}
           onSaved={handlePlanSaved}
         />
       )}
 
-      {tradesWithRules && <MostExpensiveRuleCard rule={mostExpensiveRule} />}
+      {user && <DailyRulesChecklist userId={user.id} date={todayStr} />}
 
       <StatStripBar stats={stripStats} />
+
+      <MostExpensiveRuleCard stat={mostExpensiveRule} />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 lg:col-span-2">

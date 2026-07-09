@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { fetchTradesWithDetails, fetchStrategies, fetchTargetSettings } from '../lib/queries'
-import type { TradeWithDetails, Strategy, TargetSettings } from '../lib/database.types'
+import { fetchTradesWithDetails, fetchPlaybooks, fetchTargetSettings, fetchDailyRules, fetchAllDailyRuleChecks } from '../lib/queries'
+import type { TradeWithDetails, Playbook, TargetSettings, DailyRule } from '../lib/database.types'
 import {
   computeStatsTiles,
   computeEquityCurve,
   computeDayOfWeekStats,
   computeHourOfDayStats,
-  computeStrategyStats,
+  computePlaybookStats,
   computeSymbolStats,
   computeDailyTargetStats,
   computeTargetSummary,
+  computeDailyRuleConsistency,
   type BucketStat,
 } from '../lib/metrics'
 import { filterTradesByDateRange, presetRange, type DateRangePreset } from '../lib/dateRange'
@@ -17,7 +18,7 @@ import { DateRangePresetBar } from '../components/DateRangePresetBar'
 import { StatTile } from '../components/StatStripBar'
 import { EquityCurveChart } from '../components/EquityCurveChart'
 import { MagnitudeBar } from '../components/MagnitudeBar'
-import { StrategyChip } from '../components/StrategyChip'
+import { PlaybookChip } from '../components/PlaybookChip'
 import { currency, percentFmt, holdTimeFmt } from '../lib/format'
 
 function pf(v: number | null): string {
@@ -108,14 +109,18 @@ function GroupTable({
 
 export function StatsPage() {
   const [trades, setTrades] = useState<TradeWithDetails[] | null>(null)
-  const [strategies, setStrategies] = useState<Strategy[]>([])
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([])
   const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null)
   const [preset, setPreset] = useState<DateRangePreset | null>(null)
+  const [dailyRules, setDailyRules] = useState<DailyRule[]>([])
+  const [dailyRuleChecks, setDailyRuleChecks] = useState<{ check_date: string; rule_id: string; checked: boolean }[]>([])
 
   useEffect(() => {
     fetchTradesWithDetails().then(setTrades)
-    fetchStrategies().then((s) => setStrategies(s ?? []))
+    fetchPlaybooks().then((p) => setPlaybooks(p ?? []))
     fetchTargetSettings().then(setTargetSettings)
+    fetchDailyRules().then(setDailyRules)
+    fetchAllDailyRuleChecks().then(setDailyRuleChecks)
   }, [])
 
   const filtered = useMemo(() => {
@@ -127,11 +132,15 @@ export function StatsPage() {
   const equityData = useMemo(() => computeEquityCurve(filtered), [filtered])
   const dayOfWeek = useMemo(() => computeDayOfWeekStats(filtered), [filtered])
   const hourOfDay = useMemo(() => computeHourOfDayStats(filtered), [filtered])
-  const strategyStats = useMemo(() => computeStrategyStats(filtered, strategies), [filtered, strategies])
+  const playbookStats = useMemo(() => computePlaybookStats(filtered, playbooks), [filtered, playbooks])
   const symbolStats = useMemo(() => computeSymbolStats(filtered), [filtered])
   const targetSummary = useMemo(
     () => computeTargetSummary(computeDailyTargetStats(filtered, targetSettings)),
     [filtered, targetSettings],
+  )
+  const ruleConsistency = useMemo(
+    () => computeDailyRuleConsistency(dailyRuleChecks, dailyRules, presetRange(preset)),
+    [dailyRuleChecks, dailyRules, preset],
   )
 
   if (trades === null) {
@@ -159,6 +168,17 @@ export function StatsPage() {
         <StatTile label="Top Loss" value={tiles.topLoss === null ? '—' : currency(tiles.topLoss)} tone="critical" />
         <StatTile label="Avg Daily Vol" value={tiles.avgDailyVolume === null ? '—' : tiles.avgDailyVolume.toFixed(1)} />
         <StatTile label="Avg Size" value={tiles.avgSize === null ? '—' : currency(tiles.avgSize)} />
+        {dailyRules.length > 0 && (
+          <StatTile
+            label="Rules Followed"
+            value={
+              ruleConsistency.totalDays === 0
+                ? '—'
+                : `${ruleConsistency.allFollowedDays}/${ruleConsistency.totalDays} (${Math.round((ruleConsistency.allFollowedPct ?? 0) * 100)}%)`
+            }
+            tone="good"
+          />
+        )}
         {targetSettings?.profit_target_value !== null && targetSettings?.profit_target_value !== undefined && (
           <>
             <StatTile
@@ -186,10 +206,10 @@ export function StatsPage() {
       </div>
 
       <GroupTable
-        title="By Strategy"
-        rows={strategyStats.map((s) => ({
-          key: s.strategy.id,
-          label: <StrategyChip strategy={s.strategy} />,
+        title="By Playbook"
+        rows={playbookStats.map((s) => ({
+          key: s.playbook.id,
+          label: <PlaybookChip playbook={s.playbook} />,
           tradeCount: s.tradeCount,
           netPnl: s.netPnl,
           pnlPct: s.pnlPct,

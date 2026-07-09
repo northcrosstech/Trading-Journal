@@ -53,33 +53,73 @@ export type OptionsDetailRow = {
   assigned: boolean
 }
 
-export type StrategyRow = {
+export type PlaybookRow = {
   id: string
   user_id: string
   name: string
+  description: string | null
   color: string
+  icon: string | null
+  market_conditions: string | null
+  example_chart_url: string | null
   archived: boolean
   created_at: string
+  updated_at: string
 }
 
-export type TradeStrategyRow = {
-  trade_id: string
-  strategy_id: string
-}
-
-export type RuleRow = {
+export type PlaybookRuleGroupRow = {
   id: string
-  user_id: string
+  playbook_id: string
   name: string
-  type: 'entry' | 'exit'
-  archived: boolean
+  sort_order: number
   created_at: string
 }
 
-export type TradeRuleRow = {
+export type PlaybookRuleRow = {
+  id: string
+  group_id: string
+  text: string
+  sort_order: number
+  created_at: string
+}
+
+export type TradePlaybookRow = {
+  trade_id: string
+  playbook_id: string
+}
+
+export type TradeRuleCheckRow = {
   trade_id: string
   rule_id: string
   status: 'followed' | 'broken' | 'na'
+}
+
+export type DailyRuleRow = {
+  id: string
+  user_id: string
+  text: string
+  sort_order: number
+  archived: boolean
+  created_at: string
+}
+
+export type DailyRuleCheckRow = {
+  user_id: string
+  check_date: string
+  rule_id: string
+  checked: boolean
+}
+
+export type MissedTradeRow = {
+  id: string
+  user_id: string
+  playbook_id: string
+  missed_date: string
+  symbol: string
+  notes: string | null
+  est_pnl_missed: number | null
+  screenshot_url: string | null
+  created_at: string
 }
 
 export type DailyJournalRow = {
@@ -102,9 +142,9 @@ export type DailyPlanRow = {
   updated_at: string
 }
 
-export type DailyPlanStrategyRow = {
+export type DailyPlanPlaybookRow = {
   daily_plan_id: string
-  strategy_id: string
+  playbook_id: string
 }
 
 export type TargetSettingsRow = {
@@ -141,15 +181,19 @@ export type Database = {
       trades: ReturnType<typeof table<TradeRow>>
       executions: ReturnType<typeof table<ExecutionRow>>
       options_detail: ReturnType<typeof table<OptionsDetailRow>>
-      strategies: ReturnType<typeof table<StrategyRow>>
-      trade_strategies: ReturnType<typeof table<TradeStrategyRow>>
-      rules: ReturnType<typeof table<RuleRow>>
-      trade_rules: ReturnType<typeof table<TradeRuleRow>>
+      playbooks: ReturnType<typeof table<PlaybookRow>>
+      playbook_rule_groups: ReturnType<typeof table<PlaybookRuleGroupRow>>
+      playbook_rules: ReturnType<typeof table<PlaybookRuleRow>>
+      trade_playbooks: ReturnType<typeof table<TradePlaybookRow>>
+      trade_rule_checks: ReturnType<typeof table<TradeRuleCheckRow>>
+      daily_rules: ReturnType<typeof table<DailyRuleRow>>
+      daily_rule_checks: ReturnType<typeof table<DailyRuleCheckRow>>
+      missed_trades: ReturnType<typeof table<MissedTradeRow>>
       daily_journal: ReturnType<typeof table<DailyJournalRow>>
       sync_log: ReturnType<typeof table<SyncLogRow>>
       target_settings: ReturnType<typeof table<TargetSettingsRow>>
       daily_plans: ReturnType<typeof table<DailyPlanRow>>
-      daily_plan_strategies: ReturnType<typeof table<DailyPlanStrategyRow>>
+      daily_plan_playbooks: ReturnType<typeof table<DailyPlanPlaybookRow>>
     }
     Views: Record<string, never>
     Functions: Record<string, never>
@@ -161,33 +205,38 @@ export type Database = {
 export type Trade = TradeRow
 export type Execution = ExecutionRow
 export type OptionsDetail = OptionsDetailRow
-export type Strategy = StrategyRow
-export type Rule = RuleRow
+export type Playbook = PlaybookRow
+export type PlaybookRuleGroup = PlaybookRuleGroupRow
+export type PlaybookRule = PlaybookRuleRow
+export type DailyRule = DailyRuleRow
+export type MissedTrade = MissedTradeRow
 export type DailyJournal = DailyJournalRow
 export type TargetSettings = TargetSettingsRow
 export type SyncLog = SyncLogRow
 export type DailyPlan = DailyPlanRow
 
+/** A playbook with its rule groups, each with their rules, ordered -- the full
+ * "profile page" shape used by the playbook detail/edit view. */
+export type PlaybookWithRules = Playbook & {
+  playbook_rule_groups: (PlaybookRuleGroup & { playbook_rules: PlaybookRule[] })[]
+}
+
 export type TradeWithDetails = Trade & {
   options_detail: OptionsDetail | null
   executions: Execution[]
-  trade_strategies: { strategy_id: string; strategies: Strategy | null }[]
-  trade_rules: { rule_id: string; status: TradeRuleRow['status']; rules: Rule | null }[]
+  // 1:1 (trade_playbooks.trade_id is its own primary key), same shape as
+  // options_detail -- null until a playbook is linked.
+  trade_playbooks: { playbook_id: string; playbooks: Playbook | null } | null
+  trade_rule_checks: { rule_id: string; status: TradeRuleCheckRow['status']; playbook_rules: PlaybookRule | null }[]
 }
 
-/** Leaner than TradeWithDetails -- just the strategy join, for pages (like the
- * Dashboard) that need "which setups were traded" without the full executions/
- * options_detail/trade_rules joins. */
-export type TradeWithStrategies = Trade & {
-  trade_strategies: { strategy_id: string; strategies: Strategy | null }[]
+/** Leaner than TradeWithDetails -- just the playbook link, for pages (like the
+ * Dashboard) that need "which playbook was this trade" without the full executions/
+ * options_detail/trade_rule_checks joins. */
+export type TradeWithPlaybook = Trade & {
+  trade_playbooks: { playbook_id: string; playbooks: Playbook | null } | null
 }
 
-/** Leaner than TradeWithDetails -- just the rules join, for pages that need
- * followed/broken status without the other joins. */
-export type TradeWithRules = Trade & {
-  trade_rules: { rule_id: string; status: TradeRuleRow['status']; rules: Rule | null }[]
-}
-
-export type DailyPlanWithStrategies = DailyPlan & {
-  daily_plan_strategies: { strategy_id: string; strategies: Strategy | null }[]
+export type DailyPlanWithPlaybooks = DailyPlan & {
+  daily_plan_playbooks: { playbook_id: string; playbooks: Playbook | null }[]
 }

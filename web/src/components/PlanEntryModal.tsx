@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { upsertDailyPlan, addDailyPlanStrategy, removeDailyPlanStrategy } from '../lib/queries'
-import type { DailyPlanWithStrategies, Strategy } from '../lib/database.types'
-import { StrategyTagPicker } from './StrategyTagPicker'
+import { upsertDailyPlan, addDailyPlanPlaybook, removeDailyPlanPlaybook } from '../lib/queries'
+import type { DailyPlanWithPlaybooks, Playbook } from '../lib/database.types'
+import { PlaybookTagPicker } from './PlaybookTagPicker'
 
 function dateHeading(date: string): string {
   return new Date(date + 'T00:00:00').toLocaleDateString('en-US', {
@@ -15,17 +15,17 @@ function dateHeading(date: string): string {
 type Props = {
   date: string
   userId: string
-  initialPlan: DailyPlanWithStrategies | null
-  allStrategies: Strategy[]
+  initialPlan: DailyPlanWithPlaybooks | null
+  allPlaybooks: Playbook[]
   onClose: () => void
-  onSaved: (plan: DailyPlanWithStrategies) => void
+  onSaved: (plan: DailyPlanWithPlaybooks) => void
 }
 
-/** The pre-market 30-second check-in: max trades, max loss, planned setups, a short
- * note. Creates the daily_plans row on first field touch (needed before setups can
- * be attached, same two-step shape as trades + trade_strategies) so the setup picker
- * always has a plan id to attach to, even for a brand new day. */
-export function PlanEntryModal({ date, userId, initialPlan, allStrategies, onClose, onSaved }: Props) {
+/** The pre-market 30-second check-in: max trades, max loss, watched playbooks, a
+ * short note. Creates the daily_plans row on first field touch (needed before
+ * playbooks can be attached, same two-step shape as trades + trade_playbooks) so the
+ * picker always has a plan id to attach to, even for a brand new day. */
+export function PlanEntryModal({ date, userId, initialPlan, allPlaybooks, onClose, onSaved }: Props) {
   const [plan, setPlan] = useState(initialPlan)
   const [maxTrades, setMaxTrades] = useState(initialPlan?.planned_max_trades?.toString() ?? '')
   const [maxLoss, setMaxLoss] = useState(initialPlan?.planned_max_loss?.toString() ?? '')
@@ -46,16 +46,16 @@ export function PlanEntryModal({ date, userId, initialPlan, allStrategies, onClo
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       const next = await upsertDailyPlan(userId, date, fields)
-      // Preserve setups already loaded locally -- the upsert's own select doesn't
-      // race with them since strategy add/remove hit the join table separately.
-      const merged = { ...next, daily_plan_strategies: plan?.daily_plan_strategies ?? next.daily_plan_strategies }
+      // Preserve playbooks already loaded locally -- the upsert's own select doesn't
+      // race with them since playbook add/remove hit the join table separately.
+      const merged = { ...next, daily_plan_playbooks: plan?.daily_plan_playbooks ?? next.daily_plan_playbooks }
       setPlan(merged)
       onSaved(merged)
       setSaved(true)
     }, 500)
   }
 
-  async function ensurePlanExists(): Promise<DailyPlanWithStrategies> {
+  async function ensurePlanExists(): Promise<DailyPlanWithPlaybooks> {
     if (plan) return plan
     const created = await upsertDailyPlan(userId, date, {
       planned_max_trades: maxTrades.trim() === '' ? null : Number(maxTrades),
@@ -67,19 +67,19 @@ export function PlanEntryModal({ date, userId, initialPlan, allStrategies, onClo
     return created
   }
 
-  async function handleAddSetup(strategyId: string) {
+  async function handleAddPlaybook(playbookId: string) {
     const current = await ensurePlanExists()
-    await addDailyPlanStrategy(current.id, strategyId)
-    const strategy = allStrategies.find((s) => s.id === strategyId) ?? null
-    const next = { ...current, daily_plan_strategies: [...current.daily_plan_strategies, { strategy_id: strategyId, strategies: strategy }] }
+    await addDailyPlanPlaybook(current.id, playbookId)
+    const playbook = allPlaybooks.find((p) => p.id === playbookId) ?? null
+    const next = { ...current, daily_plan_playbooks: [...current.daily_plan_playbooks, { playbook_id: playbookId, playbooks: playbook }] }
     setPlan(next)
     onSaved(next)
   }
 
-  async function handleRemoveSetup(strategyId: string) {
+  async function handleRemovePlaybook(playbookId: string) {
     if (!plan) return
-    await removeDailyPlanStrategy(plan.id, strategyId)
-    const next = { ...plan, daily_plan_strategies: plan.daily_plan_strategies.filter((s) => s.strategy_id !== strategyId) }
+    await removeDailyPlanPlaybook(plan.id, playbookId)
+    const next = { ...plan, daily_plan_playbooks: plan.daily_plan_playbooks.filter((p) => p.playbook_id !== playbookId) }
     setPlan(next)
     onSaved(next)
   }
@@ -136,12 +136,12 @@ export function PlanEntryModal({ date, userId, initialPlan, allStrategies, onClo
         </div>
 
         <div className="mb-3">
-          <label className="mb-1 block text-xs text-neutral-500">Planned Setups</label>
-          <StrategyTagPicker
-            assigned={plan?.daily_plan_strategies ?? []}
-            allStrategies={allStrategies}
-            onAdd={handleAddSetup}
-            onRemove={handleRemoveSetup}
+          <label className="mb-1 block text-xs text-neutral-500">Watching Today</label>
+          <PlaybookTagPicker
+            assigned={plan?.daily_plan_playbooks ?? []}
+            allPlaybooks={allPlaybooks}
+            onAdd={handleAddPlaybook}
+            onRemove={handleRemovePlaybook}
           />
         </div>
 

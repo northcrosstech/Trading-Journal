@@ -1,4 +1,4 @@
-import type { Trade, TradeWithDetails, Strategy, Rule, DailyPlanWithStrategies } from './database.types'
+import type { Trade, TradeWithDetails, Playbook, PlaybookRule, DailyRule, DailyPlanWithPlaybooks } from './database.types'
 
 // Standard US equity option contract multiplier. Not currently persisted per-trade
 // (options_detail stores strike/expiration/type/premium but not the multiplier), so
@@ -218,25 +218,41 @@ export function computeStatStrip(trades: Trade[]): StatStrip {
   }
 }
 
-export type StrategyStat = {
-  strategy: Strategy
+export type PlaybookStat = {
+  playbook: Playbook
   tradeCount: number
   winRate: number | null
   netPnl: number
+  expectancy: number | null // avg net P&L per trade -- the headline ranking figure
   pnlPct: number | null // blended return-on-capital for this group
   pnlContributionPct: number | null // this group's share of total net P&L across all closed trades
   profitFactor: number | null
+  avgWin: number | null
+  avgLoss: number | null
+  missedCount: number
 }
 
-/** Per-strategy rollup for the Stats page -- only strategies actually used on a
- * closed trade show up (an unused tag has nothing to report). */
-export function computeStrategyStats(trades: TradeWithDetails[], strategies: Strategy[]): StrategyStat[] {
+// Structurally narrow rather than TradeWithDetails specifically, so callers can pass
+// the lighter TradeWithPlaybook fetch too.
+type TradeForPlaybookStats = Pick<Trade, 'status' | 'realized_pnl_net' | 'avg_entry' | 'total_contracts'> & {
+  trade_playbooks: { playbook_id: string } | null
+}
+
+/** Per-playbook rollup for the Playbooks list (ranked by expectancy) and the Stats
+ * page's "By Playbook" summary table -- only playbooks actually traded show up (an
+ * unused one has nothing to report). `missedCounts` comes from missed_trades, passed
+ * in separately since it isn't derived from trade data. */
+export function computePlaybookStats(
+  trades: TradeForPlaybookStats[],
+  playbooks: Playbook[],
+  missedCounts?: Map<string, number>,
+): PlaybookStat[] {
   const closed = trades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null)
   const totalNetPnl = closed.reduce((sum, t) => sum + (t.realized_pnl_net ?? 0), 0)
 
-  return strategies
-    .map((strategy) => {
-      const assigned = closed.filter((t) => t.trade_strategies.some((ts) => ts.strategy_id === strategy.id))
+  return playbooks
+    .map((playbook) => {
+      const assigned = closed.filter((t) => t.trade_playbooks?.playbook_id === playbook.id)
       const wins = assigned.filter((t) => (t.realized_pnl_net ?? 0) > 0)
       const losses = assigned.filter((t) => (t.realized_pnl_net ?? 0) < 0)
       const netPnl = assigned.reduce((sum, t) => sum + (t.realized_pnl_net ?? 0), 0)
@@ -245,17 +261,21 @@ export function computeStrategyStats(trades: TradeWithDetails[], strategies: Str
       const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : null
 
       return {
-        strategy,
+        playbook,
         tradeCount: assigned.length,
         winRate: assigned.length > 0 ? wins.length / assigned.length : null,
         netPnl,
+        expectancy: assigned.length > 0 ? netPnl / assigned.length : null,
         pnlPct: blendedReturnPct(assigned),
         pnlContributionPct: totalNetPnl !== 0 ? netPnl / Math.abs(totalNetPnl) : null,
         profitFactor,
+        avgWin: wins.length > 0 ? grossWin / wins.length : null,
+        avgLoss: losses.length > 0 ? -grossLoss / losses.length : null,
+        missedCount: missedCounts?.get(playbook.id) ?? 0,
       }
     })
-    .filter((s) => s.tradeCount > 0)
-    .sort((a, b) => b.netPnl - a.netPnl)
+    .filter((s) => s.tradeCount > 0 || s.missedCount > 0)
+    .sort((a, b) => (b.expectancy ?? -Infinity) - (a.expectancy ?? -Infinity))
 }
 
 export type SymbolStat = {
@@ -303,8 +323,8 @@ export function computeSymbolStats(trades: Trade[]): SymbolStat[] {
   return stats.sort((a, b) => b.netPnl - a.netPnl)
 }
 
-export type RuleStat = {
-  rule: Rule
+export type RuleCheckStat = {
+  rule: PlaybookRule
   followedCount: number
   brokenCount: number
   naCount: number
@@ -317,17 +337,20 @@ export type RuleStat = {
   profitFactorBroken: number | null
 }
 
-// Structurally narrow rather than TradeWithDetails specifically, so callers (e.g. the
-// Dashboard's most-expensive-rule card) can pass a lighter fetch that only joins
-// trade_rules, without needing executions/options_detail/trade_strategies too.
-type TradeForRuleStats = Pick<Trade, 'status' | 'realized_pnl_net'> & {
-  trade_rules: { rule_id: string; status: 'followed' | 'broken' | 'na' }[]
+// Structurally narrow rather than TradeWithDetails specifically, so callers can pass
+// a lighter fetch that only joins trade_rule_checks.
+type TradeForRuleCheckStats = Pick<Trade, 'status' | 'realized_pnl_net'> & {
+  trade_rule_checks: { rule_id: string; status: 'followed' | 'broken' | 'na' }[]
 }
 
 /** Per-rule rollup: how often a rule was followed, and the P&L/win-rate/profit-factor
  * delta between trades where it was followed vs. broken -- the discipline-to-outcome
- * link (e.g. "I make money when I follow X and lose when I break it"). */
-export function computeRuleStats(trades: TradeForRuleStats[], rules: Rule[]): RuleStat[] {
+ * link (e.g. "I make money when I follow X and lose when I break it"). Same shape as
+ * the pre-playbook computeRuleStats, just sourced from trade_rule_checks against
+ * playbook-scoped rules instead of the old global rules/trade_rules tables. Pass
+ * whichever `rules` list is in scope: one playbook's rules (Playbook detail page) or
+ * every playbook's rules flattened together (Dashboard's cross-playbook headline). */
+export function computePlaybookRuleStats(trades: TradeForRuleCheckStats[], rules: PlaybookRule[]): RuleCheckStat[] {
   const closed = trades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null)
 
   return rules.map((rule) => {
@@ -344,7 +367,7 @@ export function computeRuleStats(trades: TradeForRuleStats[], rules: Rule[]): Ru
     let grossLossBroken = 0
 
     for (const t of closed) {
-      const link = t.trade_rules.find((tr) => tr.rule_id === rule.id)
+      const link = t.trade_rule_checks.find((tr) => tr.rule_id === rule.id)
       const status = link?.status ?? 'na'
       const pnl = t.realized_pnl_net ?? 0
       if (status === 'followed') {
@@ -388,13 +411,54 @@ export function computeRuleStats(trades: TradeForRuleStats[], rules: Rule[]): Ru
 }
 
 /** The rule that has cost the most money when broken -- the single headline number
- * for "your most expensive broken rule: -$X across N trades." Just picks the worst
- * `pnlBroken` among rules that have actually been broken at least once; doesn't
- * re-derive anything computeRuleStats doesn't already compute. */
-export function computeMostExpensiveRule(ruleStats: RuleStat[]): RuleStat | null {
+ * for "your most expensive broken rule: -$X across N trades." Picks the worst
+ * `pnlBroken` among rules that have actually been broken at least once. */
+export function computeMostExpensiveRule(ruleStats: RuleCheckStat[]): RuleCheckStat | null {
   const withBreaks = ruleStats.filter((s) => s.brokenCount > 0 && s.pnlBroken < 0)
   if (withBreaks.length === 0) return null
   return withBreaks.reduce((worst, s) => (s.pnlBroken < worst.pnlBroken ? s : worst))
+}
+
+export type DailyRuleConsistency = {
+  totalDays: number // days with at least one check recorded -- can't judge a day never opened
+  allFollowedDays: number
+  allFollowedPct: number | null
+}
+
+/** "Days all rules followed %" -- among days you actually engaged the checklist
+ * (recorded at least one check), what fraction had every ACTIVE daily rule checked
+ * true. A day with zero checks recorded isn't counted as a failure -- there's no way
+ * to tell "forgot to open it" from "nothing applied," so it's excluded rather than
+ * penalized. Archived rules don't count toward "all" (retiring a rule shouldn't
+ * retroactively fail old days). */
+export function computeDailyRuleConsistency(
+  checks: { check_date: string; rule_id: string; checked: boolean }[],
+  rules: DailyRule[],
+  dateRange: { from: string; to: string } | null,
+): DailyRuleConsistency {
+  const activeRuleIds = new Set(rules.filter((r) => !r.archived).map((r) => r.id))
+  const inRange = dateRange ? checks.filter((c) => c.check_date >= dateRange.from && c.check_date <= dateRange.to) : checks
+
+  const byDate = new Map<string, Map<string, boolean>>()
+  for (const c of inRange) {
+    if (!activeRuleIds.has(c.rule_id)) continue
+    const dayMap = byDate.get(c.check_date)
+    if (dayMap) dayMap.set(c.rule_id, c.checked)
+    else byDate.set(c.check_date, new Map([[c.rule_id, c.checked]]))
+  }
+
+  const totalDays = byDate.size
+  let allFollowedDays = 0
+  for (const dayMap of byDate.values()) {
+    const allChecked = Array.from(activeRuleIds).every((id) => dayMap.get(id) === true)
+    if (allChecked) allFollowedDays++
+  }
+
+  return {
+    totalDays,
+    allFollowedDays,
+    allFollowedPct: totalDays > 0 ? allFollowedDays / totalDays : null,
+  }
 }
 
 export type BucketStat = {
@@ -618,10 +682,14 @@ export type PlanVsActual = {
   plannedMaxLoss: number | null
   actualWorstPoint: number // most negative cumulative realized P&L reached that day (0 if it never went red)
   actualNetPnl: number
-  plannedSetupIds: string[]
-  actualSetupIds: string[]
-  offPlanSetupIds: string[] // traded but not planned
-  untradedSetupIds: string[] // planned but never traded
+  // "Watched" playbooks (the day's plan) vs. what was actually traded. Breadth vs.
+  // execution is expected to differ -- watching more playbooks than you end up
+  // trading is normal and good, NOT a miss. untradedPlaybookIds is informational
+  // only; it does not feed followedPlan.
+  plannedPlaybookIds: string[]
+  actualPlaybookIds: string[]
+  offPlanPlaybookIds: string[] // traded but not among the watched playbooks
+  untradedPlaybookIds: string[] // watched but never traded
   followedTradeLimit: boolean | null // null when no trade-count limit was planned
   followedLossLimit: boolean | null // null when no loss limit was planned
   followedPlan: boolean | null // null when no plan exists for this day at all
@@ -629,10 +697,10 @@ export type PlanVsActual = {
 
 // Structurally narrow rather than TradeWithDetails specifically, so callers can pass
 // either the full join (Journal, which already fetches it) or the lighter
-// TradeWithStrategies (Dashboard) without an unnecessary executions/options_detail
+// TradeWithPlaybook (Dashboard) without an unnecessary executions/options_detail
 // fetch just to satisfy this function's type.
 type TradeForPlanCompare = Pick<Trade, 'status' | 'last_out_at' | 'first_in_at' | 'realized_pnl_net'> & {
-  trade_strategies: { strategy_id: string }[]
+  trade_playbooks: { playbook_id: string } | null
 }
 
 /** Compares a day's plan (if any) against what actually happened, reusing the same
@@ -640,7 +708,7 @@ type TradeForPlanCompare = Pick<Trade, 'status' | 'last_out_at' | 'first_in_at' 
  * P&L computation. `dayTrades` bucketing matches the calendar/journal rule: closed
  * trades count under their close date, open trades under their entry date, so a
  * trade opened today that's still open still counts toward "trades taken." */
-export function computePlanVsActual(date: string, trades: TradeForPlanCompare[], plan: DailyPlanWithStrategies | null): PlanVsActual {
+export function computePlanVsActual(date: string, trades: TradeForPlanCompare[], plan: DailyPlanWithPlaybooks | null): PlanVsActual {
   const dayTrades = trades.filter((t) => {
     const bucket = t.status === 'CLOSED' ? t.last_out_at?.slice(0, 10) : t.first_in_at?.slice(0, 10)
     return bucket === date
@@ -649,11 +717,11 @@ export function computePlanVsActual(date: string, trades: TradeForPlanCompare[],
   const closedDayTrades = dayTrades.filter((t) => t.status === 'CLOSED' && t.realized_pnl_net !== null && t.last_out_at)
   const { close, trough } = walkDayCumulative(closedDayTrades)
 
-  const actualSetupIds = new Set<string>()
+  const actualPlaybookIds = new Set<string>()
   for (const t of dayTrades) {
-    for (const ts of t.trade_strategies) actualSetupIds.add(ts.strategy_id)
+    if (t.trade_playbooks) actualPlaybookIds.add(t.trade_playbooks.playbook_id)
   }
-  const plannedSetupIds = new Set((plan?.daily_plan_strategies ?? []).map((s) => s.strategy_id))
+  const plannedPlaybookIds = new Set((plan?.daily_plan_playbooks ?? []).map((p) => p.playbook_id))
 
   const plannedMaxTrades = plan?.planned_max_trades ?? null
   const plannedMaxLoss = plan?.planned_max_loss ?? null
@@ -668,10 +736,10 @@ export function computePlanVsActual(date: string, trades: TradeForPlanCompare[],
     plannedMaxLoss,
     actualWorstPoint: trough,
     actualNetPnl: close,
-    plannedSetupIds: Array.from(plannedSetupIds),
-    actualSetupIds: Array.from(actualSetupIds),
-    offPlanSetupIds: Array.from(actualSetupIds).filter((id) => !plannedSetupIds.has(id)),
-    untradedSetupIds: Array.from(plannedSetupIds).filter((id) => !actualSetupIds.has(id)),
+    plannedPlaybookIds: Array.from(plannedPlaybookIds),
+    actualPlaybookIds: Array.from(actualPlaybookIds),
+    offPlanPlaybookIds: Array.from(actualPlaybookIds).filter((id) => !plannedPlaybookIds.has(id)),
+    untradedPlaybookIds: Array.from(plannedPlaybookIds).filter((id) => !actualPlaybookIds.has(id)),
     followedTradeLimit,
     followedLossLimit,
     followedPlan: plan === null ? null : (followedTradeLimit ?? true) && (followedLossLimit ?? true),

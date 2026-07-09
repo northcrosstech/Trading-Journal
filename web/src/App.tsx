@@ -9,8 +9,8 @@ import { TradeDetailPage } from './pages/TradeDetailPage'
 import { JournalPage } from './pages/JournalPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { StatsPage } from './pages/StatsPage'
-import { StrategiesPage } from './pages/StrategiesPage'
-import { RulesPage } from './pages/RulesPage'
+import { PlaybooksPage } from './pages/PlaybooksPage'
+import { PlaybookDetailPage } from './pages/PlaybookDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
@@ -32,8 +32,8 @@ function App() {
             <Route path="/journal" element={<JournalPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/stats" element={<StatsPage />} />
-            <Route path="/strategies" element={<StrategiesPage />} />
-            <Route path="/rules" element={<RulesPage />} />
+            <Route path="/playbooks" element={<PlaybooksPage />} />
+            <Route path="/playbooks/:playbookId" element={<PlaybookDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>

@@ -1,23 +1,23 @@
 import { useState } from 'react'
-import type { DailyPlanWithStrategies, Strategy } from '../lib/database.types'
+import type { DailyPlanWithPlaybooks, Playbook } from '../lib/database.types'
 import type { PlanVsActual } from '../lib/metrics'
 import { currency } from '../lib/format'
 import { PlanEntryModal } from './PlanEntryModal'
-import { StrategyChip } from './StrategyChip'
+import { PlaybookChip } from './PlaybookChip'
 
 type Props = {
   date: string
   userId: string
-  plan: DailyPlanWithStrategies | null
-  allStrategies: Strategy[]
+  plan: DailyPlanWithPlaybooks | null
+  allPlaybooks: Playbook[]
   comparison: PlanVsActual
-  onSaved: (plan: DailyPlanWithStrategies) => void
+  onSaved: (plan: DailyPlanWithPlaybooks) => void
 }
 
 /** Dashboard's live "did I stick to the plan so far today" card. Mirrors
  * TodayTargetBenchmark's placement/role but for the pre-market plan rather than the
  * profit-target/loss-limit settings. */
-export function TodayPlanCard({ date, userId, plan, allStrategies, comparison, onSaved }: Props) {
+export function TodayPlanCard({ date, userId, plan, allPlaybooks, comparison, onSaved }: Props) {
   const [modalOpen, setModalOpen] = useState(false)
 
   if (!plan) {
@@ -36,7 +36,7 @@ export function TodayPlanCard({ date, userId, plan, allStrategies, comparison, o
           </button>
         </div>
         {modalOpen && (
-          <PlanEntryModal date={date} userId={userId} initialPlan={null} allStrategies={allStrategies} onClose={() => setModalOpen(false)} onSaved={onSaved} />
+          <PlanEntryModal date={date} userId={userId} initialPlan={null} allPlaybooks={allPlaybooks} onClose={() => setModalOpen(false)} onSaved={onSaved} />
         )}
       </>
     )
@@ -78,23 +78,31 @@ export function TodayPlanCard({ date, userId, plan, allStrategies, comparison, o
           </div>
         </div>
 
-        {(comparison.plannedSetupIds.length > 0 || comparison.actualSetupIds.length > 0) && (
+        {(comparison.plannedPlaybookIds.length > 0 || comparison.actualPlaybookIds.length > 0) && (
           <div className="mt-3 border-t border-neutral-800 pt-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-neutral-500">Setups</div>
+            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-neutral-500">Watching Today</div>
             <div className="flex flex-wrap gap-1.5">
-              {plan.daily_plan_strategies.map((ps) =>
-                ps.strategies ? (
-                  <span key={ps.strategy_id} className={comparison.untradedSetupIds.includes(ps.strategy_id) ? 'opacity-40' : ''}>
-                    <StrategyChip strategy={ps.strategies} />
+              {plan.daily_plan_playbooks.map((pp) =>
+                pp.playbooks ? (
+                  <span
+                    key={pp.playbook_id}
+                    className={comparison.untradedPlaybookIds.includes(pp.playbook_id) ? 'opacity-40' : ''}
+                    title={
+                      comparison.untradedPlaybookIds.includes(pp.playbook_id)
+                        ? 'Watched, not traded yet -- not a miss, just hasn’t set up'
+                        : undefined
+                    }
+                  >
+                    <PlaybookChip playbook={pp.playbooks} />
                   </span>
                 ) : null,
               )}
-              {comparison.offPlanSetupIds.map((id) => {
-                const strategy = allStrategies.find((s) => s.id === id)
-                if (!strategy) return null
+              {comparison.offPlanPlaybookIds.map((id) => {
+                const playbook = allPlaybooks.find((p) => p.id === id)
+                if (!playbook) return null
                 return (
-                  <span key={id} title="Traded but not planned" className="ring-1 ring-amber-500/50 rounded-full">
-                    <StrategyChip strategy={strategy} />
+                  <span key={id} title="Traded but not among today's watched playbooks" className="rounded-full ring-1 ring-amber-500/50">
+                    <PlaybookChip playbook={playbook} />
                   </span>
                 )
               })}
@@ -104,7 +112,7 @@ export function TodayPlanCard({ date, userId, plan, allStrategies, comparison, o
       </div>
 
       {modalOpen && (
-        <PlanEntryModal date={date} userId={userId} initialPlan={plan} allStrategies={allStrategies} onClose={() => setModalOpen(false)} onSaved={onSaved} />
+        <PlanEntryModal date={date} userId={userId} initialPlan={plan} allPlaybooks={allPlaybooks} onClose={() => setModalOpen(false)} onSaved={onSaved} />
       )}
     </>
   )

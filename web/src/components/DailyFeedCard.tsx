@@ -121,13 +121,15 @@ export const DailyFeedCard = forwardRef<HTMLDivElement, Props>(function DailyFee
                   </div>
                 )}
               </div>
-              {(planComparison.offPlanSetupIds.length > 0 || planComparison.untradedSetupIds.length > 0) && (
+              {(planComparison.offPlanPlaybookIds.length > 0 || planComparison.untradedPlaybookIds.length > 0) && (
                 <div className="mt-1.5 text-xs text-neutral-500">
-                  {planComparison.untradedSetupIds.length > 0 &&
-                    `${planComparison.untradedSetupIds.length} planned setup${planComparison.untradedSetupIds.length === 1 ? '' : 's'} not traded`}
-                  {planComparison.untradedSetupIds.length > 0 && planComparison.offPlanSetupIds.length > 0 && ' · '}
-                  {planComparison.offPlanSetupIds.length > 0 &&
-                    `${planComparison.offPlanSetupIds.length} off-plan setup${planComparison.offPlanSetupIds.length === 1 ? '' : 's'} traded`}
+                  {/* Watching more playbooks than you trade is normal, not a miss --
+                      worded as a plain fact, no "missed"/warning language. */}
+                  {planComparison.untradedPlaybookIds.length > 0 &&
+                    `${planComparison.untradedPlaybookIds.length} watched playbook${planComparison.untradedPlaybookIds.length === 1 ? '' : 's'} didn't set up`}
+                  {planComparison.untradedPlaybookIds.length > 0 && planComparison.offPlanPlaybookIds.length > 0 && ' · '}
+                  {planComparison.offPlanPlaybookIds.length > 0 &&
+                    `${planComparison.offPlanPlaybookIds.length} off-plan playbook${planComparison.offPlanPlaybookIds.length === 1 ? '' : 's'} traded`}
                 </div>
               )}
             </div>

@@ -10,8 +10,7 @@ const navItems = [
   { to: '/trades', label: 'Trade Log' },
   { to: '/calendar', label: 'Calendar' },
   { to: '/stats', label: 'Stats' },
-  { to: '/strategies', label: 'Strategies' },
-  { to: '/rules', label: 'Rules' },
+  { to: '/playbooks', label: 'Playbooks' },
   { to: '/settings', label: 'Settings' },
 ]
 
