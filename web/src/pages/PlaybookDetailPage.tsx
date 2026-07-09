@@ -25,7 +25,7 @@ import {
 } from '../lib/queries'
 import type { PlaybookWithRules, PlaybookRuleGroup, PlaybookRule, TradeWithDetails, MissedTrade } from '../lib/database.types'
 import { computePlaybookStats, computePlaybookRuleStats } from '../lib/metrics'
-import { filterTradesByDateRange, presetRange, type DateRangePreset } from '../lib/dateRange'
+import { filterTradesByDateRange, presetRange, toDateStr, type DateRangePreset } from '../lib/dateRange'
 import { ColorPicker } from '../components/ColorPicker'
 import { DateRangePresetBar } from '../components/DateRangePresetBar'
 import { StatTile } from '../components/StatStripBar'
@@ -154,7 +154,7 @@ function MissedTradeRow({ missed, onDelete }: { missed: MissedTrade; onDelete: (
 }
 
 function MissedTradeForm({ onSubmit }: { onSubmit: (fields: { date: string; symbol: string; notes: string; estPnl: string; file: File | null }) => Promise<void> }) {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(() => toDateStr(new Date()))
   const [symbol, setSymbol] = useState('')
   const [notes, setNotes] = useState('')
   const [estPnl, setEstPnl] = useState('')

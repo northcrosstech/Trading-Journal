@@ -1,3 +1,18 @@
+/** The exchange's own timezone -- all trade timestamps are displayed and bucketed
+ * into trading days using Central Time, regardless of the viewer's own browser
+ * timezone. Handles CST/CDT automatically. */
+export const TRADING_TIMEZONE = 'America/Chicago'
+
+/** yyyy-mm-dd calendar date in Central Time -- the canonical "which trading day"
+ * bucket for a real timestamp, independent of the viewer's own browser timezone. */
+export function centralDateStr(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TRADING_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+}
+
+function isDateOnly(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
 export const currency = (n: number | null | undefined) => {
   if (n === null || n === undefined) return '—'
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -47,7 +62,14 @@ export function optionLabel(strike: number | null | undefined, optionType: strin
 
 export function dateFmt(iso: string | null | undefined): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  if (isDateOnly(iso)) {
+    // Plain calendar date (no time component, e.g. an option's expiration) -- format
+    // the y/m/d directly rather than routing through Date+timezone conversion, which
+    // would parse it as UTC midnight and could shift the displayed day.
+    const [y, m, d] = iso.split('-').map(Number)
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: TRADING_TIMEZONE })
 }
 
 export function dateTimeFmt(iso: string | null | undefined): string {
@@ -57,12 +79,27 @@ export function dateTimeFmt(iso: string | null | undefined): string {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    timeZone: TRADING_TIMEZONE,
   })
 }
 
 export function timeOnlyFmt(iso: string | null | undefined): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: TRADING_TIMEZONE })
+}
+
+/** "0DTE" / "1DTE" / ... for near-dated options (within a week of the trade's
+ * entry) -- the more day-trading-relevant read than a bare expiration date.
+ * Falls back to the plain date for anything further out. DTE is counted from the
+ * trade's entry date, not "today", so a closed trade's label doesn't drift after
+ * the option has since expired. */
+export function dteLabel(entryIso: string | null | undefined, expiration: string | null | undefined): string {
+  if (!expiration) return '—'
+  if (!entryIso) return dateFmt(expiration)
+  const entryDateStr = centralDateStr(new Date(entryIso))
+  const days = Math.round((Date.parse(expiration) - Date.parse(entryDateStr)) / 86_400_000)
+  if (days < 0 || days > 7) return dateFmt(expiration)
+  return `${days}DTE`
 }
 
 export function relativeTimeFmt(iso: string | null | undefined): string {
