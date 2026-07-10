@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getCandlesFromProvider, type CandleInterval } from '../server/candleProviders.ts'
+import { getCandlesFromProvider, type CandleInterval } from './_lib/candleProviders.ts'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { symbol, from, to, interval } = req.query
