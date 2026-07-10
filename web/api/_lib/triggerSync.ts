@@ -1,7 +1,14 @@
 // Server-side only -- imported by web/api/trigger-sync.ts (Vercel function) and by
-// vite.config.ts's dev middleware, mirroring the server/candleProviders.ts split.
+// vite.config.ts's dev middleware, mirroring the api/_lib/candleProviders.ts split.
 // Never import this from client code: it reads SYNC_TRIGGER_SECRET from process.env,
 // which must never reach the browser bundle.
+//
+// Lives under api/_lib (not web/server) on purpose: Vercel's Node.js builder only
+// reliably compiles TypeScript that lives inside the api/ tree. A sibling directory
+// like web/server/ gets traced as a raw file dependency but never transpiled, so the
+// deployed function tries to `import` a literal .ts file at runtime and crashes with
+// ERR_MODULE_NOT_FOUND -- confirmed the hard way in production. The leading
+// underscore keeps Vercel from treating this file itself as a routable function.
 
 import { createClient } from '@supabase/supabase-js'
 

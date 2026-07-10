@@ -2,6 +2,14 @@
 // vite.config.ts's dev middleware (so local dev works without `vercel dev`). Never
 // import this from client code: it reads API keys from process.env that must not
 // reach the browser bundle.
+//
+// Lives under api/_lib (not web/server) on purpose: Vercel's Node.js builder only
+// reliably compiles TypeScript that lives inside the api/ tree. A sibling directory
+// like web/server/ gets traced as a raw file dependency but never transpiled, so the
+// deployed function tries to `import` a literal .ts file at runtime and crashes with
+// ERR_MODULE_NOT_FOUND -- see api/_lib/triggerSync.ts, which hit this in production.
+// The leading underscore keeps Vercel from treating this file itself as a routable
+// function.
 
 export type Candle = {
   time: number // unix seconds

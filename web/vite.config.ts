@@ -1,8 +1,8 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { getCandlesFromProvider, type CandleInterval } from './server/candleProviders.ts'
-import { triggerSync, TriggerSyncError } from './server/triggerSync.ts'
+import { getCandlesFromProvider, type CandleInterval } from './api/_lib/candleProviders.ts'
+import { triggerSync, TriggerSyncError } from './api/_lib/triggerSync.ts'
 
 // Mirrors web/api/candles.ts (the Vercel function) so `npm run dev` works without
 // `vercel dev` -- same handler logic, just invoked via Vite's middleware instead of
