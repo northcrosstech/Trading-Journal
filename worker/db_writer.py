@@ -43,6 +43,12 @@ load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+# The migrated Webull account's row id (accounts.id -- NOT Webull's own brokerage
+# account id, which is WEBULL_ACCOUNT_ID in sync.py, a different thing entirely).
+# Every trade this worker writes gets stamped with it. Optional (not os.environ[...])
+# so a worker deployed before this secret is set keeps syncing exactly as before, just
+# without an account_id -- matches trades.account_id being nullable by design.
+JOURNAL_ACCOUNT_ID = os.environ.get("JOURNAL_ACCOUNT_ID")
 
 # DB's `executions.action` check constraint uses the vocabulary from the original
 # schema doc (entry/add/trim/exit); transform.py's Execution.tag uses open/add/trim/close.
@@ -68,6 +74,7 @@ def _build_payload(user_id: str, trade: Trade) -> dict:
     return {
         "trade": {
             "user_id": user_id,
+            "account_id": JOURNAL_ACCOUNT_ID,
             "trade_key": trade_key,
             "symbol": trade.symbol,
             "asset_type": "option",

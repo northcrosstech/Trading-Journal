@@ -54,6 +54,15 @@ Optional (all have defaults, only set what you want to change from
 `SYNC_AFTER_CLOSE_TAPER_HOURS`, `SYNC_AFTER_CLOSE_MAX_SYNCS`,
 `SYNC_TRIGGER_DEBOUNCE_SECONDS`.
 
+`JOURNAL_ACCOUNT_ID` (multi-account support, added later): the migrated Webull
+account's row id from the `accounts` table (Supabase Studio, not `WEBULL_ACCOUNT_ID`
+above -- that's Webull's own brokerage account id, a different thing). Technically
+optional -- `trades.account_id` is nullable and the worker keeps syncing without it --
+but set it so synced trades are correctly attributed to an account in the UI:
+```
+fly secrets set JOURNAL_ACCOUNT_ID=<accounts.id from Supabase Studio>
+```
+
 **Gotcha, confirmed the hard way:** `SUPABASE_SERVICE_ROLE_KEY` must be the
 **secret** key (starts `sb_secret_...`, or a legacy long `service_role` JWT)
 — **not** the publishable key (`sb_publishable_...`). The publishable key
