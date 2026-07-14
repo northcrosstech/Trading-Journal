@@ -1,9 +1,23 @@
 // Hand-written to match supabase/migrations/*.sql exactly (no linked Supabase CLI in
 // this environment to auto-generate). Keep in sync if the schema changes.
 
+export type AccountRow = {
+  id: string
+  user_id: string
+  broker: 'webull' | 'schwab' | 'manual'
+  label: string
+  account_type: 'live' | 'paper'
+  sync_mode: 'auto' | 'manual'
+  enabled: boolean
+  archived: boolean
+  credential_ref: string | null
+  created_at: string
+}
+
 export type TradeRow = {
   id: string
   user_id: string
+  account_id: string | null
   symbol: string
   asset_type: string
   side: 'long' | 'short'
@@ -178,6 +192,7 @@ function table<Row extends Record<string, unknown>>() {
 export type Database = {
   public: {
     Tables: {
+      accounts: ReturnType<typeof table<AccountRow>>
       trades: ReturnType<typeof table<TradeRow>>
       executions: ReturnType<typeof table<ExecutionRow>>
       options_detail: ReturnType<typeof table<OptionsDetailRow>>
@@ -202,6 +217,7 @@ export type Database = {
   }
 }
 
+export type Account = AccountRow
 export type Trade = TradeRow
 export type Execution = ExecutionRow
 export type OptionsDetail = OptionsDetailRow

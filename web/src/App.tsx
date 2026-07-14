@@ -11,6 +11,7 @@ import { CalendarPage } from './pages/CalendarPage'
 import { StatsPage } from './pages/StatsPage'
 import { PlaybooksPage } from './pages/PlaybooksPage'
 import { PlaybookDetailPage } from './pages/PlaybookDetailPage'
+import { AccountsPage } from './pages/AccountsPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
@@ -34,6 +35,7 @@ function App() {
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/playbooks" element={<PlaybooksPage />} />
             <Route path="/playbooks/:playbookId" element={<PlaybookDetailPage />} />
+            <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>

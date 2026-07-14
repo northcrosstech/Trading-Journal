@@ -11,7 +11,49 @@ import type {
   PlaybookRule,
   DailyRule,
   MissedTrade,
+  Account,
 } from './database.types'
+
+// ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
+
+export async function fetchAccounts(): Promise<Account[]> {
+  const { data, error } = await supabase.from('accounts').select('*').order('created_at')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function createAccount(
+  userId: string,
+  fields: { broker: Account['broker']; label: string; account_type: Account['account_type']; sync_mode: Account['sync_mode'] },
+): Promise<Account> {
+  const { data, error } = await supabase
+    .from('accounts')
+    .insert({ user_id: userId, enabled: true, archived: false, ...fields })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateAccount(
+  id: string,
+  fields: Partial<Pick<Account, 'label' | 'account_type' | 'sync_mode'>>,
+) {
+  const { error } = await supabase.from('accounts').update(fields).eq('id', id)
+  if (error) throw error
+}
+
+export async function setAccountEnabled(id: string, enabled: boolean) {
+  const { error } = await supabase.from('accounts').update({ enabled }).eq('id', id)
+  if (error) throw error
+}
+
+export async function setAccountArchived(id: string, archived: boolean) {
+  const { error } = await supabase.from('accounts').update({ archived }).eq('id', id)
+  if (error) throw error
+}
 
 const DAILY_PLAN_WITH_PLAYBOOKS_SELECT = '*, daily_plan_playbooks(playbook_id, playbooks(*))'
 

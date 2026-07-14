@@ -11,6 +11,7 @@ const navItems = [
   { to: '/calendar', label: 'Calendar' },
   { to: '/stats', label: 'Stats' },
   { to: '/playbooks', label: 'Playbooks' },
+  { to: '/accounts', label: 'Accounts' },
   { to: '/settings', label: 'Settings' },
 ]
 
