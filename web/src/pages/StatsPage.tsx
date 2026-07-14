@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails, fetchPlaybooks, fetchTargetSettings, fetchDailyRules, fetchAllDailyRuleChecks } from '../lib/queries'
 import type { TradeWithDetails, Playbook, TargetSettings, DailyRule } from '../lib/database.types'
 import {
@@ -108,6 +109,7 @@ function GroupTable({
 }
 
 export function StatsPage() {
+  const { selectedAccountId } = useAccountFilter()
   const [trades, setTrades] = useState<TradeWithDetails[] | null>(null)
   const [playbooks, setPlaybooks] = useState<Playbook[]>([])
   const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null)
@@ -116,12 +118,12 @@ export function StatsPage() {
   const [dailyRuleChecks, setDailyRuleChecks] = useState<{ check_date: string; rule_id: string; checked: boolean }[]>([])
 
   useEffect(() => {
-    fetchTradesWithDetails().then(setTrades)
+    fetchTradesWithDetails(selectedAccountId).then(setTrades)
     fetchPlaybooks().then((p) => setPlaybooks(p ?? []))
     fetchTargetSettings().then(setTargetSettings)
     fetchDailyRules().then(setDailyRules)
     fetchAllDailyRuleChecks().then(setDailyRuleChecks)
-  }, [])
+  }, [selectedAccountId])
 
   const filtered = useMemo(() => {
     if (!trades) return []

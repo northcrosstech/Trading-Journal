@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './auth/RequireAuth'
 import { LoginPage } from './auth/LoginPage'
+import { AccountProvider } from './accounts/AccountContext'
 import { Layout } from './components/Layout'
 import { DashboardPage } from './pages/DashboardPage'
 import { TradeLogPage } from './pages/TradeLogPage'
@@ -23,7 +24,9 @@ function App() {
           <Route
             element={
               <RequireAuth>
-                <Layout />
+                <AccountProvider>
+                  <Layout />
+                </AccountProvider>
               </RequireAuth>
             }
           >

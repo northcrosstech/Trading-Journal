@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
 import { useAuth } from '../auth/AuthContext'
-import { fetchAllDailyJournal, upsertDailyJournal, fetchTargetSettings, fetchAllDailyPlans } from '../lib/queries'
+import { useAccountFilter } from '../accounts/AccountContext'
+import { fetchTrades, fetchAllDailyJournal, upsertDailyJournal, fetchTargetSettings, fetchAllDailyPlans } from '../lib/queries'
 import type { Trade, DailyJournal, TargetSettings } from '../lib/database.types'
 import { computeCalendarDays, computeDailyTargetStats } from '../lib/metrics'
 import { PnlCalendarHeatmap } from '../components/PnlCalendarHeatmap'
 
 export function CalendarPage() {
   const { user } = useAuth()
+  const { selectedAccountId } = useAccountFilter()
   const [trades, setTrades] = useState<Trade[] | null>(null)
   const [journalByDate, setJournalByDate] = useState<Map<string, DailyJournal>>(new Map())
   const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null)
@@ -16,13 +17,9 @@ export function CalendarPage() {
   useEffect(() => {
     let cancelled = false
 
-    supabase
-      .from('trades')
-      .select('*')
-      .order('first_in_at', { ascending: true })
-      .then(({ data }) => {
-        if (!cancelled) setTrades(data ?? [])
-      })
+    fetchTrades(selectedAccountId).then((data) => {
+      if (!cancelled) setTrades(data)
+    })
 
     fetchAllDailyJournal().then((entries) => {
       if (cancelled) return
@@ -40,7 +37,7 @@ export function CalendarPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [selectedAccountId])
 
   const handleSaveNote = useCallback(
     (date: string, fields: { notes?: string; mood_rating?: number | null }) => {

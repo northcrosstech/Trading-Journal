@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails } from '../lib/queries'
 import type { TradeWithDetails } from '../lib/database.types'
 import { currency, priceFmt, holdTimeFmt, optionLabel, dateFmt, percentFmt, dteLabel, centralDateStr } from '../lib/format'
@@ -20,6 +21,7 @@ function posSize(t: TradeWithDetails): number | null {
 }
 
 export function TradeLogPage() {
+  const { selectedAccountId } = useAccountFilter()
   const [trades, setTrades] = useState<TradeWithDetails[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
@@ -47,10 +49,10 @@ export function TradeLogPage() {
   }
 
   useEffect(() => {
-    fetchTradesWithDetails()
+    fetchTradesWithDetails(selectedAccountId)
       .then(setTrades)
       .catch((e) => setError(e.message))
-  }, [])
+  }, [selectedAccountId])
 
   const allPlaybooks = useMemo(() => {
     if (!trades) return []

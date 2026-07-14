@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails, fetchAllDailyJournal, upsertDailyJournal, fetchAllDailyPlans } from '../lib/queries'
 import type { TradeWithDetails, DailyJournal, DailyPlanWithPlaybooks } from '../lib/database.types'
 import { computeDailyFeed, computePlanVsActual } from '../lib/metrics'
@@ -8,6 +9,7 @@ import { DailyFeedCard } from '../components/DailyFeedCard'
 
 export function JournalPage() {
   const { user } = useAuth()
+  const { selectedAccountId } = useAccountFilter()
   const [searchParams, setSearchParams] = useSearchParams()
   const focusDate = searchParams.get('date')
 
@@ -19,14 +21,14 @@ export function JournalPage() {
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   useEffect(() => {
-    fetchTradesWithDetails().then(setTrades)
+    fetchTradesWithDetails(selectedAccountId).then(setTrades)
     fetchAllDailyJournal().then((entries) => {
       setJournalByDate(new Map(entries.map((e) => [e.entry_date, e])))
     })
     fetchAllDailyPlans().then((plans) => {
       setPlanByDate(new Map(plans.map((p) => [p.plan_date, p])))
     })
-  }, [])
+  }, [selectedAccountId])
 
   const feed = useMemo(() => (trades ? computeDailyFeed(trades) : []), [trades])
 

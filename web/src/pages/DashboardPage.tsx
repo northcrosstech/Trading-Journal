@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
 import { useAuth } from '../auth/AuthContext'
+import { useAccountFilter } from '../accounts/AccountContext'
 import {
+  fetchTrades,
   fetchAllDailyJournal,
   upsertDailyJournal,
   fetchTargetSettings,
@@ -44,6 +45,7 @@ import { DailyRulesChecklist } from '../components/DailyRulesChecklist'
 
 export function DashboardPage() {
   const { user } = useAuth()
+  const { selectedAccountId } = useAccountFilter()
   const [trades, setTrades] = useState<Trade[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [journalByDate, setJournalByDate] = useState<Map<string, DailyJournal>>(new Map())
@@ -66,7 +68,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false
-    fetchTradesWithPlaybook().then((t) => {
+    fetchTradesWithPlaybook(selectedAccountId).then((t) => {
       if (!cancelled) setTradesWithPlaybook(t)
     })
     fetchPlaybooks().then((p) => {
@@ -78,7 +80,7 @@ export function DashboardPage() {
     fetchAllDailyPlans().then((plans) => {
       if (!cancelled) setPlannedDates(new Set(plans.map((p) => p.plan_date)))
     })
-    fetchTradesWithDetails().then((t) => {
+    fetchTradesWithDetails(selectedAccountId).then((t) => {
       if (!cancelled) setTradesWithDetails(t)
     })
     fetchAllPlaybookRules().then((r) => {
@@ -87,7 +89,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [todayStr])
+  }, [todayStr, selectedAccountId])
 
   const handlePlanSaved = useCallback(
     (plan: DailyPlanWithPlaybooks) => {
@@ -100,17 +102,12 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false
 
-    supabase
-      .from('trades')
-      .select('*')
-      .order('first_in_at', { ascending: true })
-      .then(({ data, error }) => {
-        if (cancelled) return
-        if (error) {
-          setError(error.message)
-          return
-        }
-        setTrades(data ?? [])
+    fetchTrades(selectedAccountId)
+      .then((data) => {
+        if (!cancelled) setTrades(data)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message)
       })
 
     fetchAllDailyJournal().then((entries) => {
@@ -125,7 +122,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [selectedAccountId])
 
   const handleSaveNote = useCallback(
     (date: string, fields: { notes?: string; mood_rating?: number | null }) => {

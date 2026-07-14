@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { supabase } from '../lib/supabase'
+import { useAccountFilter } from '../accounts/AccountContext'
+import { fetchTrades } from '../lib/queries'
 import { currency } from '../lib/format'
 import { SyncStatus } from './SyncStatus'
 
@@ -17,21 +18,21 @@ const navItems = [
 
 export function Layout() {
   const { user, signOut } = useAuth()
+  const { accounts, selectedAccountId, setSelectedAccountId } = useAccountFilter()
   const [balance, setBalance] = useState<number | null>(null)
 
   // All-time cumulative net P&L, unaffected by any page's date-range filter -- a
   // synthetic estimate (no real starting capital or cash deposits/withdrawals are
   // tracked), so it's explicitly labeled "Est." rather than presented as real cash.
+  // Respects the account switcher: re-fetches whenever the selection changes.
   useEffect(() => {
-    supabase
-      .from('trades')
-      .select('status, realized_pnl_net')
-      .eq('status', 'CLOSED')
-      .then(({ data }) => {
-        if (!data) return
-        setBalance(data.reduce((sum, t) => sum + (t.realized_pnl_net ?? 0), 0))
-      })
-  }, [])
+    fetchTrades(selectedAccountId).then((trades) => {
+      const closed = trades.filter((t) => t.status === 'CLOSED')
+      setBalance(closed.reduce((sum, t) => sum + (t.realized_pnl_net ?? 0), 0))
+    })
+  }, [selectedAccountId])
+
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null
 
   return (
     <div className="flex min-h-screen bg-neutral-950 text-neutral-100">
@@ -40,13 +41,24 @@ export function Layout() {
           <span className="text-sm font-semibold tracking-tight text-neutral-100">Trading Journal</span>
         </div>
 
-        <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-2">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
-          <div className="min-w-0">
-            <div className="truncate text-xs font-medium text-neutral-300">Webull Individual</div>
-            <div className="truncate text-[11px] tabular-nums text-neutral-500">
-              {balance === null ? '—' : `Est. ${currency(balance)}`}
-            </div>
+        <div className="mx-2 mb-2 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-2">
+          <div className="flex items-center gap-2">
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${selectedAccount === null || selectedAccount.enabled ? 'bg-emerald-400' : 'bg-neutral-600'}`} />
+            <select
+              value={selectedAccountId ?? 'all'}
+              onChange={(e) => setSelectedAccountId(e.target.value === 'all' ? null : e.target.value)}
+              className="w-full truncate bg-transparent text-xs font-medium text-neutral-300 outline-none"
+            >
+              <option value="all">All Accounts</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="truncate pl-3.5 text-[11px] tabular-nums text-neutral-500">
+            {balance === null ? '—' : `Est. ${currency(balance)}`}
           </div>
         </div>
 
