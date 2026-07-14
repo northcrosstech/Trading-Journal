@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useAccountFilter } from '../accounts/AccountContext'
 import {
   fetchPlaybookWithRules,
   updatePlaybook,
@@ -317,6 +318,7 @@ function RuleGroupCard({ group, onReload }: { group: PlaybookRuleGroup & { playb
 export function PlaybookDetailPage() {
   const { playbookId } = useParams<{ playbookId: string }>()
   const { user } = useAuth()
+  const { selectedAccountId } = useAccountFilter()
 
   const [playbook, setPlaybook] = useState<PlaybookWithRules | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -358,10 +360,10 @@ export function PlaybookDetailPage() {
 
   const loadStatsData = useCallback(async () => {
     if (!playbookId) return
-    const [t, m] = await Promise.all([fetchTradesWithDetails(), fetchMissedTrades(playbookId)])
+    const [t, m] = await Promise.all([fetchTradesWithDetails(selectedAccountId), fetchMissedTrades(playbookId)])
     setTrades(t)
     setMissedTrades(m)
-  }, [playbookId])
+  }, [playbookId, selectedAccountId])
 
   useEffect(() => {
     loadStatsData().catch((e) => setError(e.message))

@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import type {
+  Trade,
   TradeWithDetails,
   TradeWithPlaybook,
   DailyJournal,
@@ -60,11 +61,21 @@ const DAILY_PLAN_WITH_PLAYBOOKS_SELECT = '*, daily_plan_playbooks(playbook_id, p
 const TRADE_WITH_DETAILS_SELECT =
   '*, options_detail(*), executions(*), trade_playbooks(playbook_id, playbooks(*)), trade_rule_checks(rule_id, status, playbook_rules(*))'
 
-export async function fetchTradesWithDetails(): Promise<TradeWithDetails[]> {
-  const { data, error } = await supabase
-    .from('trades')
-    .select(TRADE_WITH_DETAILS_SELECT)
-    .order('first_in_at', { ascending: false })
+/** Bare trades, no joins -- for pages (Dashboard, Calendar, Layout's balance) that
+ * only need the raw trade rows. `accountId` is the account switcher's selection:
+ * omit/null/undefined for "All accounts" (no filter). */
+export async function fetchTrades(accountId?: string | null): Promise<Trade[]> {
+  let query = supabase.from('trades').select('*').order('first_in_at', { ascending: true })
+  if (accountId) query = query.eq('account_id', accountId)
+  const { data, error } = await query
+  if (error) throw error
+  return data ?? []
+}
+
+export async function fetchTradesWithDetails(accountId?: string | null): Promise<TradeWithDetails[]> {
+  let query = supabase.from('trades').select(TRADE_WITH_DETAILS_SELECT).order('first_in_at', { ascending: false })
+  if (accountId) query = query.eq('account_id', accountId)
+  const { data, error } = await query
 
   if (error) throw error
   return (data ?? []) as unknown as TradeWithDetails[]
@@ -73,11 +84,10 @@ export async function fetchTradesWithDetails(): Promise<TradeWithDetails[]> {
 /** Lighter than fetchTradesWithDetails -- just the playbook link. Used by the daily
  * plan feature (Dashboard's Today's Plan card) which only needs "which playbook was
  * each trade," not executions/options_detail/trade_rule_checks. */
-export async function fetchTradesWithPlaybook(): Promise<TradeWithPlaybook[]> {
-  const { data, error } = await supabase
-    .from('trades')
-    .select('*, trade_playbooks(playbook_id, playbooks(*))')
-    .order('first_in_at', { ascending: false })
+export async function fetchTradesWithPlaybook(accountId?: string | null): Promise<TradeWithPlaybook[]> {
+  let query = supabase.from('trades').select('*, trade_playbooks(playbook_id, playbooks(*))').order('first_in_at', { ascending: false })
+  if (accountId) query = query.eq('account_id', accountId)
+  const { data, error } = await query
 
   if (error) throw error
   return (data ?? []) as unknown as TradeWithPlaybook[]

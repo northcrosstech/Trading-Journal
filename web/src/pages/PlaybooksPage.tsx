@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchPlaybooks, createPlaybook, setPlaybookArchived, fetchTradesWithDetails, fetchMissedTrades } from '../lib/queries'
 import type { Playbook, TradeWithDetails, MissedTrade } from '../lib/database.types'
 import { computePlaybookStats } from '../lib/metrics'
@@ -14,6 +15,7 @@ function pf(v: number | null): string {
 
 export function PlaybooksPage() {
   const { user } = useAuth()
+  const { selectedAccountId } = useAccountFilter()
   const [playbooks, setPlaybooks] = useState<Playbook[] | null>(null)
   const [trades, setTrades] = useState<TradeWithDetails[]>([])
   const [missedTrades, setMissedTrades] = useState<MissedTrade[]>([])
@@ -28,9 +30,9 @@ export function PlaybooksPage() {
 
   useEffect(() => {
     reload()
-    fetchTradesWithDetails().then(setTrades)
+    fetchTradesWithDetails(selectedAccountId).then(setTrades)
     fetchMissedTrades().then(setMissedTrades)
-  }, [])
+  }, [selectedAccountId])
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
