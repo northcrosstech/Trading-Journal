@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails } from '../lib/queries'
 import type { TradeWithDetails } from '../lib/database.types'
@@ -177,11 +177,27 @@ export function TradeLogPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-neutral-100">Trade Log</h1>
-        <div className="text-sm text-neutral-400">
-          {summary.count} trade{summary.count === 1 ? '' : 's'} · {summary.closedCount} closed ·{' '}
-          <span className={summary.net >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
-            {currency(summary.net)}
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="text-sm text-neutral-400">
+            {summary.count} trade{summary.count === 1 ? '' : 's'} · {summary.closedCount} closed ·{' '}
+            <span className={summary.net >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
+              {currency(summary.net)}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              to="/trades/import"
+              className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-neutral-800"
+            >
+              Import CSV
+            </Link>
+            <Link
+              to="/trades/new"
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500"
+            >
+              + Add Trade
+            </Link>
+          </div>
         </div>
       </div>
 

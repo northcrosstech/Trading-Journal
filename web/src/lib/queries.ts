@@ -56,6 +56,138 @@ export async function setAccountArchived(id: string, archived: boolean) {
   if (error) throw error
 }
 
+// ---------------------------------------------------------------------------
+// Manual trade entry (also the CSV import path -- both funnel through this)
+// ---------------------------------------------------------------------------
+
+const OPTION_MULTIPLIER = 100
+
+export type ManualTradeFields = {
+  accountId: string
+  symbol: string
+  side: 'long' | 'short'
+  quantity: number
+  entryPrice: number
+  entryTime: string // ISO
+  exitPrice: number | null
+  exitTime: string | null // ISO -- null means still OPEN
+  fees: number
+  optionType?: 'call' | 'put'
+  strike?: number
+  expiration?: string // date, yyyy-mm-dd
+}
+
+/** Writes a manually-entered (or CSV-imported) trade as real trades + executions
+ * (+ options_detail) rows -- one entry fill, one exit fill if closed -- so it's
+ * first-class in the executions pipeline (per-trade executions view, any
+ * execution-based analytics) rather than a flattened summary row. Deliberately a
+ * fixed one-entry/one-exit shape for now (no add/trim UI), but nothing about the
+ * schema or this function assumes that -- a future "add another fill" button would
+ * just insert more executions rows against the same trade_id, no migration needed.
+ *
+ * Ordinary RLS-scoped inserts (not upsert_trade_bundle -- that RPC is
+ * security-definer, worker/service-role-only). Sequential, not a single transaction
+ * (the supabase-js client has no multi-statement transaction API, same constraint
+ * noted in worker/db_writer.py) -- acceptable here since this is a one-off,
+ * user-initiated write, not a repeated high-volume sync.
+ */
+export async function createManualTrade(userId: string, fields: ManualTradeFields): Promise<Trade> {
+  const isOption = fields.optionType !== undefined && fields.strike !== undefined && !!fields.expiration
+  const multiplier = isOption ? OPTION_MULTIPLIER : 1
+  const closed = fields.exitPrice !== null && fields.exitTime !== null
+  const direction = fields.side === 'long' ? 1 : -1
+
+  const realizedPnlGross = closed ? (fields.exitPrice! - fields.entryPrice) * fields.quantity * multiplier * direction : null
+  const realizedPnlNet = closed ? realizedPnlGross! - fields.fees : null
+  const holdSeconds = closed
+    ? Math.round((new Date(fields.exitTime!).getTime() - new Date(fields.entryTime).getTime()) / 1000)
+    : null
+
+  const { data: trade, error: tradeError } = await supabase
+    .from('trades')
+    .insert({
+      user_id: userId,
+      account_id: fields.accountId,
+      symbol: fields.symbol,
+      asset_type: isOption ? 'option' : 'stock',
+      side: fields.side,
+      status: closed ? 'CLOSED' : 'OPEN',
+      avg_entry: fields.entryPrice,
+      avg_exit: closed ? fields.exitPrice : null,
+      hold_seconds: holdSeconds,
+      total_contracts: fields.quantity,
+      realized_pnl_gross: realizedPnlGross,
+      realized_pnl_net: realizedPnlNet,
+      // Manual entry has no "estimate pending confirmation" phase -- whatever fee the
+      // user enters IS the real number, so it's stamped straight to 'actual'.
+      estimated_fee: fields.fees,
+      actual_fee: fields.fees,
+      fee_source: 'actual',
+      trade_key: null, // no dedup key needed -- a unique constraint on a nullable column allows multiple nulls
+      first_in_at: fields.entryTime,
+      last_out_at: closed ? fields.exitTime : null,
+    })
+    .select()
+    .single()
+  if (tradeError) throw tradeError
+
+  const executions: {
+    user_id: string
+    trade_id: string
+    client_order_id: string
+    filled_at: string
+    action: 'entry' | 'exit'
+    price: number
+    quantity: number
+    side: 'buy' | 'sell'
+    estimated_fee: number
+    actual_fee: number
+  }[] = [
+    {
+      user_id: userId,
+      trade_id: trade.id,
+      client_order_id: `manual-${trade.id}-entry`,
+      filled_at: fields.entryTime,
+      action: 'entry',
+      price: fields.entryPrice,
+      quantity: fields.quantity,
+      side: fields.side === 'long' ? 'buy' : 'sell',
+      estimated_fee: 0,
+      actual_fee: 0,
+    },
+  ]
+  if (closed) {
+    executions.push({
+      user_id: userId,
+      trade_id: trade.id,
+      client_order_id: `manual-${trade.id}-exit`,
+      filled_at: fields.exitTime!,
+      action: 'exit',
+      price: fields.exitPrice!,
+      quantity: fields.quantity,
+      side: fields.side === 'long' ? 'sell' : 'buy',
+      estimated_fee: fields.fees,
+      actual_fee: fields.fees,
+    })
+  }
+
+  const { error: execError } = await supabase.from('executions').insert(executions)
+  if (execError) throw execError
+
+  if (isOption) {
+    const { error: optError } = await supabase.from('options_detail').insert({
+      trade_id: trade.id,
+      option_type: fields.optionType!,
+      strike: fields.strike!,
+      expiration: fields.expiration!,
+      premium: fields.entryPrice,
+    })
+    if (optError) throw optError
+  }
+
+  return trade
+}
+
 const DAILY_PLAN_WITH_PLAYBOOKS_SELECT = '*, daily_plan_playbooks(playbook_id, playbooks(*))'
 
 const TRADE_WITH_DETAILS_SELECT =
