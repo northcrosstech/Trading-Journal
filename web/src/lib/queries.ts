@@ -13,7 +13,9 @@ import type {
   DailyRule,
   MissedTrade,
   Account,
+  Emotion,
 } from './database.types'
+import { DEFAULT_EMOTIONS } from './emotions'
 
 // ---------------------------------------------------------------------------
 // Accounts
@@ -75,6 +77,8 @@ export type ManualTradeFields = {
   optionType?: 'call' | 'put'
   strike?: number
   expiration?: string // date, yyyy-mm-dd
+  thesisNote?: string
+  reflectionNote?: string
 }
 
 /** Writes a manually-entered (or CSV-imported) trade as real trades + executions
@@ -126,6 +130,8 @@ export async function createManualTrade(userId: string, fields: ManualTradeField
       trade_key: null, // no dedup key needed -- a unique constraint on a nullable column allows multiple nulls
       first_in_at: fields.entryTime,
       last_out_at: closed ? fields.exitTime : null,
+      thesis_note: fields.thesisNote?.trim() || null,
+      reflection_note: fields.reflectionNote?.trim() || null,
     })
     .select()
     .single()
@@ -191,7 +197,7 @@ export async function createManualTrade(userId: string, fields: ManualTradeField
 const DAILY_PLAN_WITH_PLAYBOOKS_SELECT = '*, daily_plan_playbooks(playbook_id, playbooks(*))'
 
 const TRADE_WITH_DETAILS_SELECT =
-  '*, options_detail(*), executions(*), trade_playbooks(playbook_id, playbooks(*)), trade_rule_checks(rule_id, status, playbook_rules(*))'
+  '*, options_detail(*), executions(*), trade_playbooks(playbook_id, playbooks(*)), trade_rule_checks(rule_id, status, playbook_rules(*)), trade_emotions(emotion_id, phase, emotions(*))'
 
 /** Bare trades, no joins -- for pages (Dashboard, Calendar, Layout's balance) that
  * only need the raw trade rows. `accountId` is the account switcher's selection:
@@ -239,6 +245,77 @@ export async function fetchTradeWithDetails(tradeId: string): Promise<TradeWithD
 export async function updateTradeNotes(tradeId: string, notes: string) {
   const { error } = await supabase.from('trades').update({ notes }).eq('id', tradeId)
   if (error) throw error
+}
+
+export async function updateTradeThesisNote(tradeId: string, thesisNote: string) {
+  const { error } = await supabase.from('trades').update({ thesis_note: thesisNote }).eq('id', tradeId)
+  if (error) throw error
+}
+
+export async function updateTradeReflectionNote(tradeId: string, reflectionNote: string) {
+  const { error } = await supabase.from('trades').update({ reflection_note: reflectionNote }).eq('id', tradeId)
+  if (error) throw error
+}
+
+// ---------------------------------------------------------------------------
+// Trade psychology: emotions vocabulary + per-trade tagging
+// ---------------------------------------------------------------------------
+
+export async function fetchEmotions(): Promise<Emotion[]> {
+  const { data, error } = await supabase.from('emotions').select('*').order('sort_order')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function createEmotion(userId: string, phase: Emotion['phase'], name: string, sortOrder: number): Promise<Emotion> {
+  const { data, error } = await supabase
+    .from('emotions')
+    .insert({ user_id: userId, phase, name, sort_order: sortOrder, archived: false })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function setEmotionArchived(id: string, archived: boolean) {
+  const { error } = await supabase.from('emotions').update({ archived }).eq('id', id)
+  if (error) throw error
+}
+
+/** Seeds the default vocabulary (see lib/emotions.ts) the first time this user has
+ * none -- lazy, client-side, and idempotent (unique(user_id, phase, name) means a
+ * re-run/race just no-ops on conflict) rather than a SQL seed, so it also covers
+ * future signups with no migration needed. No-ops if the user already has any
+ * emotions, including if they've deleted down to zero on purpose -- checked by the
+ * caller passing the current count, not re-derived here. */
+export async function ensureDefaultEmotions(userId: string): Promise<void> {
+  const existing = await fetchEmotions()
+  if (existing.length > 0) return
+  const rows = DEFAULT_EMOTIONS.map((e, i) => ({ user_id: userId, phase: e.phase, name: e.name, sort_order: i, archived: false }))
+  const { error } = await supabase.from('emotions').upsert(rows, { onConflict: 'user_id,phase,name', ignoreDuplicates: true })
+  if (error) throw error
+}
+
+export async function setTradeEmotion(tradeId: string, emotionId: string, phase: Emotion['phase']) {
+  const { error } = await supabase.from('trade_emotions').upsert({ trade_id: tradeId, emotion_id: emotionId, phase }, { onConflict: 'trade_id,emotion_id' })
+  if (error) throw error
+}
+
+export async function removeTradeEmotion(tradeId: string, emotionId: string) {
+  const { error } = await supabase.from('trade_emotions').delete().eq('trade_id', tradeId).eq('emotion_id', emotionId)
+  if (error) throw error
+}
+
+/** All trade_emotions rows for a set of trade ids in one query -- used by the quick
+ * psych pass to figure out which of today's trades have zero tags yet, without an
+ * N+1 per trade. */
+export async function fetchTradeEmotionCounts(tradeIds: string[]): Promise<Map<string, number>> {
+  if (tradeIds.length === 0) return new Map()
+  const { data, error } = await supabase.from('trade_emotions').select('trade_id').in('trade_id', tradeIds)
+  if (error) throw error
+  const counts = new Map<string, number>()
+  for (const row of data ?? []) counts.set(row.trade_id, (counts.get(row.trade_id) ?? 0) + 1)
+  return counts
 }
 
 export async function updateTradeScreenshot(tradeId: string, screenshotUrl: string | null) {
