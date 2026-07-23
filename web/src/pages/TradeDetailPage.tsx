@@ -9,16 +9,24 @@ import {
   removeTradePlaybook,
   setTradeRuleCheckStatus,
   updateTradeNotes,
+  updateTradeThesisNote,
+  updateTradeReflectionNote,
   uploadTradeScreenshot,
   updateTradeScreenshot,
   getTradeScreenshotUrl,
   deleteTradeScreenshot,
+  fetchEmotions,
+  ensureDefaultEmotions,
+  createEmotion,
+  setTradeEmotion,
+  removeTradeEmotion,
 } from '../lib/queries'
-import type { TradeWithDetails, Playbook, PlaybookWithRules } from '../lib/database.types'
+import type { TradeWithDetails, Playbook, PlaybookWithRules, Emotion } from '../lib/database.types'
 import { fetchCandles, type CandleInterval, type CandleResult } from '../lib/candles'
 import { CandlestickChart, type ChartMarker } from '../components/CandlestickChart'
 import { PlaybookPicker } from '../components/PlaybookPicker'
 import { PlaybookRuleChecklist } from '../components/PlaybookRuleChecklist'
+import { PsychologyChips } from '../components/PsychologyChips'
 import { currency, holdTimeFmt, optionLabel, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt, dteLabel } from '../lib/format'
 import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd } from '../lib/metrics'
 
@@ -35,6 +43,12 @@ export function TradeDetailPage() {
   const [notesSaved, setNotesSaved] = useState(true)
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const [thesisNote, setThesisNote] = useState('')
+  const [reflectionNote, setReflectionNote] = useState('')
+  const [psychSaved, setPsychSaved] = useState(true)
+  const psychTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [allEmotions, setAllEmotions] = useState<Emotion[]>([])
+
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
 
@@ -49,6 +63,8 @@ export function TradeDetailPage() {
     const t = await fetchTradeWithDetails(tradeId)
     setTrade(t)
     setNotes(t?.notes ?? '')
+    setThesisNote(t?.thesis_note ?? '')
+    setReflectionNote(t?.reflection_note ?? '')
     if (t?.screenshot_url) {
       getTradeScreenshotUrl(t.screenshot_url).then(setScreenshotUrl).catch(() => setScreenshotUrl(null))
     } else {
@@ -65,6 +81,13 @@ export function TradeDetailPage() {
     load().catch((e) => setError(e.message))
     fetchPlaybooks().then((p) => setAllPlaybooks(p ?? []))
   }, [load])
+
+  useEffect(() => {
+    if (!user) return
+    ensureDefaultEmotions(user.id)
+      .then(() => fetchEmotions())
+      .then(setAllEmotions)
+  }, [user])
 
   async function handleSelectPlaybook(playbookId: string) {
     if (!tradeId) return
@@ -141,6 +164,52 @@ export function TradeDetailPage() {
       await updateTradeNotes(tradeId, value)
       setNotesSaved(true)
     }, 700)
+  }
+
+  function scheduleThesisNoteSave(value: string) {
+    setThesisNote(value)
+    setPsychSaved(false)
+    if (psychTimer.current) clearTimeout(psychTimer.current)
+    psychTimer.current = setTimeout(async () => {
+      if (!tradeId) return
+      await updateTradeThesisNote(tradeId, value)
+      setPsychSaved(true)
+    }, 700)
+  }
+
+  function scheduleReflectionNoteSave(value: string) {
+    setReflectionNote(value)
+    setPsychSaved(false)
+    if (psychTimer.current) clearTimeout(psychTimer.current)
+    psychTimer.current = setTimeout(async () => {
+      if (!tradeId) return
+      await updateTradeReflectionNote(tradeId, value)
+      setPsychSaved(true)
+    }, 700)
+  }
+
+  async function handleToggleEmotion(emotion: Emotion, on: boolean) {
+    if (!tradeId) return
+    if (on) {
+      await setTradeEmotion(tradeId, emotion.id, emotion.phase)
+      setTrade((t) => {
+        if (!t) return t
+        const next = t.trade_emotions.filter((te) => te.emotion_id !== emotion.id)
+        next.push({ emotion_id: emotion.id, phase: emotion.phase, emotions: emotion })
+        return { ...t, trade_emotions: next }
+      })
+    } else {
+      await removeTradeEmotion(tradeId, emotion.id)
+      setTrade((t) => (t ? { ...t, trade_emotions: t.trade_emotions.filter((te) => te.emotion_id !== emotion.id) } : t))
+    }
+  }
+
+  async function handleAddEmotion(phase: Emotion['phase'], name: string) {
+    if (!user || !tradeId) return
+    const nextOrder = allEmotions.length > 0 ? Math.max(...allEmotions.map((e) => e.sort_order)) + 1 : 0
+    const emotion = await createEmotion(user.id, phase, name, nextOrder)
+    setAllEmotions((prev) => [...prev, emotion])
+    await handleToggleEmotion(emotion, true)
   }
 
   async function handleScreenshotChange(file: File | null) {
@@ -319,6 +388,23 @@ export function TradeDetailPage() {
             <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
               <PlaybookRuleChecklist playbook={linkedPlaybook} tradeRuleChecks={trade.trade_rule_checks} onSetStatus={handleSetRuleStatus} />
             </div>
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-sm font-medium text-neutral-300">Psychology</h2>
+              <span className="text-xs text-neutral-600">{psychSaved ? 'Saved' : 'Saving…'}</span>
+            </div>
+            <PsychologyChips
+              emotions={allEmotions}
+              selected={trade.trade_emotions.map((te) => ({ emotion_id: te.emotion_id, phase: te.phase }))}
+              thesisNote={thesisNote}
+              reflectionNote={reflectionNote}
+              onToggle={handleToggleEmotion}
+              onThesisNoteChange={scheduleThesisNoteSave}
+              onReflectionNoteChange={scheduleReflectionNoteSave}
+              onAddEmotion={handleAddEmotion}
+            />
           </div>
 
           <div>

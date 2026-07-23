@@ -1,8 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
-import { createManualTrade } from '../lib/queries'
+import { createManualTrade, fetchEmotions, ensureDefaultEmotions, createEmotion, setTradeEmotion } from '../lib/queries'
+import type { Emotion } from '../lib/database.types'
+import { PsychologyChips } from '../components/PsychologyChips'
 
 /** yyyy-mm-ddThh:mm, the format <input type="datetime-local"> both wants and gives back. */
 function toDatetimeLocal(d: Date): string {
@@ -33,6 +35,32 @@ export function ManualTradeEntryPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [allEmotions, setAllEmotions] = useState<Emotion[]>([])
+  const [selectedEmotions, setSelectedEmotions] = useState<{ emotion_id: string; phase: Emotion['phase'] }[]>([])
+  const [thesisNote, setThesisNote] = useState('')
+  const [reflectionNote, setReflectionNote] = useState('')
+
+  useEffect(() => {
+    if (!user) return
+    ensureDefaultEmotions(user.id)
+      .then(() => fetchEmotions())
+      .then(setAllEmotions)
+  }, [user])
+
+  function handleToggleEmotion(emotion: Emotion, on: boolean) {
+    setSelectedEmotions((prev) =>
+      on ? [...prev.filter((e) => e.emotion_id !== emotion.id), { emotion_id: emotion.id, phase: emotion.phase }] : prev.filter((e) => e.emotion_id !== emotion.id),
+    )
+  }
+
+  async function handleAddEmotion(phase: Emotion['phase'], name: string) {
+    if (!user) return
+    const nextOrder = allEmotions.length > 0 ? Math.max(...allEmotions.map((e) => e.sort_order)) + 1 : 0
+    const emotion = await createEmotion(user.id, phase, name, nextOrder)
+    setAllEmotions((prev) => [...prev, emotion])
+    handleToggleEmotion(emotion, true)
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!user || !accountId || !symbol.trim() || !entryPrice || !quantity) return
@@ -52,7 +80,10 @@ export function ManualTradeEntryPage() {
         optionType: isOption ? optionType : undefined,
         strike: isOption && strike ? Number(strike) : undefined,
         expiration: isOption && expiration ? expiration : undefined,
+        thesisNote,
+        reflectionNote,
       })
+      await Promise.all(selectedEmotions.map((e) => setTradeEmotion(trade.id, e.emotion_id, e.phase)))
       navigate(`/trades/${trade.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -247,6 +278,20 @@ export function ManualTradeEntryPage() {
             </div>
           </div>
         )}
+
+        <div className="border-t border-neutral-800 pt-3">
+          <h2 className="mb-2 text-sm font-medium text-neutral-300">Psychology (optional)</h2>
+          <PsychologyChips
+            emotions={allEmotions}
+            selected={selectedEmotions}
+            thesisNote={thesisNote}
+            reflectionNote={reflectionNote}
+            onToggle={handleToggleEmotion}
+            onThesisNoteChange={setThesisNote}
+            onReflectionNoteChange={setReflectionNote}
+            onAddEmotion={handleAddEmotion}
+          />
+        </div>
 
         {error && <div className="rounded-md border border-red-900 bg-red-950/40 p-2 text-xs text-red-300">{error}</div>}
 

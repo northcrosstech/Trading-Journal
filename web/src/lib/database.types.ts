@@ -33,9 +33,28 @@ export type TradeRow = {
   fee_source: 'estimated' | 'actual'
   trade_key: string | null
   notes: string | null
+  thesis_note: string | null
+  reflection_note: string | null
   screenshot_url: string | null
   first_in_at: string | null
   last_out_at: string | null
+  created_at: string
+}
+
+export type EmotionRow = {
+  id: string
+  user_id: string
+  phase: 'before' | 'during' | 'after'
+  name: string
+  sort_order: number
+  archived: boolean
+  created_at: string
+}
+
+export type TradeEmotionRow = {
+  trade_id: string
+  emotion_id: string
+  phase: 'before' | 'during' | 'after'
   created_at: string
 }
 
@@ -194,6 +213,8 @@ export type Database = {
     Tables: {
       accounts: ReturnType<typeof table<AccountRow>>
       trades: ReturnType<typeof table<TradeRow>>
+      emotions: ReturnType<typeof table<EmotionRow>>
+      trade_emotions: ReturnType<typeof table<TradeEmotionRow>>
       executions: ReturnType<typeof table<ExecutionRow>>
       options_detail: ReturnType<typeof table<OptionsDetailRow>>
       playbooks: ReturnType<typeof table<PlaybookRow>>
@@ -219,6 +240,7 @@ export type Database = {
 
 export type Account = AccountRow
 export type Trade = TradeRow
+export type Emotion = EmotionRow
 export type Execution = ExecutionRow
 export type OptionsDetail = OptionsDetailRow
 export type Playbook = PlaybookRow
@@ -244,6 +266,7 @@ export type TradeWithDetails = Trade & {
   // options_detail -- null until a playbook is linked.
   trade_playbooks: { playbook_id: string; playbooks: Playbook | null } | null
   trade_rule_checks: { rule_id: string; status: TradeRuleCheckRow['status']; playbook_rules: PlaybookRule | null }[]
+  trade_emotions: { emotion_id: string; phase: TradeEmotionRow['phase']; emotions: Emotion | null }[]
 }
 
 /** Leaner than TradeWithDetails -- just the playbook link, for pages (like the

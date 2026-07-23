@@ -15,6 +15,7 @@ import { PlaybookDetailPage } from './pages/PlaybookDetailPage'
 import { AccountsPage } from './pages/AccountsPage'
 import { ManualTradeEntryPage } from './pages/ManualTradeEntryPage'
 import { CsvImportPage } from './pages/CsvImportPage'
+import { PsychPassPage } from './pages/PsychPassPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
@@ -36,6 +37,7 @@ function App() {
             <Route path="/trades" element={<TradeLogPage />} />
             <Route path="/trades/new" element={<ManualTradeEntryPage />} />
             <Route path="/trades/import" element={<CsvImportPage />} />
+            <Route path="/trades/psych-pass" element={<PsychPassPage />} />
             <Route path="/trades/:tradeId" element={<TradeDetailPage />} />
             <Route path="/journal" element={<JournalPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
