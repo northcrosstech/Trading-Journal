@@ -29,9 +29,17 @@ export function PlaybooksPage() {
   }
 
   useEffect(() => {
+    let cancelled = false
     reload()
-    fetchTradesWithDetails(selectedAccountId).then(setTrades)
-    fetchMissedTrades().then(setMissedTrades)
+    fetchTradesWithDetails(selectedAccountId).then((t) => {
+      if (!cancelled) setTrades(t)
+    })
+    fetchMissedTrades().then((m) => {
+      if (!cancelled) setMissedTrades(m)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [selectedAccountId])
 
   async function handleCreate(e: FormEvent) {

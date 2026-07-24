@@ -118,11 +118,25 @@ export function StatsPage() {
   const [dailyRuleChecks, setDailyRuleChecks] = useState<{ check_date: string; rule_id: string; checked: boolean }[]>([])
 
   useEffect(() => {
-    fetchTradesWithDetails(selectedAccountId).then(setTrades)
-    fetchPlaybooks().then((p) => setPlaybooks(p ?? []))
-    fetchTargetSettings().then(setTargetSettings)
-    fetchDailyRules().then(setDailyRules)
-    fetchAllDailyRuleChecks().then(setDailyRuleChecks)
+    let cancelled = false
+    fetchTradesWithDetails(selectedAccountId).then((t) => {
+      if (!cancelled) setTrades(t)
+    })
+    fetchPlaybooks().then((p) => {
+      if (!cancelled) setPlaybooks(p ?? [])
+    })
+    fetchTargetSettings().then((s) => {
+      if (!cancelled) setTargetSettings(s)
+    })
+    fetchDailyRules().then((r) => {
+      if (!cancelled) setDailyRules(r)
+    })
+    fetchAllDailyRuleChecks().then((c) => {
+      if (!cancelled) setDailyRuleChecks(c)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [selectedAccountId])
 
   const filtered = useMemo(() => {

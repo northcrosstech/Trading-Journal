@@ -21,13 +21,19 @@ export function JournalPage() {
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   useEffect(() => {
-    fetchTradesWithDetails(selectedAccountId).then(setTrades)
+    let cancelled = false
+    fetchTradesWithDetails(selectedAccountId).then((t) => {
+      if (!cancelled) setTrades(t)
+    })
     fetchAllDailyJournal().then((entries) => {
-      setJournalByDate(new Map(entries.map((e) => [e.entry_date, e])))
+      if (!cancelled) setJournalByDate(new Map(entries.map((e) => [e.entry_date, e])))
     })
     fetchAllDailyPlans().then((plans) => {
-      setPlanByDate(new Map(plans.map((p) => [p.plan_date, p])))
+      if (!cancelled) setPlanByDate(new Map(plans.map((p) => [p.plan_date, p])))
     })
+    return () => {
+      cancelled = true
+    }
   }, [selectedAccountId])
 
   const feed = useMemo(() => (trades ? computeDailyFeed(trades) : []), [trades])

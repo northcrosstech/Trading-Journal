@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/AuthContext'
+import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchAccounts, createAccount, updateAccount, setAccountEnabled, setAccountArchived } from '../lib/queries'
 import type { Account } from '../lib/database.types'
 
@@ -79,6 +80,11 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
 
 export function AccountsPage() {
   const { user } = useAuth()
+  // This page needs the FULL list (including archived, for "Show archived"), so it
+  // keeps its own fetch rather than reading the switcher context's (non-archived-only)
+  // list directly -- but every mutation here also refreshes the shared context so the
+  // sidebar switcher doesn't go stale (it used to only refresh once on initial mount).
+  const { reloadAccounts: reloadSwitcherAccounts } = useAccountFilter()
   const [accounts, setAccounts] = useState<Account[] | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
@@ -89,13 +95,14 @@ export function AccountsPage() {
   const [syncMode, setSyncMode] = useState<Account['sync_mode']>('manual')
   const [defaultAssetType, setDefaultAssetType] = useState<Account['default_asset_type']>('stock')
 
-  function reload() {
+  const reload = useCallback(() => {
     fetchAccounts().then(setAccounts)
-  }
+    reloadSwitcherAccounts()
+  }, [reloadSwitcherAccounts])
 
   useEffect(() => {
     reload()
-  }, [])
+  }, [reload])
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
