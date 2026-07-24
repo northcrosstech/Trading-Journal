@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
@@ -16,7 +16,10 @@ export function ManualTradeEntryPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { accounts } = useAccountFilter()
-  const manualAccounts = accounts.filter((a) => a.sync_mode === 'manual')
+  // Memoized so it's referentially stable across renders (only changes when
+  // `accounts` itself does) -- lets the default-asset-type effect below depend on it
+  // directly without re-firing on every render.
+  const manualAccounts = useMemo(() => accounts.filter((a) => a.sync_mode === 'manual'), [accounts])
 
   const [accountId, setAccountId] = useState(manualAccounts[0]?.id ?? '')
   const [symbol, setSymbol] = useState('')
@@ -34,6 +37,14 @@ export function ManualTradeEntryPage() {
   const [fees, setFees] = useState('0')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Defaults the options checkbox from the selected account's preference (set on the
+  // Accounts page) -- re-applies whenever the account selection changes, so switching
+  // accounts mid-form updates the default rather than sticking with the first one.
+  useEffect(() => {
+    const account = manualAccounts.find((a) => a.id === accountId)
+    if (account) setIsOption(account.default_asset_type === 'option')
+  }, [accountId, manualAccounts])
 
   const [allEmotions, setAllEmotions] = useState<Emotion[]>([])
   const [selectedEmotions, setSelectedEmotions] = useState<{ emotion_id: string; phase: Emotion['phase'] }[]>([])

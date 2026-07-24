@@ -29,11 +29,17 @@ export async function fetchAccounts(): Promise<Account[]> {
 
 export async function createAccount(
   userId: string,
-  fields: { broker: Account['broker']; label: string; account_type: Account['account_type']; sync_mode: Account['sync_mode'] },
+  fields: {
+    broker: Account['broker']
+    label: string
+    account_type: Account['account_type']
+    sync_mode: Account['sync_mode']
+    default_asset_type?: Account['default_asset_type']
+  },
 ): Promise<Account> {
   const { data, error } = await supabase
     .from('accounts')
-    .insert({ user_id: userId, enabled: true, archived: false, ...fields })
+    .insert({ user_id: userId, enabled: true, archived: false, default_asset_type: 'stock', ...fields })
     .select()
     .single()
   if (error) throw error
@@ -42,7 +48,7 @@ export async function createAccount(
 
 export async function updateAccount(
   id: string,
-  fields: Partial<Pick<Account, 'label' | 'account_type' | 'sync_mode'>>,
+  fields: Partial<Pick<Account, 'label' | 'account_type' | 'sync_mode' | 'default_asset_type'>>,
 ) {
   const { error } = await supabase.from('accounts').update(fields).eq('id', id)
   if (error) throw error
