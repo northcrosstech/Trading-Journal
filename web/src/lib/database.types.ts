@@ -11,6 +11,7 @@ export type AccountRow = {
   enabled: boolean
   archived: boolean
   credential_ref: string | null
+  default_asset_type: 'stock' | 'option'
   created_at: string
 }
 

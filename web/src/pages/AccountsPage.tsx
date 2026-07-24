@@ -21,11 +21,17 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
   const [label, setLabel] = useState(account.label)
   const [accountType, setAccountType] = useState<Account['account_type']>(account.account_type)
   const [syncMode, setSyncMode] = useState<Account['sync_mode']>(account.sync_mode)
+  const [defaultAssetType, setDefaultAssetType] = useState<Account['default_asset_type']>(account.default_asset_type)
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!label.trim()) return
-    onSave({ label: label.trim(), account_type: accountType, sync_mode: account.broker === 'manual' ? 'manual' : syncMode })
+    onSave({
+      label: label.trim(),
+      account_type: accountType,
+      sync_mode: account.broker === 'manual' ? 'manual' : syncMode,
+      default_asset_type: defaultAssetType,
+    })
   }
 
   return (
@@ -52,6 +58,15 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
         <option value="auto">Auto-sync</option>
         <option value="manual">Manual entry</option>
       </select>
+      <select
+        value={defaultAssetType}
+        onChange={(e) => setDefaultAssetType(e.target.value as Account['default_asset_type'])}
+        title="Default asset type for new manual trades on this account"
+        className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+      >
+        <option value="stock">Default: Stock</option>
+        <option value="option">Default: Option</option>
+      </select>
       <button type="submit" className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500">
         Save
       </button>
@@ -72,6 +87,7 @@ export function AccountsPage() {
   const [label, setLabel] = useState('')
   const [accountType, setAccountType] = useState<Account['account_type']>('live')
   const [syncMode, setSyncMode] = useState<Account['sync_mode']>('manual')
+  const [defaultAssetType, setDefaultAssetType] = useState<Account['default_asset_type']>('stock')
 
   function reload() {
     fetchAccounts().then(setAccounts)
@@ -89,6 +105,7 @@ export function AccountsPage() {
       label: label.trim(),
       account_type: accountType,
       sync_mode: broker === 'manual' ? 'manual' : syncMode,
+      default_asset_type: defaultAssetType,
     })
     setLabel('')
     reload()
@@ -144,6 +161,15 @@ export function AccountsPage() {
             <option value="auto">Auto-sync</option>
             <option value="manual">Manual entry</option>
           </select>
+          <select
+            value={defaultAssetType}
+            onChange={(e) => setDefaultAssetType(e.target.value as Account['default_asset_type'])}
+            title="Default asset type for new manual trades on this account"
+            className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          >
+            <option value="stock">Default: Stock</option>
+            <option value="option">Default: Option</option>
+          </select>
           <button
             type="submit"
             disabled={!label.trim()}
@@ -180,6 +206,7 @@ export function AccountsPage() {
                   <Badge>{BROKER_LABEL[a.broker]}</Badge>
                   <Badge tone={a.account_type === 'live' ? 'good' : 'neutral'}>{a.account_type === 'live' ? 'Live' : 'Paper'}</Badge>
                   <Badge>{a.sync_mode === 'auto' ? 'Auto-sync' : 'Manual entry'}</Badge>
+                  <Badge>Default: {a.default_asset_type === 'option' ? 'Option' : 'Stock'}</Badge>
                   {!a.enabled && <Badge>Disabled</Badge>}
                 </div>
                 {a.broker !== 'manual' && !a.credential_ref && (
