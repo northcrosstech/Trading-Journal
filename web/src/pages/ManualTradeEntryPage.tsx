@@ -140,6 +140,19 @@ export function ManualTradeEntryPage() {
     ]
   })
 
+  // Auto-calculates fees from the account's per-contract rate x total quantity across
+  // all fills, whenever both are available -- stops the moment the user types into the
+  // fees field themselves (feesTouchedRef), so it's a smart default, never a lock.
+  const feesTouchedRef = useRef(false)
+  useEffect(() => {
+    if (feesTouchedRef.current) return
+    const account = manualAccounts.find((a) => a.id === accountId)
+    if (!account || !account.per_contract_fee) return
+    const totalQty = fills.reduce((sum, f) => sum + (Number(f.quantity) || 0), 0)
+    if (totalQty === 0) return
+    setFees(String(Math.round(account.per_contract_fee * totalQty * 100) / 100))
+  }, [accountId, manualAccounts, fills])
+
   // Step 2: optional context, collapsed by default so logging a trade never feels
   // heavier than "the numbers." Declared here (ahead of the edit loader below) so
   // that effect can populate them directly.
@@ -176,6 +189,7 @@ export function ManualTradeEntryPage() {
         setSymbol(trade.symbol)
         setSide(trade.side)
         setFees(String(trade.actual_fee ?? trade.estimated_fee ?? 0))
+        feesTouchedRef.current = true
         setNotes(trade.notes ?? '')
         setThesisNote(trade.thesis_note ?? '')
         setReflectionNote(trade.reflection_note ?? '')
@@ -212,11 +226,9 @@ export function ManualTradeEntryPage() {
 
   function addFill() {
     setFills((prev) => {
-      const row = { key: newFillKey(), action: 'trim' as FillAction, time: toDatetimeLocal(new Date()), price: '', quantity: '1' }
-      // Insert before the last row (typically "Close") so Close stays the final fill
-      // by default -- matches "I want to trim before I close."
-      if (prev.length === 0) return [row]
-      return [...prev.slice(0, -1), row, prev[prev.length - 1]]
+      const last = prev[prev.length - 1]
+      const row = { key: newFillKey(), action: 'trim' as FillAction, time: last ? last.time : toDatetimeLocal(new Date()), price: '', quantity: '1' }
+      return [...prev, row]
     })
   }
 
@@ -269,6 +281,8 @@ export function ManualTradeEntryPage() {
     setAllEmotions((prev) => [...prev, emotion])
     handleToggleEmotion(emotion, true)
   }
+
+  const activeAccount = manualAccounts.find((a) => a.id === accountId)
 
   const fillsValid = fills.every((f) => f.price !== '' && Number(f.price) > 0 && f.quantity !== '' && Number(f.quantity) > 0)
   const canSubmit = !!accountId && !!symbol.trim() && fillsValid && fillSummary.entryQty > 0
@@ -479,14 +493,37 @@ export function ManualTradeEntryPage() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-neutral-500">Fees (total)</label>
-          <input
-            type="number"
-            step="0.01"
-            value={fees}
-            onChange={(e) => setFees(e.target.value)}
-            className="w-32 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
-          />
+          <label className="mb-1 flex items-center gap-2 text-xs text-neutral-500">
+            Fees (total)
+            {activeAccount !== undefined && activeAccount.per_contract_fee > 0 && !feesTouchedRef.current && (
+              <span className="text-neutral-600">(auto: ${activeAccount.per_contract_fee.toFixed(2)}/contract)</span>
+            )}
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              step="0.01"
+              value={fees}
+              onChange={(e) => {
+                feesTouchedRef.current = true
+                setFees(e.target.value)
+              }}
+              className="w-32 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            />
+            {activeAccount !== undefined && activeAccount.per_contract_fee > 0 && feesTouchedRef.current && (
+              <button
+                type="button"
+                onClick={() => {
+                  feesTouchedRef.current = false
+                  const totalQty = fills.reduce((sum, f) => sum + (Number(f.quantity) || 0), 0)
+                  setFees(String(Math.round(activeAccount.per_contract_fee * totalQty * 100) / 100))
+                }}
+                className="text-xs text-blue-400 hover:underline"
+              >
+                Recalculate
+              </button>
+            )}
+          </div>
         </div>
 
         <button

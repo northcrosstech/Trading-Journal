@@ -12,6 +12,7 @@ export type AccountRow = {
   archived: boolean
   credential_ref: string | null
   default_asset_type: 'stock' | 'option'
+  per_contract_fee: number
   created_at: string
 }
 

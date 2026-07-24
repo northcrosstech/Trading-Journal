@@ -23,6 +23,7 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
   const [accountType, setAccountType] = useState<Account['account_type']>(account.account_type)
   const [syncMode, setSyncMode] = useState<Account['sync_mode']>(account.sync_mode)
   const [defaultAssetType, setDefaultAssetType] = useState<Account['default_asset_type']>(account.default_asset_type)
+  const [perContractFee, setPerContractFee] = useState(String(account.per_contract_fee))
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -32,6 +33,7 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
       account_type: accountType,
       sync_mode: account.broker === 'manual' ? 'manual' : syncMode,
       default_asset_type: defaultAssetType,
+      per_contract_fee: Number(perContractFee) || 0,
     })
   }
 
@@ -68,6 +70,18 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
         <option value="stock">Default: Stock</option>
         <option value="option">Default: Option</option>
       </select>
+      <label className="flex items-center gap-1.5 text-xs text-neutral-500">
+        Fee/contract
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={perContractFee}
+          onChange={(e) => setPerContractFee(e.target.value)}
+          title="Auto-fills the fees field on new manual trades: this rate x total quantity across all fills. 0 = no auto-calc."
+          className="w-20 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+        />
+      </label>
       <button type="submit" className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500">
         Save
       </button>
@@ -94,6 +108,7 @@ export function AccountsPage() {
   const [accountType, setAccountType] = useState<Account['account_type']>('live')
   const [syncMode, setSyncMode] = useState<Account['sync_mode']>('manual')
   const [defaultAssetType, setDefaultAssetType] = useState<Account['default_asset_type']>('stock')
+  const [perContractFee, setPerContractFee] = useState('0')
 
   const reload = useCallback(() => {
     fetchAccounts().then(setAccounts)
@@ -113,6 +128,7 @@ export function AccountsPage() {
       account_type: accountType,
       sync_mode: broker === 'manual' ? 'manual' : syncMode,
       default_asset_type: defaultAssetType,
+      per_contract_fee: Number(perContractFee) || 0,
     })
     setLabel('')
     reload()
@@ -177,6 +193,18 @@ export function AccountsPage() {
             <option value="stock">Default: Stock</option>
             <option value="option">Default: Option</option>
           </select>
+          <label className="flex items-center gap-1.5 text-sm text-neutral-500">
+            Fee/contract
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={perContractFee}
+              onChange={(e) => setPerContractFee(e.target.value)}
+              title="Auto-fills the fees field on new manual trades: this rate x total quantity across all fills. 0 = no auto-calc."
+              className="w-20 rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            />
+          </label>
           <button
             type="submit"
             disabled={!label.trim()}
@@ -214,6 +242,7 @@ export function AccountsPage() {
                   <Badge tone={a.account_type === 'live' ? 'good' : 'neutral'}>{a.account_type === 'live' ? 'Live' : 'Paper'}</Badge>
                   <Badge>{a.sync_mode === 'auto' ? 'Auto-sync' : 'Manual entry'}</Badge>
                   <Badge>Default: {a.default_asset_type === 'option' ? 'Option' : 'Stock'}</Badge>
+                  {a.per_contract_fee > 0 && <Badge>${a.per_contract_fee.toFixed(2)}/contract</Badge>}
                   {!a.enabled && <Badge>Disabled</Badge>}
                 </div>
                 {a.broker !== 'manual' && !a.credential_ref && (

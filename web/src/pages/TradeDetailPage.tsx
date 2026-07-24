@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import {
   fetchTradeWithDetails,
@@ -20,6 +20,7 @@ import {
   createEmotion,
   setTradeEmotion,
   removeTradeEmotion,
+  deleteManualTrade,
 } from '../lib/queries'
 import type { TradeWithDetails, Playbook, PlaybookWithRules, Emotion } from '../lib/database.types'
 import { fetchCandles, type CandleInterval, type CandleResult } from '../lib/candles'
@@ -35,9 +36,12 @@ const ACTION_LABEL: Record<string, string> = { entry: 'Open', add: 'Add', trim: 
 export function TradeDetailPage() {
   const { tradeId } = useParams<{ tradeId: string }>()
   const { user } = useAuth()
+  const navigate = useNavigate()
 
   const [trade, setTrade] = useState<TradeWithDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const [notes, setNotes] = useState('')
   const [notesSaved, setNotesSaved] = useState(true)
@@ -99,6 +103,19 @@ export function TradeDetailPage() {
     if (!tradeId) return
     await removeTradePlaybook(tradeId)
     load()
+  }
+
+  async function handleDelete() {
+    if (!tradeId) return
+    setDeleting(true)
+    try {
+      await deleteManualTrade(tradeId)
+      navigate('/trades')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setDeleting(false)
+      setConfirmingDelete(false)
+    }
   }
 
   async function handleSetRuleStatus(ruleId: string, status: 'followed' | 'broken' | 'na') {
@@ -269,10 +286,30 @@ export function TradeDetailPage() {
           >
             {trade.status}
           </span>
-          {trade.trade_key === null && (
-            <Link to={`/trades/${trade.id}/edit`} className="text-xs text-blue-400 hover:underline">
-              Edit
-            </Link>
+          {trade.trade_key === null && !confirmingDelete && (
+            <>
+              <Link to={`/trades/${trade.id}/edit`} className="text-xs text-blue-400 hover:underline">
+                Edit
+              </Link>
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                className="text-xs text-neutral-500 hover:text-red-400 hover:underline"
+              >
+                Delete
+              </button>
+            </>
+          )}
+          {trade.trade_key === null && confirmingDelete && (
+            <span className="flex items-center gap-2 text-xs">
+              <span className="text-red-300">Delete this trade permanently?</span>
+              <button type="button" onClick={handleDelete} disabled={deleting} className="text-red-400 hover:underline disabled:opacity-50">
+                {deleting ? 'Deleting…' : 'Confirm'}
+              </button>
+              <button type="button" onClick={() => setConfirmingDelete(false)} className="text-neutral-500 hover:underline">
+                Cancel
+              </button>
+            </span>
           )}
         </div>
       </div>

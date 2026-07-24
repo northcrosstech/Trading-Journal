@@ -47,11 +47,13 @@ export function Layout() {
             <select
               value={selectedAccountId ?? 'all'}
               onChange={(e) => setSelectedAccountId(e.target.value === 'all' ? null : e.target.value)}
-              className="w-full truncate bg-transparent text-xs font-medium text-neutral-300 outline-none"
+              className="w-full truncate bg-neutral-900 text-xs font-medium text-neutral-300 outline-none"
             >
-              <option value="all">All Accounts</option>
+              <option value="all" className="bg-neutral-900 text-neutral-100">
+                All Accounts
+              </option>
               {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
+                <option key={a.id} value={a.id} className="bg-neutral-900 text-neutral-100">
                   {a.label}
                 </option>
               ))}

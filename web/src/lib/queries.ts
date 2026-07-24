@@ -37,11 +37,12 @@ export async function createAccount(
     account_type: Account['account_type']
     sync_mode: Account['sync_mode']
     default_asset_type?: Account['default_asset_type']
+    per_contract_fee?: number
   },
 ): Promise<Account> {
   const { data, error } = await supabase
     .from('accounts')
-    .insert({ user_id: userId, enabled: true, archived: false, default_asset_type: 'stock', ...fields })
+    .insert({ user_id: userId, enabled: true, archived: false, default_asset_type: 'stock', per_contract_fee: 0, ...fields })
     .select()
     .single()
   if (error) throw error
@@ -50,7 +51,7 @@ export async function createAccount(
 
 export async function updateAccount(
   id: string,
-  fields: Partial<Pick<Account, 'label' | 'account_type' | 'sync_mode' | 'default_asset_type'>>,
+  fields: Partial<Pick<Account, 'label' | 'account_type' | 'sync_mode' | 'default_asset_type' | 'per_contract_fee'>>,
 ) {
   const { error } = await supabase.from('accounts').update(fields).eq('id', id)
   if (error) throw error
@@ -233,6 +234,14 @@ export async function updateManualTrade(tradeId: string, fields: ManualTradeFiel
   }
 
   return trade
+}
+
+/** Deletes a trade previously created by createManualTrade -- only ever called for
+ * trades with trade_key === null (see updateManualTrade's comment). Executions,
+ * options_detail, trade_playbooks, and trade_emotions all cascade via FK. */
+export async function deleteManualTrade(tradeId: string) {
+  const { error } = await supabase.from('trades').delete().eq('id', tradeId)
+  if (error) throw error
 }
 
 /** Replaces all of a trade's emotion tags wholesale -- used by the manual-trade edit
