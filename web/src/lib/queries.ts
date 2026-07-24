@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import type {
   Trade,
+  Execution,
   TradeWithDetails,
   TradeWithPlaybook,
   DailyJournal,
@@ -15,6 +16,7 @@ import type {
   Account,
   Emotion,
 } from './database.types'
+import { summarizeFills, computeRealizedPnlGross, executionSide, type FillAction, type FillInput } from './manualTrade'
 import { DEFAULT_EMOTIONS } from './emotions'
 
 // ---------------------------------------------------------------------------
@@ -70,30 +72,29 @@ export async function setAccountArchived(id: string, archived: boolean) {
 
 const OPTION_MULTIPLIER = 100
 
+const FILL_ACTION_TO_DB: Record<FillAction, Execution['action']> = { open: 'entry', add: 'add', trim: 'trim', close: 'exit' }
+
 export type ManualTradeFields = {
   accountId: string
   symbol: string
   side: 'long' | 'short'
-  quantity: number
-  entryPrice: number
-  entryTime: string // ISO
-  exitPrice: number | null
-  exitTime: string | null // ISO -- null means still OPEN
-  fees: number
+  fills: FillInput[] // at least one -- see lib/manualTrade.ts for the shape/math
+  fees: number // total, applied to the last fill (mirrors where the old single-exit-fill fee lived)
   optionType?: 'call' | 'put'
   strike?: number
   expiration?: string // date, yyyy-mm-dd
   thesisNote?: string
   reflectionNote?: string
+  notes?: string
 }
 
 /** Writes a manually-entered (or CSV-imported) trade as real trades + executions
- * (+ options_detail) rows -- one entry fill, one exit fill if closed -- so it's
+ * (+ options_detail) rows -- one row per fill (open/add/trim/close), so it's
  * first-class in the executions pipeline (per-trade executions view, any
- * execution-based analytics) rather than a flattened summary row. Deliberately a
- * fixed one-entry/one-exit shape for now (no add/trim UI), but nothing about the
- * schema or this function assumes that -- a future "add another fill" button would
- * just insert more executions rows against the same trade_id, no migration needed.
+ * execution-based analytics) rather than a flattened summary row. Supports any
+ * number of fills (trims included), not just one entry + one exit -- see
+ * lib/manualTrade.ts for the shared avg-entry/avg-exit/closed math, used identically
+ * here and in the form's live preview so they can never disagree.
  *
  * Ordinary RLS-scoped inserts (not upsert_trade_bundle -- that RPC is
  * security-definer, worker/service-role-only). Sequential, not a single transaction
@@ -104,14 +105,15 @@ export type ManualTradeFields = {
 export async function createManualTrade(userId: string, fields: ManualTradeFields): Promise<Trade> {
   const isOption = fields.optionType !== undefined && fields.strike !== undefined && !!fields.expiration
   const multiplier = isOption ? OPTION_MULTIPLIER : 1
-  const closed = fields.exitPrice !== null && fields.exitTime !== null
   const direction = fields.side === 'long' ? 1 : -1
 
-  const realizedPnlGross = closed ? (fields.exitPrice! - fields.entryPrice) * fields.quantity * multiplier * direction : null
-  const realizedPnlNet = closed ? realizedPnlGross! - fields.fees : null
-  const holdSeconds = closed
-    ? Math.round((new Date(fields.exitTime!).getTime() - new Date(fields.entryTime).getTime()) / 1000)
-    : null
+  const summary = summarizeFills(fields.fills)
+  const realizedPnlGross = computeRealizedPnlGross(summary, multiplier, direction)
+  const realizedPnlNet = realizedPnlGross !== null ? realizedPnlGross - fields.fees : null
+  const holdSeconds =
+    summary.closed && summary.firstFillTime && summary.lastExitFillTime
+      ? Math.round((new Date(summary.lastExitFillTime).getTime() - new Date(summary.firstFillTime).getTime()) / 1000)
+      : null
 
   const { data: trade, error: tradeError } = await supabase
     .from('trades')
@@ -121,21 +123,22 @@ export async function createManualTrade(userId: string, fields: ManualTradeField
       symbol: fields.symbol,
       asset_type: isOption ? 'option' : 'stock',
       side: fields.side,
-      status: closed ? 'CLOSED' : 'OPEN',
-      avg_entry: fields.entryPrice,
-      avg_exit: closed ? fields.exitPrice : null,
+      status: summary.closed ? 'CLOSED' : 'OPEN',
+      avg_entry: summary.avgEntry,
+      avg_exit: summary.closed ? summary.avgExit : null,
       hold_seconds: holdSeconds,
-      total_contracts: fields.quantity,
-      realized_pnl_gross: realizedPnlGross,
-      realized_pnl_net: realizedPnlNet,
+      total_contracts: summary.entryQty,
+      realized_pnl_gross: summary.closed ? realizedPnlGross : null,
+      realized_pnl_net: summary.closed ? realizedPnlNet : null,
       // Manual entry has no "estimate pending confirmation" phase -- whatever fee the
       // user enters IS the real number, so it's stamped straight to 'actual'.
       estimated_fee: fields.fees,
       actual_fee: fields.fees,
       fee_source: 'actual',
       trade_key: null, // no dedup key needed -- a unique constraint on a nullable column allows multiple nulls
-      first_in_at: fields.entryTime,
-      last_out_at: closed ? fields.exitTime : null,
+      first_in_at: summary.firstFillTime,
+      last_out_at: summary.closed ? summary.lastExitFillTime : null,
+      notes: fields.notes?.trim() || null,
       thesis_note: fields.thesisNote?.trim() || null,
       reflection_note: fields.reflectionNote?.trim() || null,
     })
@@ -143,44 +146,25 @@ export async function createManualTrade(userId: string, fields: ManualTradeField
     .single()
   if (tradeError) throw tradeError
 
-  const executions: {
-    user_id: string
-    trade_id: string
-    client_order_id: string
-    filled_at: string
-    action: 'entry' | 'exit'
-    price: number
-    quantity: number
-    side: 'buy' | 'sell'
-    estimated_fee: number
-    actual_fee: number
-  }[] = [
-    {
-      user_id: userId,
-      trade_id: trade.id,
-      client_order_id: `manual-${trade.id}-entry`,
-      filled_at: fields.entryTime,
-      action: 'entry',
-      price: fields.entryPrice,
-      quantity: fields.quantity,
-      side: fields.side === 'long' ? 'buy' : 'sell',
-      estimated_fee: 0,
-      actual_fee: 0,
-    },
-  ]
-  if (closed) {
-    executions.push({
-      user_id: userId,
-      trade_id: trade.id,
-      client_order_id: `manual-${trade.id}-exit`,
-      filled_at: fields.exitTime!,
-      action: 'exit',
-      price: fields.exitPrice!,
-      quantity: fields.quantity,
-      side: fields.side === 'long' ? 'sell' : 'buy',
-      estimated_fee: fields.fees,
-      actual_fee: fields.fees,
-    })
+  const executions = fields.fills.map((f, i) => ({
+    user_id: userId,
+    trade_id: trade.id,
+    client_order_id: `manual-${trade.id}-${i}`,
+    filled_at: f.time,
+    action: FILL_ACTION_TO_DB[f.action],
+    price: f.price,
+    quantity: f.quantity,
+    side: executionSide(f.action, fields.side),
+    estimated_fee: 0,
+    actual_fee: 0,
+  }))
+  // Total fee lands on the last fill in the list (the form/importer keep fills in
+  // chronological order) -- same place a single exit fill's fee lived before fills
+  // became a list.
+  if (executions.length > 0) {
+    const last = executions[executions.length - 1]
+    last.estimated_fee = fields.fees
+    last.actual_fee = fields.fees
   }
 
   const { error: execError } = await supabase.from('executions').insert(executions)
@@ -192,7 +176,7 @@ export async function createManualTrade(userId: string, fields: ManualTradeField
       option_type: fields.optionType!,
       strike: fields.strike!,
       expiration: fields.expiration!,
-      premium: fields.entryPrice,
+      premium: summary.avgEntry,
     })
     if (optError) throw optError
   }
