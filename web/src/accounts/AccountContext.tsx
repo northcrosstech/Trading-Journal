@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { fetchAccounts } from '../lib/queries'
 import type { Account } from '../lib/database.types'
@@ -25,13 +25,13 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     typeof window === 'undefined' ? null : localStorage.getItem(STORAGE_KEY),
   )
 
-  function reloadAccounts() {
+  const reloadAccounts = useCallback(() => {
     fetchAccounts().then((all) => setAccounts(all.filter((a) => !a.archived)))
-  }
+  }, [])
 
   useEffect(() => {
     if (user) reloadAccounts()
-  }, [user])
+  }, [user, reloadAccounts])
 
   // A persisted selection can go stale (the account was archived/deleted elsewhere,
   // or this is a leftover value from before any accounts existed) -- fall back to
@@ -43,17 +43,22 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     }
   }, [accounts, selectedAccountId])
 
-  function setSelectedAccountId(id: string | null) {
+  const setSelectedAccountId = useCallback((id: string | null) => {
     setSelectedAccountIdState(id)
     if (id) localStorage.setItem(STORAGE_KEY, id)
     else localStorage.removeItem(STORAGE_KEY)
-  }
+  }, [])
 
-  return (
-    <AccountContext.Provider value={{ accounts, selectedAccountId, setSelectedAccountId, reloadAccounts }}>
-      {children}
-    </AccountContext.Provider>
+  // Memoized so consumers only re-render when a value they actually read changes,
+  // not on every render of this provider -- a fresh object literal here would
+  // otherwise be a new context value every time, regardless of whether accounts or
+  // selectedAccountId actually changed.
+  const value = useMemo(
+    () => ({ accounts, selectedAccountId, setSelectedAccountId, reloadAccounts }),
+    [accounts, selectedAccountId, setSelectedAccountId, reloadAccounts],
   )
+
+  return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>
 }
 
 export function useAccountFilter(): AccountContextValue {

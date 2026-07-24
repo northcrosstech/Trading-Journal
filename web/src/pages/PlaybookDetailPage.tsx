@@ -358,9 +358,17 @@ export function PlaybookDetailPage() {
     load().catch((e) => setError(e.message))
   }, [load])
 
+  // Guards against a race when selectedAccountId changes rapidly: an in-flight load
+  // from a previous account/playbook selection could otherwise resolve after (and
+  // overwrite the result of) a newer one -- each call captures the request
+  // "generation" it was issued at and only applies its result if still current.
+  const statsRequestId = useRef(0)
+
   const loadStatsData = useCallback(async () => {
     if (!playbookId) return
+    const requestId = ++statsRequestId.current
     const [t, m] = await Promise.all([fetchTradesWithDetails(selectedAccountId), fetchMissedTrades(playbookId)])
+    if (requestId !== statsRequestId.current) return
     setTrades(t)
     setMissedTrades(m)
   }, [playbookId, selectedAccountId])

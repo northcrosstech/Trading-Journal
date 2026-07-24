@@ -49,9 +49,17 @@ export function TradeLogPage() {
   }
 
   useEffect(() => {
+    let cancelled = false
     fetchTradesWithDetails(selectedAccountId)
-      .then(setTrades)
-      .catch((e) => setError(e.message))
+      .then((t) => {
+        if (!cancelled) setTrades(t)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [selectedAccountId])
 
   const allPlaybooks = useMemo(() => {
