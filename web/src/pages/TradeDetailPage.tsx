@@ -269,6 +269,11 @@ export function TradeDetailPage() {
           >
             {trade.status}
           </span>
+          {trade.trade_key === null && (
+            <Link to={`/trades/${trade.id}/edit`} className="text-xs text-blue-400 hover:underline">
+              Edit
+            </Link>
+          )}
         </div>
       </div>
 

@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
 import {
   createManualTrade,
+  updateManualTrade,
+  fetchTradeWithDetails,
   fetchEmotions,
   ensureDefaultEmotions,
   createEmotion,
   setTradeEmotion,
+  replaceTradeEmotions,
   setTradePlaybook,
+  removeTradePlaybook,
   fetchPlaybooks,
 } from '../lib/queries'
 import type { Emotion, Playbook } from '../lib/database.types'
@@ -16,6 +20,8 @@ import { summarizeFills, type FillAction, type FillInput } from '../lib/manualTr
 import { PsychologyChips } from '../components/PsychologyChips'
 import { PlaybookChip } from '../components/PlaybookChip'
 import { priceFmt } from '../lib/format'
+
+const DB_ACTION_TO_FILL: Record<string, FillAction> = { entry: 'open', add: 'add', trim: 'trim', exit: 'close' }
 
 /** yyyy-mm-ddThh:mm, the format <input type="datetime-local"> both wants and gives back. */
 function toDatetimeLocal(d: Date): string {
@@ -27,10 +33,8 @@ const ACTION_LABEL: Record<FillAction, string> = { open: 'Open', add: 'Add', tri
 
 type FillFormRow = { key: string; action: FillAction; time: string; price: string; quantity: string }
 
-let fillKeySeq = 0
-function newFillKey() {
-  fillKeySeq += 1
-  return `fill-${fillKeySeq}`
+function newFillKey(): string {
+  return crypto.randomUUID()
 }
 
 function FillRow({
@@ -94,6 +98,8 @@ function FillRow({
 }
 
 export function ManualTradeEntryPage() {
+  const { tradeId } = useParams<{ tradeId?: string }>()
+  const isEdit = !!tradeId
   const { user } = useAuth()
   const navigate = useNavigate()
   const { accounts, selectedAccountId } = useAccountFilter()
@@ -106,14 +112,15 @@ export function ManualTradeEntryPage() {
   // Defaults the account to whatever's currently selected in the sidebar switcher
   // (if it accepts manual entry), falling back to the first manual account -- runs
   // once, the first time manualAccounts has something to choose from, and never
-  // overrides a choice the user's already made.
+  // overrides a choice the user's already made. Skipped entirely in edit mode, where
+  // the loader below sets accountId from the existing trade instead.
   const defaultedAccountRef = useRef(false)
   useEffect(() => {
-    if (defaultedAccountRef.current || manualAccounts.length === 0) return
+    if (isEdit || defaultedAccountRef.current || manualAccounts.length === 0) return
     defaultedAccountRef.current = true
     const preferred = manualAccounts.find((a) => a.id === selectedAccountId)
     setAccountId((preferred ?? manualAccounts[0]).id)
-  }, [manualAccounts, selectedAccountId])
+  }, [isEdit, manualAccounts, selectedAccountId])
 
   const [symbol, setSymbol] = useState('')
   const [side, setSide] = useState<'long' | 'short'>('long')
@@ -132,6 +139,72 @@ export function ManualTradeEntryPage() {
       { key: newFillKey(), action: 'close', time: now, price: '', quantity: '1' },
     ]
   })
+
+  // Step 2: optional context, collapsed by default so logging a trade never feels
+  // heavier than "the numbers." Declared here (ahead of the edit loader below) so
+  // that effect can populate them directly.
+  const [showMore, setShowMore] = useState(false)
+  const [allPlaybooks, setAllPlaybooks] = useState<Playbook[]>([])
+  const [playbookId, setPlaybookId] = useState<string | null>(null)
+  const [notes, setNotes] = useState('')
+  const [allEmotions, setAllEmotions] = useState<Emotion[]>([])
+  const [selectedEmotions, setSelectedEmotions] = useState<{ emotion_id: string; phase: Emotion['phase'] }[]>([])
+  const [thesisNote, setThesisNote] = useState('')
+  const [reflectionNote, setReflectionNote] = useState('')
+
+  // Edit mode: load the existing trade and populate every field from it. Guards
+  // against editing a synced trade (trade_key !== null) -- this form only ever
+  // writes manual trades, so opening it against a real broker trade would silently
+  // discard the broker's own record on save.
+  const [loadingTrade, setLoadingTrade] = useState(isEdit)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!tradeId) return
+    fetchTradeWithDetails(tradeId)
+      .then((trade) => {
+        if (!trade) {
+          setLoadError('Trade not found.')
+          return
+        }
+        if (trade.trade_key !== null) {
+          setLoadError('This trade was synced from your broker and can’t be edited here.')
+          return
+        }
+        defaultedAccountRef.current = true
+        setAccountId(trade.account_id ?? '')
+        setSymbol(trade.symbol)
+        setSide(trade.side)
+        setFees(String(trade.actual_fee ?? trade.estimated_fee ?? 0))
+        setNotes(trade.notes ?? '')
+        setThesisNote(trade.thesis_note ?? '')
+        setReflectionNote(trade.reflection_note ?? '')
+        setPlaybookId(trade.trade_playbooks?.playbook_id ?? null)
+        setSelectedEmotions(trade.trade_emotions.map((te) => ({ emotion_id: te.emotion_id, phase: te.phase })))
+
+        if (trade.options_detail) {
+          setIsOption(true)
+          setOptionType(trade.options_detail.option_type)
+          setStrike(String(trade.options_detail.strike))
+          setExpiration(trade.options_detail.expiration)
+        }
+
+        const sortedExecutions = [...trade.executions].sort((a, b) => new Date(a.filled_at).getTime() - new Date(b.filled_at).getTime())
+        if (sortedExecutions.length > 0) {
+          setFills(
+            sortedExecutions.map((e) => ({
+              key: newFillKey(),
+              action: DB_ACTION_TO_FILL[e.action] ?? 'open',
+              time: toDatetimeLocal(new Date(e.filled_at)),
+              price: String(e.price),
+              quantity: String(e.quantity),
+            })),
+          )
+        }
+      })
+      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoadingTrade(false))
+  }, [tradeId])
 
   function updateFill(key: string, patch: Partial<FillFormRow>) {
     setFills((prev) => prev.map((f) => (f.key === key ? { ...f, ...patch } : f)))
@@ -169,17 +242,6 @@ export function ManualTradeEntryPage() {
     const account = manualAccounts.find((a) => a.id === accountId)
     if (account) setIsOption(account.default_asset_type === 'option')
   }, [accountId, manualAccounts])
-
-  // Step 2: optional context, collapsed by default so logging a trade never feels
-  // heavier than "the numbers."
-  const [showMore, setShowMore] = useState(false)
-  const [allPlaybooks, setAllPlaybooks] = useState<Playbook[]>([])
-  const [playbookId, setPlaybookId] = useState<string | null>(null)
-  const [notes, setNotes] = useState('')
-  const [allEmotions, setAllEmotions] = useState<Emotion[]>([])
-  const [selectedEmotions, setSelectedEmotions] = useState<{ emotion_id: string; phase: Emotion['phase'] }[]>([])
-  const [thesisNote, setThesisNote] = useState('')
-  const [reflectionNote, setReflectionNote] = useState('')
 
   useEffect(() => {
     fetchPlaybooks().then((p) => setAllPlaybooks((p ?? []).filter((pb) => !pb.archived)))
@@ -223,7 +285,7 @@ export function ManualTradeEntryPage() {
         price: Number(f.price),
         quantity: Number(f.quantity),
       }))
-      const trade = await createManualTrade(user.id, {
+      const tradeFields = {
         accountId,
         symbol: symbol.trim().toUpperCase(),
         side,
@@ -235,11 +297,22 @@ export function ManualTradeEntryPage() {
         notes,
         thesisNote,
         reflectionNote,
-      })
+      }
+
+      const trade = isEdit && tradeId ? await updateManualTrade(tradeId, tradeFields) : await createManualTrade(user.id, tradeFields)
+
       if (playbookId) {
         await setTradePlaybook(trade.id, playbookId)
+      } else if (isEdit) {
+        await removeTradePlaybook(trade.id)
       }
-      await Promise.all(selectedEmotions.map((em) => setTradeEmotion(trade.id, em.emotion_id, em.phase)))
+
+      if (isEdit) {
+        await replaceTradeEmotions(trade.id, selectedEmotions)
+      } else {
+        await Promise.all(selectedEmotions.map((em) => setTradeEmotion(trade.id, em.emotion_id, em.phase)))
+      }
+
       navigate(`/trades/${trade.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -247,10 +320,25 @@ export function ManualTradeEntryPage() {
     }
   }
 
+  if (loadingTrade) {
+    return <div className="text-neutral-500">Loading trade…</div>
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto flex max-w-lg flex-col gap-3">
+        <Link to={tradeId ? `/trades/${tradeId}` : '/trades'} className="text-sm text-neutral-500 hover:text-neutral-300">
+          ← Back
+        </Link>
+        <div className="rounded-xl border border-red-900 bg-red-950/40 p-6 text-center text-sm text-red-300">{loadError}</div>
+      </div>
+    )
+  }
+
   if (manualAccounts.length === 0) {
     return (
       <div className="mx-auto flex max-w-lg flex-col gap-3">
-        <h1 className="text-lg font-semibold text-neutral-100">Add Manual Trade</h1>
+        <h1 className="text-lg font-semibold text-neutral-100">{isEdit ? 'Edit Trade' : 'Add Manual Trade'}</h1>
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-6 text-center text-sm text-neutral-400">
           No manual-entry accounts yet.{' '}
           <Link to="/accounts" className="text-blue-400 hover:underline">
@@ -265,10 +353,10 @@ export function ManualTradeEntryPage() {
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4">
       <div>
-        <Link to="/trades" className="text-sm text-neutral-500 hover:text-neutral-300">
-          ← Trade Log
+        <Link to={isEdit ? `/trades/${tradeId}` : '/trades'} className="text-sm text-neutral-500 hover:text-neutral-300">
+          {isEdit ? '← Back to Trade' : '← Trade Log'}
         </Link>
-        <h1 className="mt-1 text-lg font-semibold text-neutral-100">Add Manual Trade</h1>
+        <h1 className="mt-1 text-lg font-semibold text-neutral-100">{isEdit ? 'Edit Trade' : 'Add Manual Trade'}</h1>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -291,7 +379,7 @@ export function ManualTradeEntryPage() {
             <label className="mb-1 block text-xs text-neutral-500">Symbol</label>
             <input
               value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
+              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
               placeholder="SPY"
               autoFocus
               className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
@@ -469,7 +557,7 @@ export function ManualTradeEntryPage() {
           disabled={submitting || !canSubmit}
           className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
         >
-          {submitting ? 'Saving…' : 'Save Trade'}
+          {submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Save Trade'}
         </button>
       </form>
     </div>

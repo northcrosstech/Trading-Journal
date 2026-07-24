@@ -36,6 +36,7 @@ function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/trades" element={<TradeLogPage />} />
             <Route path="/trades/new" element={<ManualTradeEntryPage />} />
+            <Route path="/trades/:tradeId/edit" element={<ManualTradeEntryPage />} />
             <Route path="/trades/import" element={<CsvImportPage />} />
             <Route path="/trades/psych-pass" element={<PsychPassPage />} />
             <Route path="/trades/:tradeId" element={<TradeDetailPage />} />

@@ -88,6 +88,75 @@ export type ManualTradeFields = {
   notes?: string
 }
 
+/** Shared between createManualTrade and updateManualTrade: turns ManualTradeFields
+ * into the trades-table row and the derived isOption/summary values both callers
+ * need for their own subsequent executions/options_detail writes. */
+function computeManualTradeRow(fields: ManualTradeFields) {
+  const isOption = fields.optionType !== undefined && fields.strike !== undefined && !!fields.expiration
+  const multiplier = isOption ? OPTION_MULTIPLIER : 1
+  const direction = fields.side === 'long' ? 1 : -1
+
+  const summary = summarizeFills(fields.fills)
+  const realizedPnlGross = computeRealizedPnlGross(summary, multiplier, direction)
+  const realizedPnlNet = realizedPnlGross !== null ? realizedPnlGross - fields.fees : null
+  const holdSeconds =
+    summary.closed && summary.firstFillTime && summary.lastExitFillTime
+      ? Math.round((new Date(summary.lastExitFillTime).getTime() - new Date(summary.firstFillTime).getTime()) / 1000)
+      : null
+
+  return {
+    isOption,
+    summary,
+    row: {
+      account_id: fields.accountId,
+      symbol: fields.symbol,
+      asset_type: isOption ? ('option' as const) : ('stock' as const),
+      side: fields.side,
+      status: summary.closed ? ('CLOSED' as const) : ('OPEN' as const),
+      avg_entry: summary.avgEntry,
+      avg_exit: summary.closed ? summary.avgExit : null,
+      hold_seconds: holdSeconds,
+      total_contracts: summary.entryQty,
+      realized_pnl_gross: summary.closed ? realizedPnlGross : null,
+      realized_pnl_net: summary.closed ? realizedPnlNet : null,
+      // Manual entry has no "estimate pending confirmation" phase -- whatever fee the
+      // user enters IS the real number, so it's stamped straight to 'actual'.
+      estimated_fee: fields.fees,
+      actual_fee: fields.fees,
+      fee_source: 'actual' as const,
+      first_in_at: summary.firstFillTime,
+      last_out_at: summary.closed ? summary.lastExitFillTime : null,
+      notes: fields.notes?.trim() || null,
+      thesis_note: fields.thesisNote?.trim() || null,
+      reflection_note: fields.reflectionNote?.trim() || null,
+    },
+  }
+}
+
+/** One executions row per fill, fee landing on the last fill in the list (the form/
+ * importer keep fills in chronological order) -- same place a single exit fill's fee
+ * lived before fills became a list. */
+function buildFillExecutions(userId: string, tradeId: string, fields: ManualTradeFields) {
+  const executions = fields.fills.map((f, i) => ({
+    user_id: userId,
+    trade_id: tradeId,
+    client_order_id: `manual-${tradeId}-${i}`,
+    filled_at: f.time,
+    action: FILL_ACTION_TO_DB[f.action],
+    price: f.price,
+    quantity: f.quantity,
+    side: executionSide(f.action, fields.side),
+    estimated_fee: 0,
+    actual_fee: 0,
+  }))
+  if (executions.length > 0) {
+    const last = executions[executions.length - 1]
+    last.estimated_fee = fields.fees
+    last.actual_fee = fields.fees
+  }
+  return executions
+}
+
 /** Writes a manually-entered (or CSV-imported) trade as real trades + executions
  * (+ options_detail) rows -- one row per fill (open/add/trim/close), so it's
  * first-class in the executions pipeline (per-trade executions view, any
@@ -103,71 +172,20 @@ export type ManualTradeFields = {
  * user-initiated write, not a repeated high-volume sync.
  */
 export async function createManualTrade(userId: string, fields: ManualTradeFields): Promise<Trade> {
-  const isOption = fields.optionType !== undefined && fields.strike !== undefined && !!fields.expiration
-  const multiplier = isOption ? OPTION_MULTIPLIER : 1
-  const direction = fields.side === 'long' ? 1 : -1
-
-  const summary = summarizeFills(fields.fills)
-  const realizedPnlGross = computeRealizedPnlGross(summary, multiplier, direction)
-  const realizedPnlNet = realizedPnlGross !== null ? realizedPnlGross - fields.fees : null
-  const holdSeconds =
-    summary.closed && summary.firstFillTime && summary.lastExitFillTime
-      ? Math.round((new Date(summary.lastExitFillTime).getTime() - new Date(summary.firstFillTime).getTime()) / 1000)
-      : null
+  const { isOption, summary, row } = computeManualTradeRow(fields)
 
   const { data: trade, error: tradeError } = await supabase
     .from('trades')
     .insert({
       user_id: userId,
-      account_id: fields.accountId,
-      symbol: fields.symbol,
-      asset_type: isOption ? 'option' : 'stock',
-      side: fields.side,
-      status: summary.closed ? 'CLOSED' : 'OPEN',
-      avg_entry: summary.avgEntry,
-      avg_exit: summary.closed ? summary.avgExit : null,
-      hold_seconds: holdSeconds,
-      total_contracts: summary.entryQty,
-      realized_pnl_gross: summary.closed ? realizedPnlGross : null,
-      realized_pnl_net: summary.closed ? realizedPnlNet : null,
-      // Manual entry has no "estimate pending confirmation" phase -- whatever fee the
-      // user enters IS the real number, so it's stamped straight to 'actual'.
-      estimated_fee: fields.fees,
-      actual_fee: fields.fees,
-      fee_source: 'actual',
       trade_key: null, // no dedup key needed -- a unique constraint on a nullable column allows multiple nulls
-      first_in_at: summary.firstFillTime,
-      last_out_at: summary.closed ? summary.lastExitFillTime : null,
-      notes: fields.notes?.trim() || null,
-      thesis_note: fields.thesisNote?.trim() || null,
-      reflection_note: fields.reflectionNote?.trim() || null,
+      ...row,
     })
     .select()
     .single()
   if (tradeError) throw tradeError
 
-  const executions = fields.fills.map((f, i) => ({
-    user_id: userId,
-    trade_id: trade.id,
-    client_order_id: `manual-${trade.id}-${i}`,
-    filled_at: f.time,
-    action: FILL_ACTION_TO_DB[f.action],
-    price: f.price,
-    quantity: f.quantity,
-    side: executionSide(f.action, fields.side),
-    estimated_fee: 0,
-    actual_fee: 0,
-  }))
-  // Total fee lands on the last fill in the list (the form/importer keep fills in
-  // chronological order) -- same place a single exit fill's fee lived before fills
-  // became a list.
-  if (executions.length > 0) {
-    const last = executions[executions.length - 1]
-    last.estimated_fee = fields.fees
-    last.actual_fee = fields.fees
-  }
-
-  const { error: execError } = await supabase.from('executions').insert(executions)
+  const { error: execError } = await supabase.from('executions').insert(buildFillExecutions(userId, trade.id, fields))
   if (execError) throw execError
 
   if (isOption) {
@@ -182,6 +200,52 @@ export async function createManualTrade(userId: string, fields: ManualTradeField
   }
 
   return trade
+}
+
+/** Edits a trade previously created by createManualTrade -- only ever called for
+ * trades with trade_key === null (the marker for "not synced from a broker"; see
+ * TradeDetailPage's isManualTrade check). Replaces executions and options_detail
+ * wholesale rather than diffing individual fills -- simpler and correct for
+ * arbitrary add/remove/reorder edits to the fill list. */
+export async function updateManualTrade(tradeId: string, fields: ManualTradeFields): Promise<Trade> {
+  const { isOption, summary, row } = computeManualTradeRow(fields)
+
+  const { data: trade, error: tradeError } = await supabase.from('trades').update(row).eq('id', tradeId).select().single()
+  if (tradeError) throw tradeError
+
+  const { error: delExecError } = await supabase.from('executions').delete().eq('trade_id', tradeId)
+  if (delExecError) throw delExecError
+
+  const { error: execError } = await supabase.from('executions').insert(buildFillExecutions(trade.user_id, tradeId, fields))
+  if (execError) throw execError
+
+  if (isOption) {
+    const { error: optError } = await supabase
+      .from('options_detail')
+      .upsert(
+        { trade_id: tradeId, option_type: fields.optionType!, strike: fields.strike!, expiration: fields.expiration!, premium: summary.avgEntry },
+        { onConflict: 'trade_id' },
+      )
+    if (optError) throw optError
+  } else {
+    const { error: delOptError } = await supabase.from('options_detail').delete().eq('trade_id', tradeId)
+    if (delOptError) throw delOptError
+  }
+
+  return trade
+}
+
+/** Replaces all of a trade's emotion tags wholesale -- used by the manual-trade edit
+ * form, which re-derives the full selected set each save rather than diffing
+ * individual toggles like the trade detail page's live PsychologyChips does. */
+export async function replaceTradeEmotions(tradeId: string, emotions: { emotion_id: string; phase: Emotion['phase'] }[]) {
+  const { error: delError } = await supabase.from('trade_emotions').delete().eq('trade_id', tradeId)
+  if (delError) throw delError
+  if (emotions.length === 0) return
+  const { error: insError } = await supabase
+    .from('trade_emotions')
+    .insert(emotions.map((e) => ({ trade_id: tradeId, emotion_id: e.emotion_id, phase: e.phase })))
+  if (insError) throw insError
 }
 
 const DAILY_PLAN_WITH_PLAYBOOKS_SELECT = '*, daily_plan_playbooks(playbook_id, playbooks(*))'
