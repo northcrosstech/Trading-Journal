@@ -206,6 +206,12 @@ export function TradeLogPage() {
               Import CSV
             </Link>
             <Link
+              to="/trades/import/robinhood"
+              className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-neutral-800"
+            >
+              Import Robinhood CSV
+            </Link>
+            <Link
               to="/trades/new"
               className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500"
             >

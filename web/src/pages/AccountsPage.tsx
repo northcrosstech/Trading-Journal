@@ -4,7 +4,10 @@ import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchAccounts, createAccount, updateAccount, setAccountEnabled, setAccountArchived } from '../lib/queries'
 import type { Account } from '../lib/database.types'
 
-const BROKER_LABEL: Record<Account['broker'], string> = { webull: 'Webull', schwab: 'Schwab', manual: 'Manual' }
+const BROKER_LABEL: Record<Account['broker'], string> = { webull: 'Webull', schwab: 'Schwab', manual: 'Manual', robinhood: 'Robinhood' }
+// Robinhood has no live-sync worker (Phase 3, not built) -- it's CSV-import only, same
+// mechanically as a plain manual account, just labeled distinctly.
+const forcesManualSync = (broker: Account['broker']) => broker === 'manual' || broker === 'robinhood'
 
 function Badge({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'good' }) {
   return (
@@ -31,7 +34,7 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
     onSave({
       label: label.trim(),
       account_type: accountType,
-      sync_mode: account.broker === 'manual' ? 'manual' : syncMode,
+      sync_mode: forcesManualSync(account.broker) ? 'manual' : syncMode,
       default_asset_type: defaultAssetType,
       per_contract_fee: Number(perContractFee) || 0,
     })
@@ -53,9 +56,9 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
         <option value="paper">Paper</option>
       </select>
       <select
-        value={account.broker === 'manual' ? 'manual' : syncMode}
+        value={forcesManualSync(account.broker) ? 'manual' : syncMode}
         onChange={(e) => setSyncMode(e.target.value as Account['sync_mode'])}
-        disabled={account.broker === 'manual'}
+        disabled={forcesManualSync(account.broker)}
         className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500 disabled:opacity-40"
       >
         <option value="auto">Auto-sync</option>
@@ -126,7 +129,7 @@ export function AccountsPage() {
       broker,
       label: label.trim(),
       account_type: accountType,
-      sync_mode: broker === 'manual' ? 'manual' : syncMode,
+      sync_mode: forcesManualSync(broker) ? 'manual' : syncMode,
       default_asset_type: defaultAssetType,
       per_contract_fee: Number(perContractFee) || 0,
     })
@@ -160,6 +163,7 @@ export function AccountsPage() {
             <option value="manual">Manual</option>
             <option value="webull">Webull</option>
             <option value="schwab">Schwab</option>
+            <option value="robinhood">Robinhood</option>
           </select>
           <input
             value={label}
@@ -176,9 +180,9 @@ export function AccountsPage() {
             <option value="paper">Paper</option>
           </select>
           <select
-            value={broker === 'manual' ? 'manual' : syncMode}
+            value={forcesManualSync(broker) ? 'manual' : syncMode}
             onChange={(e) => setSyncMode(e.target.value as Account['sync_mode'])}
-            disabled={broker === 'manual'}
+            disabled={forcesManualSync(broker)}
             className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500 disabled:opacity-40"
           >
             <option value="auto">Auto-sync</option>
@@ -213,11 +217,14 @@ export function AccountsPage() {
             Add
           </button>
         </div>
-        {broker !== 'manual' && (
+        {broker !== 'manual' && broker !== 'robinhood' && (
           <p className="text-xs text-amber-400/80">
             {BROKER_LABEL[broker]} credentials connected in a later step -- this creates a placeholder account with no
             live sync yet.
           </p>
+        )}
+        {broker === 'robinhood' && (
+          <p className="text-xs text-neutral-500">Robinhood trades come in via CSV import, not a live sync.</p>
         )}
       </form>
 
@@ -245,7 +252,7 @@ export function AccountsPage() {
                   {a.per_contract_fee > 0 && <Badge>${a.per_contract_fee.toFixed(2)}/contract</Badge>}
                   {!a.enabled && <Badge>Disabled</Badge>}
                 </div>
-                {a.broker !== 'manual' && !a.credential_ref && (
+                {a.broker !== 'manual' && a.broker !== 'robinhood' && !a.credential_ref && (
                   <p className="mt-1 text-xs text-neutral-600">Credentials connected in a later step -- placeholder only.</p>
                 )}
               </div>

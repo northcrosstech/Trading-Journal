@@ -15,6 +15,7 @@ import { PlaybookDetailPage } from './pages/PlaybookDetailPage'
 import { AccountsPage } from './pages/AccountsPage'
 import { ManualTradeEntryPage } from './pages/ManualTradeEntryPage'
 import { CsvImportPage } from './pages/CsvImportPage'
+import { RobinhoodImportPage } from './pages/RobinhoodImportPage'
 import { PsychPassPage } from './pages/PsychPassPage'
 import { SettingsPage } from './pages/SettingsPage'
 
@@ -38,6 +39,7 @@ function App() {
             <Route path="/trades/new" element={<ManualTradeEntryPage />} />
             <Route path="/trades/:tradeId/edit" element={<ManualTradeEntryPage />} />
             <Route path="/trades/import" element={<CsvImportPage />} />
+            <Route path="/trades/import/robinhood" element={<RobinhoodImportPage />} />
             <Route path="/trades/psych-pass" element={<PsychPassPage />} />
             <Route path="/trades/:tradeId" element={<TradeDetailPage />} />
             <Route path="/journal" element={<JournalPage />} />

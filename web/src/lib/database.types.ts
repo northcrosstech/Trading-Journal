@@ -4,7 +4,7 @@
 export type AccountRow = {
   id: string
   user_id: string
-  broker: 'webull' | 'schwab' | 'manual'
+  broker: 'webull' | 'schwab' | 'manual' | 'robinhood'
   label: string
   account_type: 'live' | 'paper'
   sync_mode: 'auto' | 'manual'
@@ -34,6 +34,7 @@ export type TradeRow = {
   actual_fee: number | null
   fee_source: 'estimated' | 'actual'
   trade_key: string | null
+  import_key: string | null
   notes: string | null
   thesis_note: string | null
   reflection_note: string | null
