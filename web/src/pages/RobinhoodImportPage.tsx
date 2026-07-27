@@ -1,20 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAccountFilter } from '../accounts/AccountContext'
+import { useAuth } from '../auth/AuthContext'
 import { parseRobinhoodActivityCsv, type RhSkippedRow } from '../lib/robinhoodCsv'
-import { groupRobinhoodExecutions, tradeToFillInputs, type RhGroupedTrade } from '../lib/robinhoodTrades'
+import { groupRobinhoodExecutions, tradeToFillInputs, tradeImportKey, computeImpliedFee, type RhGroupedTrade } from '../lib/robinhoodTrades'
 import { summarizeFills } from '../lib/manualTrade'
-import { priceFmt, dateTimeFmt } from '../lib/format'
+import { createImportedTrade } from '../lib/queries'
+import { priceFmt, currency, dateTimeFmt } from '../lib/format'
 
-/** Dedicated Robinhood "Activity" CSV importer -- dry-run preview only. Deliberately
- * stops short of writing anything to the database: parse -> group -> show exactly
- * what would be imported (and what's being skipped/flagged and why) so it can be
- * checked against the source file first. The commit step is a separate, later change. */
+/** Dedicated Robinhood "Activity" CSV importer: parse -> group -> a dry-run preview
+ * where individual trades can be excluded -> import only the checked ones as real
+ * trades + executions rows (see lib/queries.ts's createImportedTrade). */
 
-function TradeRow({ trade }: { trade: RhGroupedTrade }) {
+type ImportOutcome = 'imported' | 'duplicate' | 'error'
+
+function TradeRow({
+  trade,
+  selected,
+  onToggle,
+  outcome,
+}: {
+  trade: RhGroupedTrade
+  selected: boolean
+  onToggle: () => void
+  outcome?: { status: ImportOutcome; message?: string }
+}) {
   const [expanded, setExpanded] = useState(false)
   const fills = useMemo(() => tradeToFillInputs(trade), [trade])
   const summary = useMemo(() => summarizeFills(fills), [fills])
+  const fee = useMemo(() => computeImpliedFee(trade), [trade])
 
   const label =
     trade.assetType === 'option'
@@ -23,11 +37,11 @@ function TradeRow({ trade }: { trade: RhGroupedTrade }) {
 
   return (
     <>
-      <tr
-        onClick={() => setExpanded((v) => !v)}
-        className="cursor-pointer border-b border-neutral-800/60 last:border-0 hover:bg-neutral-800/40"
-      >
-        <td className="px-3 py-2 text-neutral-200">
+      <tr className="border-b border-neutral-800/60 last:border-0 hover:bg-neutral-800/40">
+        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+          <input type="checkbox" checked={selected} onChange={onToggle} />
+        </td>
+        <td className="cursor-pointer px-3 py-2 text-neutral-200" onClick={() => setExpanded((v) => !v)}>
           <span className={`mr-1.5 inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
           {label}
         </td>
@@ -36,6 +50,7 @@ function TradeRow({ trade }: { trade: RhGroupedTrade }) {
         <td className="px-3 py-2 text-right tabular-nums text-neutral-300">{trade.executions.length}</td>
         <td className="px-3 py-2 text-right tabular-nums text-neutral-300">{trade.orphanEntry ? '—' : priceFmt(summary.avgEntry)}</td>
         <td className="px-3 py-2 text-right tabular-nums text-neutral-300">{summary.avgExit !== null ? priceFmt(summary.avgExit) : '—'}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-neutral-400">{fee > 0 ? currency(fee) : '—'}</td>
         <td className="px-3 py-2">
           <span
             className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
@@ -50,10 +65,15 @@ function TradeRow({ trade }: { trade: RhGroupedTrade }) {
           {trade.notes.some((n) => n.includes('Assigned')) && 'assigned'}
           {trade.notes.some((n) => n.includes('Expired')) && 'expired worthless'}
         </td>
+        <td className="px-3 py-2 text-xs">
+          {outcome?.status === 'imported' && <span className="text-(--status-good)">Imported</span>}
+          {outcome?.status === 'duplicate' && <span className="text-neutral-500">Already imported</span>}
+          {outcome?.status === 'error' && <span className="text-(--status-critical)">{outcome.message ?? 'Failed'}</span>}
+        </td>
       </tr>
       {expanded && (
         <tr className="border-b border-neutral-800/60 bg-neutral-950/60 last:border-0">
-          <td colSpan={8} className="px-3 py-2">
+          <td colSpan={10} className="px-3 py-2">
             <table className="w-full text-[11px]">
               <thead>
                 <tr className="text-left uppercase tracking-wide text-neutral-600">
@@ -89,6 +109,8 @@ function TradeRow({ trade }: { trade: RhGroupedTrade }) {
 }
 
 export function RobinhoodImportPage() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
   const { accounts, selectedAccountId } = useAccountFilter()
   const manualAccounts = useMemo(() => accounts.filter((a) => a.sync_mode === 'manual'), [accounts])
 
@@ -131,6 +153,70 @@ export function RobinhoodImportPage() {
 
   const [expandedReason, setExpandedReason] = useState<string | null>(null)
 
+  // Selection defaults to "everything" -- the ask is to exclude unwanted trades from
+  // an otherwise-import-everything pass, not to opt in one at a time. Resets whenever
+  // a new file is parsed.
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  useEffect(() => {
+    setSelected(grouped ? new Set(grouped.trades.map((_, i) => i)) : new Set())
+  }, [grouped])
+
+  const [importing, setImporting] = useState(false)
+  const [outcomes, setOutcomes] = useState<Map<number, { status: ImportOutcome; message?: string }>>(new Map())
+
+  function toggleTrade(i: number) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  }
+
+  async function handleImport() {
+    if (!user || !grouped) return
+    setImporting(true)
+    setOutcomes(new Map())
+
+    for (let i = 0; i < grouped.trades.length; i++) {
+      if (!selected.has(i)) continue
+      const trade = grouped.trades[i]
+      let outcome: { status: ImportOutcome; message?: string }
+      try {
+        await createImportedTrade(user.id, {
+          accountId,
+          symbol: trade.symbol,
+          side: trade.direction,
+          assetType: trade.assetType,
+          optionType: trade.optionType,
+          strike: trade.strike,
+          expiration: trade.expiration,
+          fills: tradeToFillInputs(trade),
+          fee: computeImpliedFee(trade),
+          orphanEntry: trade.orphanEntry,
+          importKey: tradeImportKey(trade),
+        })
+        outcome = { status: 'imported' }
+      } catch (err) {
+        // unique_violation on (user_id, account_id, import_key) -- already imported,
+        // not a real failure.
+        const code = (err as { code?: string })?.code
+        outcome = code === '23505' ? { status: 'duplicate' } : { status: 'error', message: err instanceof Error ? err.message : String(err) }
+      }
+      // Updated per-row (not batched at the end) so the Result column and running
+      // totals reflect progress live -- a multi-hundred-trade import is a real wait,
+      // sequential one row at a time (no multi-statement transaction API available;
+      // see createManualTrade's doc comment for the same constraint).
+      setOutcomes((prev) => new Map(prev).set(i, outcome))
+    }
+
+    setImporting(false)
+  }
+
+  const importedCount = [...outcomes.values()].filter((o) => o.status === 'imported').length
+  const duplicateCount = [...outcomes.values()].filter((o) => o.status === 'duplicate').length
+  const errorCount = [...outcomes.values()].filter((o) => o.status === 'error').length
+
   const flaggedCount = grouped ? grouped.trades.filter((t) => t.orphanEntry).length : 0
   const openCount = grouped ? grouped.trades.filter((t) => t.status === 'OPEN').length : 0
 
@@ -157,8 +243,8 @@ export function RobinhoodImportPage() {
         </Link>
         <h1 className="mt-1 text-lg font-semibold text-neutral-100">Import Robinhood CSV</h1>
         <p className="mt-1 text-sm text-neutral-500">
-          Upload the "Activity" export from Robinhood (Account → Statements &amp; History → Export). This is a
-          dry-run preview only -- nothing is written to the database yet.
+          Upload the "Activity" export from Robinhood (Account → Statements &amp; History → Export). Review the
+          grouped trades below, uncheck anything you don't want, then import the rest.
         </p>
       </div>
 
@@ -185,11 +271,6 @@ export function RobinhoodImportPage() {
 
       {parsed && grouped && (
         <>
-          <div className="rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-xs text-amber-300">
-            Dry-run only -- reviewing this preview does not write anything to your journal. Nothing is imported until
-            a separate commit step (not built yet) runs.
-          </div>
-
           <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 text-sm text-neutral-300">
             Parsed <span className="font-medium text-neutral-100">{parsed.executions.length}</span> fill
             {parsed.executions.length === 1 ? '' : 's'} into{' '}
@@ -244,30 +325,68 @@ export function RobinhoodImportPage() {
           )}
 
           <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-            <div className="border-b border-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-300">
-              Grouped trades (click a row to see its fills)
+            <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
+              <span className="text-sm font-medium text-neutral-300">Grouped trades (click a row to see its fills)</span>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-neutral-500">{selected.size} of {grouped.trades.length} selected</span>
+                <button
+                  onClick={() => setSelected(new Set(grouped.trades.map((_, i) => i)))}
+                  className="text-blue-400 hover:underline"
+                >
+                  Select all
+                </button>
+                <button onClick={() => setSelected(new Set())} className="text-blue-400 hover:underline">
+                  Select none
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-neutral-800 text-left uppercase tracking-wide text-neutral-500">
+                    <th className="px-3 py-2"></th>
                     <th className="px-3 py-2">Symbol</th>
                     <th className="px-3 py-2">Type</th>
                     <th className="px-3 py-2">Direction</th>
                     <th className="px-3 py-2 text-right">Fills</th>
                     <th className="px-3 py-2 text-right">Avg Entry</th>
                     <th className="px-3 py-2 text-right">Avg Exit</th>
+                    <th className="px-3 py-2 text-right">Fee</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Flags</th>
+                    <th className="px-3 py-2">Result</th>
                   </tr>
                 </thead>
                 <tbody>
                   {grouped.trades.map((t, i) => (
-                    <TradeRow key={i} trade={t} />
+                    <TradeRow key={i} trade={t} selected={selected.has(i)} onToggle={() => toggleTrade(i)} outcome={outcomes.get(i)} />
                   ))}
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleImport}
+              disabled={importing || selected.size === 0 || !accountId}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
+            >
+              {importing ? 'Importing…' : `Import ${selected.size} trade${selected.size === 1 ? '' : 's'}`}
+            </button>
+            {outcomes.size > 0 && (
+              <p className="text-sm text-neutral-400">
+                <span className="text-(--status-good)">{importedCount} imported</span>
+                {duplicateCount > 0 && <>, <span className="text-neutral-500">{duplicateCount} already imported</span></>}
+                {errorCount > 0 && <>, <span className="text-(--status-critical)">{errorCount} failed</span></>}
+                .{' '}
+                {importedCount > 0 && (
+                  <button onClick={() => navigate('/trades')} className="text-blue-400 hover:underline">
+                    View in Trade Log →
+                  </button>
+                )}
+              </p>
+            )}
           </div>
 
           {grouped.warnings.length > 0 && (

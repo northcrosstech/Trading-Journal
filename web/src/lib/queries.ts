@@ -244,6 +244,114 @@ export async function deleteManualTrade(tradeId: string) {
   if (error) throw error
 }
 
+export type ImportedTradeFields = {
+  accountId: string
+  symbol: string
+  side: 'long' | 'short'
+  assetType: 'stock' | 'option'
+  optionType?: 'call' | 'put'
+  strike?: number
+  expiration?: string
+  fills: FillInput[] // chronological order, exactly like ManualTradeFields
+  fee: number
+  /** true = a standalone closing fill with no matching open in the source export --
+   * avg_entry/first_in_at/realized P&L are all genuinely unknown, not just
+   * unfavorable to compute, so they're written null rather than guessed. */
+  orphanEntry: boolean
+  /** Dedup key for trades.import_key -- deliberately NOT trade_key (see the migration
+   * comment): trade_key belongs solely to the Webull worker's upsert_trade_bundle RPC.
+   * Importers write trade_key = null, same as any manual trade. */
+  importKey: string
+}
+
+/** Writes one CSV-importer-sourced trade (Robinhood today) as real trades +
+ * executions (+ options_detail) rows, mirroring createManualTrade's shape and math
+ * (see lib/manualTrade.ts) but adding orphanEntry handling and import_key dedup that
+ * a hand-entered trade never needs. A unique_violation on (user_id, account_id,
+ * import_key) means this trade was already imported -- callers should let that
+ * surface as a distinguishable "already imported" outcome rather than a generic
+ * failure (see RobinhoodImportPage). */
+export async function createImportedTrade(userId: string, fields: ImportedTradeFields): Promise<Trade> {
+  const isOption = fields.assetType === 'option'
+  const multiplier = isOption ? OPTION_MULTIPLIER : 1
+  const direction = fields.side === 'long' ? 1 : -1
+  const summary = summarizeFills(fields.fills)
+
+  const closed = fields.orphanEntry || summary.closed
+  const avgEntry = fields.orphanEntry ? null : summary.avgEntry
+  const avgExit = closed ? summary.avgExit : null
+  const realizedPnlGross = fields.orphanEntry ? null : computeRealizedPnlGross(summary, multiplier, direction)
+  const realizedPnlNet = realizedPnlGross !== null ? realizedPnlGross - fields.fee : null
+  // Orphan trades have no known open fills (entryQty is 0 by construction), so their
+  // real size is the quantity that closed, not summary.entryQty.
+  const totalContracts = fields.orphanEntry ? summary.exitQty : summary.entryQty
+  const lastFillTime = fields.fills.length > 0 ? fields.fills[fields.fills.length - 1].time : null
+  const holdSeconds =
+    !fields.orphanEntry && summary.closed && summary.firstFillTime && summary.lastExitFillTime
+      ? Math.round((new Date(summary.lastExitFillTime).getTime() - new Date(summary.firstFillTime).getTime()) / 1000)
+      : null
+
+  const { data: trade, error: tradeError } = await supabase
+    .from('trades')
+    .insert({
+      user_id: userId,
+      trade_key: null,
+      import_key: fields.importKey,
+      account_id: fields.accountId,
+      symbol: fields.symbol,
+      asset_type: fields.assetType,
+      side: fields.side,
+      status: closed ? ('CLOSED' as const) : ('OPEN' as const),
+      avg_entry: avgEntry,
+      avg_exit: avgExit,
+      hold_seconds: holdSeconds,
+      total_contracts: totalContracts,
+      realized_pnl_gross: realizedPnlGross,
+      realized_pnl_net: realizedPnlNet,
+      estimated_fee: fields.fee,
+      actual_fee: fields.fee,
+      fee_source: 'actual' as const,
+      first_in_at: fields.orphanEntry ? null : summary.firstFillTime,
+      last_out_at: closed ? (fields.orphanEntry ? lastFillTime : summary.lastExitFillTime) : null,
+    })
+    .select()
+    .single()
+  if (tradeError) throw tradeError
+
+  const executions = fields.fills.map((f, i) => ({
+    user_id: userId,
+    trade_id: trade.id,
+    client_order_id: `rh-${trade.id}-${i}`,
+    filled_at: f.time,
+    action: FILL_ACTION_TO_DB[f.action],
+    price: f.price,
+    quantity: f.quantity,
+    side: executionSide(f.action, fields.side),
+    estimated_fee: 0,
+    actual_fee: 0,
+  }))
+  if (executions.length > 0) {
+    const last = executions[executions.length - 1]
+    last.estimated_fee = fields.fee
+    last.actual_fee = fields.fee
+  }
+  const { error: execError } = await supabase.from('executions').insert(executions)
+  if (execError) throw execError
+
+  if (isOption) {
+    const { error: optError } = await supabase.from('options_detail').insert({
+      trade_id: trade.id,
+      option_type: fields.optionType!,
+      strike: fields.strike!,
+      expiration: fields.expiration!,
+      premium: avgEntry ?? avgExit ?? 0,
+    })
+    if (optError) throw optError
+  }
+
+  return trade
+}
+
 /** Replaces all of a trade's emotion tags wholesale -- used by the manual-trade edit
  * form, which re-derives the full selected set each save rather than diffing
  * individual toggles like the trade detail page's live PsychologyChips does. */

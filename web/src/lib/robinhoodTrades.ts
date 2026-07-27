@@ -206,3 +206,28 @@ export function groupRobinhoodExecutions(executions: RhExecutionInput[]): { trad
 export function tradeToFillInputs(trade: RhGroupedTrade): FillInput[] {
   return trade.executions.map((e) => ({ action: e.tag, time: e.filledAt, price: e.price, quantity: e.quantity }))
 }
+
+/** Deterministic dedup key for a grouped trade -- deliberately not a hash (unlike
+ * trade_key's sha256): a plain, inspectable string is fine here since it only needs to
+ * be stable and unique per (contract/symbol, first fill), not collision-resistant
+ * against adversarial input. Re-importing the same export produces the same
+ * synthetic fill ordering/timestamps (see robinhoodCsv.ts), so the same trade yields
+ * the same key both times -- that's what lets trades.import_key's unique constraint
+ * catch a re-import as a no-op. */
+export function tradeImportKey(trade: RhGroupedTrade): string {
+  const first = trade.executions[0]
+  return `rh:${trade.key}:${first.filledAt}:${first.side}:${first.quantity}:${first.price}`
+}
+
+/** Robinhood's reported Amount is already fee-inclusive -- the gap between it and the
+ * raw price x quantity x multiplier IS the fee, in either direction (a buy pays more
+ * than the raw gross; a sell nets less), so its absolute value is always the fee. OEXP/
+ * OASGN rows carry no amount (amount === null) and contribute $0, correctly. */
+export function computeImpliedFee(trade: RhGroupedTrade): number {
+  const multiplier = trade.assetType === 'option' ? 100 : 1
+  return trade.executions.reduce((sum, e) => {
+    if (e.amount === null) return sum
+    const gross = e.price * e.quantity * multiplier
+    return sum + Math.abs(Math.abs(e.amount) - gross)
+  }, 0)
+}
