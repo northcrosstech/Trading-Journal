@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useAccountFilter } from '../accounts/AccountContext'
 import {
   fetchTradeWithDetails,
+  fetchTrades,
   fetchPlaybooks,
   fetchPlaybookWithRules,
   setTradePlaybook,
@@ -22,16 +24,97 @@ import {
   removeTradeEmotion,
   deleteManualTrade,
 } from '../lib/queries'
-import type { TradeWithDetails, Playbook, PlaybookWithRules, Emotion } from '../lib/database.types'
+import type { Trade, TradeWithDetails, Playbook, PlaybookWithRules, Emotion } from '../lib/database.types'
 import { fetchCandles, type CandleInterval, type CandleResult } from '../lib/candles'
 import { CandlestickChart, type ChartMarker } from '../components/CandlestickChart'
 import { PlaybookPicker } from '../components/PlaybookPicker'
 import { PlaybookRuleChecklist } from '../components/PlaybookRuleChecklist'
 import { PsychologyChips } from '../components/PsychologyChips'
-import { currency, holdTimeFmt, optionLabel, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt, dteLabel } from '../lib/format'
-import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd } from '../lib/metrics'
+import { currency, holdTimeFmt, optionLabel, dateFmt, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt, dteLabel } from '../lib/format'
+import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd, computeFifoAnalysis } from '../lib/metrics'
 
 const ACTION_LABEL: Record<string, string> = { entry: 'Open', add: 'Add', trim: 'Trim', exit: 'Close' }
+
+/** Same bucketing rule used everywhere else: closed trades sort by when the P&L
+ * became real, open trades by when the position was entered. */
+function navSortDate(t: Trade): string | null {
+  return t.status === 'CLOSED' ? t.last_out_at : t.first_in_at
+}
+
+/** Persistent trade list so you can click straight through a review session instead
+ * of going back to the Trade Log between every trade. Scoped to the current account
+ * filter, newest first -- a lighter fetchTrades (no execution/playbook joins) since
+ * this only ever renders a summary line per row. */
+function TradeNavPanel({ currentTradeId }: { currentTradeId: string }) {
+  const { selectedAccountId } = useAccountFilter()
+  const [navTrades, setNavTrades] = useState<Trade[] | null>(null)
+  const [filter, setFilter] = useState('')
+  const currentRowRef = useRef<HTMLAnchorElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchTrades(selectedAccountId).then((t) => {
+      if (!cancelled) setNavTrades(t)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedAccountId])
+
+  const sorted = useMemo(() => {
+    if (!navTrades) return []
+    return [...navTrades].sort((a, b) => new Date(navSortDate(b) ?? 0).getTime() - new Date(navSortDate(a) ?? 0).getTime())
+  }, [navTrades])
+
+  const visible = filter.trim() ? sorted.filter((t) => t.symbol.toLowerCase().includes(filter.trim().toLowerCase())) : sorted
+
+  // Keeps the current trade in view when navigating via the panel itself, without
+  // fighting the page's own scroll position on first load.
+  useEffect(() => {
+    currentRowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [currentTradeId])
+
+  return (
+    <aside className="hidden w-64 shrink-0 flex-col gap-2 lg:flex">
+      <input
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter by symbol…"
+        className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-xs text-neutral-100 outline-none focus:border-blue-500"
+      />
+      <div className="sticky top-6 flex max-h-[calc(100vh-8rem)] flex-col gap-0.5 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 p-1.5">
+        {navTrades === null && <div className="p-3 text-xs text-neutral-500">Loading…</div>}
+        {navTrades !== null && visible.length === 0 && <div className="p-3 text-xs text-neutral-500">No trades match.</div>}
+        {visible.map((t) => {
+          const isCurrent = t.id === currentTradeId
+          const date = navSortDate(t)
+          return (
+            <Link
+              key={t.id}
+              ref={isCurrent ? currentRowRef : undefined}
+              to={`/trades/${t.id}`}
+              className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition ${
+                isCurrent ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800/60 hover:text-neutral-200'
+              }`}
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate font-medium">{t.symbol}</span>
+                <span className="text-[11px] text-neutral-500">{date ? dateFmt(date) : '—'}</span>
+              </span>
+              {t.status === 'CLOSED' ? (
+                <span className={`shrink-0 tabular-nums ${(t.realized_pnl_net ?? 0) >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}`}>
+                  {currency(t.realized_pnl_net)}
+                </span>
+              ) : (
+                <span className="shrink-0 text-neutral-600">OPEN</span>
+              )}
+            </Link>
+          )
+        })}
+      </div>
+    </aside>
+  )
+}
 
 export function TradeDetailPage() {
   const { tradeId } = useParams<{ tradeId: string }>()
@@ -265,9 +348,12 @@ export function TradeDetailPage() {
   const sortedExecutions = [...trade.executions].sort(
     (a, b) => new Date(a.filled_at).getTime() - new Date(b.filled_at).getTime(),
   )
+  const fifo = computeFifoAnalysis(trade)
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex gap-5">
+      <TradeNavPanel currentTradeId={trade.id} />
+      <div className="flex min-w-0 flex-1 flex-col gap-5">
       <div>
         <Link to="/trades" className="text-sm text-neutral-500 hover:text-neutral-300">
           ← Trade Log
@@ -394,20 +480,36 @@ export function TradeDetailPage() {
                   <th className="px-4 py-2">Side</th>
                   <th className="px-4 py-2 text-right">Qty</th>
                   <th className="px-4 py-2 text-right">Price</th>
+                  <th className="px-4 py-2 text-right" title="FIFO-matched against the oldest still-open entry fills; gross, before fees">
+                    Realized (FIFO)
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {sortedExecutions.map((e) => (
-                  <tr key={e.id} className="border-b border-neutral-800/60 last:border-0">
-                    <td className="px-4 py-2 text-neutral-400" title={dateTimeFmt(e.filled_at)}>
-                      {timeOnlyFmt(e.filled_at)}
-                    </td>
-                    <td className="px-4 py-2 text-neutral-200">{ACTION_LABEL[e.action] ?? e.action}</td>
-                    <td className="px-4 py-2 capitalize text-neutral-400">{e.side}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-300">{e.quantity}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-300">{priceFmt(e.price)}</td>
-                  </tr>
-                ))}
+                {sortedExecutions.map((e) => {
+                  const trim = fifo.trimResults.get(e.id)
+                  return (
+                    <tr key={e.id} className="border-b border-neutral-800/60 last:border-0">
+                      <td className="px-4 py-2 text-neutral-400" title={dateTimeFmt(e.filled_at)}>
+                        {timeOnlyFmt(e.filled_at)}
+                      </td>
+                      <td className="px-4 py-2 text-neutral-200">{ACTION_LABEL[e.action] ?? e.action}</td>
+                      <td className="px-4 py-2 capitalize text-neutral-400">{e.side}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-neutral-300">{e.quantity}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-neutral-300">{priceFmt(e.price)}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">
+                        {trim ? (
+                          <span className={trim.realizedDollarGross >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
+                            {currency(trim.realizedDollarGross)}
+                            {trim.realizedPct !== null && <span className="ml-1 text-neutral-500">({percentFmt(trim.realizedPct)})</span>}
+                          </span>
+                        ) : (
+                          <span className="text-neutral-600">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -489,6 +591,7 @@ export function TradeDetailPage() {
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   )

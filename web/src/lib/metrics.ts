@@ -1,4 +1,4 @@
-import type { Trade, TradeWithDetails, Playbook, PlaybookRule, DailyRule, DailyPlanWithPlaybooks } from './database.types'
+import type { Trade, TradeWithDetails, Playbook, PlaybookRule, DailyRule, DailyPlanWithPlaybooks, Execution } from './database.types'
 import { centralDateStr } from './format'
 
 // Standard US equity option contract multiplier. Not currently persisted per-trade
@@ -6,6 +6,78 @@ import { centralDateStr } from './format'
 // this is an assumption -- correct for every real trade in this account so far, but
 // would be wrong for an unusual adjusted contract. Revisit if that ever comes up.
 const ASSUMED_OPTION_MULTIPLIER = 100
+
+const FIFO_EPS = 1e-9
+
+export type FifoTrimResult = {
+  /** Gross -- no fee allocation. A trade's fee typically lands on one execution (see
+   * buildFillExecutions in lib/queries.ts), so splitting it across trims by FIFO share
+   * would imply a precision the data doesn't have. */
+  realizedDollarGross: number
+  /** Return relative to the FIFO-matched cost basis this trim actually closed out --
+   * null if that cost basis is 0 (shouldn't happen for a real fill, but division by
+   * zero is still division by zero). */
+  realizedPct: number | null
+  costBasis: number
+}
+
+export type FifoAnalysis = {
+  /** Peak dollar capital actually committed to the position at any single moment --
+   * replaces the old "max(entry total, exit total)" heuristic, which happened to
+   * equal whichever of those two was numerically larger (driven purely by whether
+   * price rose or fell) rather than anything about position size, since both used the
+   * same total_contracts figure. This walks real fills, so it reflects true adds/trims. */
+  peakExposureUsd: number | null
+  /** Keyed by execution id -- only trim/exit (closing) fills have an entry. */
+  trimResults: Map<string, FifoTrimResult>
+}
+
+/** Walks a trade's fills in chronological order, matching each closing (trim/exit)
+ * fill against the oldest still-open opening (entry/add) fills first -- standard FIFO
+ * lot accounting. A trade's side is fixed for its whole life in this schema (a
+ * direction flip becomes two separate trades upstream, e.g. in the Robinhood
+ * importer's grouping), so there's no need to handle a running position changing
+ * sign here, unlike a raw broker-feed grouper. */
+export function computeFifoAnalysis(
+  trade: Pick<Trade, 'side' | 'asset_type'> & { executions: Pick<Execution, 'id' | 'action' | 'quantity' | 'price' | 'filled_at'>[] },
+): FifoAnalysis {
+  const multiplier = trade.asset_type === 'option' ? ASSUMED_OPTION_MULTIPLIER : 1
+  const direction = trade.side === 'long' ? 1 : -1
+  const sorted = [...trade.executions].sort((a, b) => new Date(a.filled_at).getTime() - new Date(b.filled_at).getTime())
+
+  const lots: { remainingQty: number; price: number }[] = []
+  let runningCostBasis = 0
+  let peakExposureUsd = 0
+  const trimResults = new Map<string, FifoTrimResult>()
+
+  for (const e of sorted) {
+    const isEntry = e.action === 'entry' || e.action === 'add'
+    if (isEntry) {
+      lots.push({ remainingQty: e.quantity, price: e.price })
+      runningCostBasis += e.quantity * e.price * multiplier
+      peakExposureUsd = Math.max(peakExposureUsd, runningCostBasis)
+      continue
+    }
+
+    let qtyToConsume = e.quantity
+    let costBasis = 0
+    while (qtyToConsume > FIFO_EPS && lots.length > 0) {
+      const lot = lots[0]
+      const consumed = Math.min(lot.remainingQty, qtyToConsume)
+      costBasis += consumed * lot.price * multiplier
+      lot.remainingQty -= consumed
+      qtyToConsume -= consumed
+      runningCostBasis -= consumed * lot.price * multiplier
+      if (lot.remainingQty <= FIFO_EPS) lots.shift()
+    }
+
+    const proceeds = e.price * e.quantity * multiplier
+    const realizedDollarGross = direction === 1 ? proceeds - costBasis : costBasis - proceeds
+    trimResults.set(e.id, { realizedDollarGross, realizedPct: costBasis > 0 ? realizedDollarGross / costBasis : null, costBasis })
+  }
+
+  return { peakExposureUsd: sorted.length > 0 ? peakExposureUsd : null, trimResults }
+}
 
 /**
  * Return on capital: net P&L / capital deployed. Capital deployed is the premium

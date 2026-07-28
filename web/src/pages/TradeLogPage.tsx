@@ -4,21 +4,11 @@ import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails } from '../lib/queries'
 import type { TradeWithDetails } from '../lib/database.types'
 import { currency, priceFmt, holdTimeFmt, optionLabel, dateFmt, percentFmt, dteLabel, centralDateStr } from '../lib/format'
-import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd } from '../lib/metrics'
+import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd, computeFifoAnalysis } from '../lib/metrics'
 import { DATE_RANGE_PRESETS, presetRange, type DateRangePreset } from '../lib/dateRange'
 
 type SortKey = 'date' | 'holdTime' | 'netPnl' | 'symbol' | 'returnPct'
 type WinLossFilter = 'all' | 'win' | 'loss'
-
-/** Peak capital committed to the position -- the larger of what was deployed at
- * entry vs. exit (they can differ if size was added/trimmed along the way). */
-function posSize(t: TradeWithDetails): number | null {
-  const entry = entrySizeUsd(t)
-  const exit = exitSizeUsd(t)
-  if (entry === null) return exit
-  if (exit === null) return entry
-  return Math.max(entry, exit)
-}
 
 export function TradeLogPage() {
   const { selectedAccountId } = useAccountFilter()
@@ -312,7 +302,9 @@ export function TradeLogPage() {
               <th className="px-3 py-2.5 text-right">Exit</th>
               <th className="px-3 py-2.5 text-right">Ent Tot</th>
               <th className="px-3 py-2.5 text-right">Ext Tot</th>
-              <th className="px-3 py-2.5 text-right">Pos</th>
+              <th className="px-3 py-2.5 text-right" title="Peak dollar capital actually committed at any single moment in the trade">
+                Pos
+              </th>
               <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('holdTime')}>
                 Hold{sortIndicator('holdTime')}
               </th>
@@ -356,7 +348,7 @@ export function TradeLogPage() {
                 {!collapsed && group.trades.map((t) => {
                   const returnPct = returnOnCapitalPct(t)
                   const date = t.status === 'CLOSED' ? t.last_out_at : t.first_in_at
-                  const pos = posSize(t)
+                  const pos = computeFifoAnalysis(t).peakExposureUsd
                   return (
                     <tr
                       key={t.id}
