@@ -7,21 +7,19 @@ import { centralDateStr } from './format'
 // would be wrong for an unusual adjusted contract. Revisit if that ever comes up.
 const ASSUMED_OPTION_MULTIPLIER = 100
 
-const FIFO_EPS = 1e-9
-
-export type FifoTrimResult = {
+export type TrimResult = {
   /** Gross -- no fee allocation. A trade's fee typically lands on one execution (see
-   * buildFillExecutions in lib/queries.ts), so splitting it across trims by FIFO share
-   * would imply a precision the data doesn't have. */
+   * buildFillExecutions in lib/queries.ts), so splitting it across trims would imply a
+   * precision the data doesn't have. */
   realizedDollarGross: number
-  /** Return relative to the FIFO-matched cost basis this trim actually closed out --
-   * null if that cost basis is 0 (shouldn't happen for a real fill, but division by
-   * zero is still division by zero). */
+  /** Return relative to this trim's share of the running average cost basis -- null
+   * if that cost basis is 0 (shouldn't happen for a real fill, but division by zero
+   * is still division by zero). */
   realizedPct: number | null
   costBasis: number
 }
 
-export type FifoAnalysis = {
+export type CostBasisAnalysis = {
   /** Peak dollar capital actually committed to the position at any single moment --
    * replaces the old "max(entry total, exit total)" heuristic, which happened to
    * equal whichever of those two was numerically larger (driven purely by whether
@@ -29,47 +27,47 @@ export type FifoAnalysis = {
    * same total_contracts figure. This walks real fills, so it reflects true adds/trims. */
   peakExposureUsd: number | null
   /** Keyed by execution id -- only trim/exit (closing) fills have an entry. */
-  trimResults: Map<string, FifoTrimResult>
+  trimResults: Map<string, TrimResult>
 }
 
-/** Walks a trade's fills in chronological order, matching each closing (trim/exit)
- * fill against the oldest still-open opening (entry/add) fills first -- standard FIFO
- * lot accounting. A trade's side is fixed for its whole life in this schema (a
- * direction flip becomes two separate trades upstream, e.g. in the Robinhood
- * importer's grouping), so there's no need to handle a running position changing
- * sign here, unlike a raw broker-feed grouper. */
-export function computeFifoAnalysis(
+/** Walks a trade's fills in chronological order using running weighted-average-cost
+ * accounting (not FIFO lots): every add blends into a single average cost per share,
+ * and every trim/exit is priced against THAT average as of the moment it happens --
+ * matching what a broker's live P&L display shows in real time, and what a trader
+ * actually saw while making the decision to trim, rather than an after-the-fact FIFO
+ * lot assignment that mostly matters for tax accounting. A trim's share of the
+ * average cost is removed proportionally, which is what keeps the average cost of
+ * whatever remains open unchanged -- the defining property of this method. A trade's
+ * side is fixed for its whole life in this schema (a direction flip becomes two
+ * separate trades upstream, e.g. in the Robinhood importer's grouping), so there's no
+ * need to handle a running position changing sign here. */
+export function computeCostBasisAnalysis(
   trade: Pick<Trade, 'side' | 'asset_type'> & { executions: Pick<Execution, 'id' | 'action' | 'quantity' | 'price' | 'filled_at'>[] },
-): FifoAnalysis {
+): CostBasisAnalysis {
   const multiplier = trade.asset_type === 'option' ? ASSUMED_OPTION_MULTIPLIER : 1
   const direction = trade.side === 'long' ? 1 : -1
   const sorted = [...trade.executions].sort((a, b) => new Date(a.filled_at).getTime() - new Date(b.filled_at).getTime())
 
-  const lots: { remainingQty: number; price: number }[] = []
+  let runningQty = 0
   let runningCostBasis = 0
   let peakExposureUsd = 0
-  const trimResults = new Map<string, FifoTrimResult>()
+  const trimResults = new Map<string, TrimResult>()
 
   for (const e of sorted) {
     const isEntry = e.action === 'entry' || e.action === 'add'
     if (isEntry) {
-      lots.push({ remainingQty: e.quantity, price: e.price })
+      runningQty += e.quantity
       runningCostBasis += e.quantity * e.price * multiplier
       peakExposureUsd = Math.max(peakExposureUsd, runningCostBasis)
       continue
     }
 
-    let qtyToConsume = e.quantity
-    let costBasis = 0
-    while (qtyToConsume > FIFO_EPS && lots.length > 0) {
-      const lot = lots[0]
-      const consumed = Math.min(lot.remainingQty, qtyToConsume)
-      costBasis += consumed * lot.price * multiplier
-      lot.remainingQty -= consumed
-      qtyToConsume -= consumed
-      runningCostBasis -= consumed * lot.price * multiplier
-      if (lot.remainingQty <= FIFO_EPS) lots.shift()
-    }
+    // Proportional share of the current average cost, not a fixed per-share price
+    // times quantity -- equivalent, but avoids a separate division that could drift
+    // from runningCostBasis's own rounding over many trims.
+    const costBasis = runningQty > 0 ? runningCostBasis * (e.quantity / runningQty) : 0
+    runningQty -= e.quantity
+    runningCostBasis -= costBasis
 
     const proceeds = e.price * e.quantity * multiplier
     const realizedDollarGross = direction === 1 ? proceeds - costBasis : costBasis - proceeds

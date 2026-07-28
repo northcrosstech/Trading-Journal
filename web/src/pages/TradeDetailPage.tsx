@@ -31,7 +31,7 @@ import { PlaybookPicker } from '../components/PlaybookPicker'
 import { PlaybookRuleChecklist } from '../components/PlaybookRuleChecklist'
 import { PsychologyChips } from '../components/PsychologyChips'
 import { currency, holdTimeFmt, optionLabel, dateFmt, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt, dteLabel } from '../lib/format'
-import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd, computeFifoAnalysis } from '../lib/metrics'
+import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd, computeCostBasisAnalysis } from '../lib/metrics'
 
 const ACTION_LABEL: Record<string, string> = { entry: 'Open', add: 'Add', trim: 'Trim', exit: 'Close' }
 
@@ -348,7 +348,7 @@ export function TradeDetailPage() {
   const sortedExecutions = [...trade.executions].sort(
     (a, b) => new Date(a.filled_at).getTime() - new Date(b.filled_at).getTime(),
   )
-  const fifo = computeFifoAnalysis(trade)
+  const costBasis = computeCostBasisAnalysis(trade)
 
   return (
     <div className="flex gap-5">
@@ -480,14 +480,14 @@ export function TradeDetailPage() {
                   <th className="px-4 py-2">Side</th>
                   <th className="px-4 py-2 text-right">Qty</th>
                   <th className="px-4 py-2 text-right">Price</th>
-                  <th className="px-4 py-2 text-right" title="FIFO-matched against the oldest still-open entry fills; gross, before fees">
-                    Realized (FIFO)
+                  <th className="px-4 py-2 text-right" title="Priced against the running average cost of the position at that moment; gross, before fees">
+                    Realized
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {sortedExecutions.map((e) => {
-                  const trim = fifo.trimResults.get(e.id)
+                  const trim = costBasis.trimResults.get(e.id)
                   return (
                     <tr key={e.id} className="border-b border-neutral-800/60 last:border-0">
                       <td className="px-4 py-2 text-neutral-400" title={dateTimeFmt(e.filled_at)}>

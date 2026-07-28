@@ -4,7 +4,7 @@ import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails } from '../lib/queries'
 import type { TradeWithDetails } from '../lib/database.types'
 import { currency, priceFmt, holdTimeFmt, optionLabel, dateFmt, percentFmt, dteLabel, centralDateStr } from '../lib/format'
-import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd, computeFifoAnalysis } from '../lib/metrics'
+import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd, computeCostBasisAnalysis } from '../lib/metrics'
 import { DATE_RANGE_PRESETS, presetRange, type DateRangePreset } from '../lib/dateRange'
 
 type SortKey = 'date' | 'holdTime' | 'netPnl' | 'symbol' | 'returnPct'
@@ -348,7 +348,7 @@ export function TradeLogPage() {
                 {!collapsed && group.trades.map((t) => {
                   const returnPct = returnOnCapitalPct(t)
                   const date = t.status === 'CLOSED' ? t.last_out_at : t.first_in_at
-                  const pos = computeFifoAnalysis(t).peakExposureUsd
+                  const pos = computeCostBasisAnalysis(t).peakExposureUsd
                   return (
                     <tr
                       key={t.id}
