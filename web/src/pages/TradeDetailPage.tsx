@@ -23,6 +23,8 @@ import {
   setTradeEmotion,
   removeTradeEmotion,
   deleteManualTrade,
+  markTradeExpiredWorthless,
+  clearManualOverride,
 } from '../lib/queries'
 import type { Trade, TradeWithDetails, Playbook, PlaybookWithRules, Emotion } from '../lib/database.types'
 import { fetchCandles, type CandleInterval, type CandleResult } from '../lib/candles'
@@ -124,6 +126,8 @@ export function TradeDetailPage() {
   const [trade, setTrade] = useState<TradeWithDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [confirmingExpire, setConfirmingExpire] = useState(false)
+  const [marking, setMarking] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   const [notes, setNotes] = useState('')
@@ -198,6 +202,33 @@ export function TradeDetailPage() {
       setError(e instanceof Error ? e.message : String(e))
       setDeleting(false)
       setConfirmingDelete(false)
+    }
+  }
+
+  async function handleMarkExpiredWorthless() {
+    if (!trade?.options_detail) return
+    setMarking(true)
+    try {
+      await markTradeExpiredWorthless(trade, trade.options_detail.expiration)
+      setConfirmingExpire(false)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setMarking(false)
+    }
+  }
+
+  async function handleClearOverride() {
+    if (!tradeId) return
+    setMarking(true)
+    try {
+      await clearManualOverride(tradeId)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setMarking(false)
     }
   }
 
@@ -394,6 +425,42 @@ export function TradeDetailPage() {
               </button>
               <button type="button" onClick={() => setConfirmingDelete(false)} className="text-neutral-500 hover:underline">
                 Cancel
+              </button>
+            </span>
+          )}
+          {trade.status === 'OPEN' &&
+            trade.options_detail &&
+            new Date(trade.options_detail.expiration) < new Date() &&
+            !confirmingExpire && (
+              <button
+                type="button"
+                onClick={() => setConfirmingExpire(true)}
+                className="text-xs text-amber-400 hover:underline"
+              >
+                Mark expired worthless
+              </button>
+            )}
+          {confirmingExpire && (
+            <span className="flex items-center gap-2 text-xs">
+              <span className="text-amber-300">Close at $0, effective the expiration date?</span>
+              <button
+                type="button"
+                onClick={handleMarkExpiredWorthless}
+                disabled={marking}
+                className="text-amber-400 hover:underline disabled:opacity-50"
+              >
+                {marking ? 'Closing…' : 'Confirm'}
+              </button>
+              <button type="button" onClick={() => setConfirmingExpire(false)} className="text-neutral-500 hover:underline">
+                Cancel
+              </button>
+            </span>
+          )}
+          {trade.manually_closed && !confirmingExpire && (
+            <span className="flex items-center gap-1.5 text-xs text-neutral-500">
+              <span title="This trade's outcome was set manually -- the broker sync won't overwrite it.">Manually closed</span>
+              <button type="button" onClick={handleClearOverride} disabled={marking} className="text-blue-400 hover:underline disabled:opacity-50">
+                Clear
               </button>
             </span>
           )}

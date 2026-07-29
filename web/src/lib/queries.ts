@@ -244,6 +244,56 @@ export async function deleteManualTrade(tradeId: string) {
   if (error) throw error
 }
 
+/** Closes a still-OPEN option trade at $0 -- for a worthless expiration, which never
+ * produces a broker order (nothing was traded), so the Webull sync worker can never
+ * derive this on its own; it just keeps re-deriving OPEN forever from the same
+ * unchanging order history. Works for ANY trade regardless of trade_key (synced or
+ * manual) -- unlike a full edit, this only ever touches the six "outcome" fields
+ * (status/avg_exit/hold_seconds/realized P&L/last_out_at), which is exactly what
+ * upsert_trade_bundle's on-conflict clause skips overwriting once manually_closed is
+ * true, so a broker resync 15 minutes later can't silently revert it. */
+export async function markTradeExpiredWorthless(
+  trade: Pick<Trade, 'id' | 'side' | 'asset_type' | 'avg_entry' | 'total_contracts' | 'first_in_at' | 'actual_fee' | 'estimated_fee' | 'fee_source'>,
+  expirationDate: string, // yyyy-mm-dd
+): Promise<void> {
+  const multiplier = trade.asset_type === 'option' ? OPTION_MULTIPLIER : 1
+  const direction = trade.side === 'long' ? 1 : -1
+  const qty = trade.total_contracts ?? 0
+  const avgEntry = trade.avg_entry ?? 0
+  // Long: full loss of premium paid. Short: full gain of premium collected.
+  const realizedPnlGross = (0 - avgEntry) * qty * multiplier * direction
+  const feeUsed = trade.fee_source === 'actual' ? (trade.actual_fee ?? 0) : trade.estimated_fee
+  const realizedPnlNet = realizedPnlGross - feeUsed
+  // Approximate US market close on expiration day -- Webull/Robinhood don't give an
+  // intraday expiration timestamp either, since nothing was actually traded.
+  const lastOutAt = new Date(`${expirationDate}T20:00:00.000Z`).toISOString()
+  const holdSeconds = trade.first_in_at
+    ? Math.round((new Date(lastOutAt).getTime() - new Date(trade.first_in_at).getTime()) / 1000)
+    : null
+
+  const { error } = await supabase
+    .from('trades')
+    .update({
+      status: 'CLOSED',
+      avg_exit: 0,
+      hold_seconds: holdSeconds,
+      realized_pnl_gross: realizedPnlGross,
+      realized_pnl_net: realizedPnlNet,
+      last_out_at: lastOutAt,
+      manually_closed: true,
+    })
+    .eq('id', trade.id)
+  if (error) throw error
+}
+
+/** Reverts markTradeExpiredWorthless -- lets the next broker resync (if any) take
+ * back over deriving this trade's outcome. Doesn't itself recompute status back to
+ * OPEN; that only happens once the worker actually re-syncs. */
+export async function clearManualOverride(tradeId: string) {
+  const { error } = await supabase.from('trades').update({ manually_closed: false }).eq('id', tradeId)
+  if (error) throw error
+}
+
 export type ImportedTradeFields = {
   accountId: string
   symbol: string

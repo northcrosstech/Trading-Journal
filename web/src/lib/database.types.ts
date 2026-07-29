@@ -35,6 +35,7 @@ export type TradeRow = {
   fee_source: 'estimated' | 'actual'
   trade_key: string | null
   import_key: string | null
+  manually_closed: boolean
   notes: string | null
   thesis_note: string | null
   reflection_note: string | null
