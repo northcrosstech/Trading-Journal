@@ -37,7 +37,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from transform import Trade
+from transform import Execution, Trade, _parse_time
 
 load_dotenv()
 
@@ -59,13 +59,15 @@ def get_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
+def _trade_key(contract_key: str, first_order_id: Optional[str]) -> str:
+    return hashlib.sha256(f"{contract_key}|{first_order_id}".encode()).hexdigest()
+
+
 def compute_trade_key(trade: Trade) -> str:
     """Deterministic id for a derived (non-broker) Trade grouping. Same executions
     regrouped -> same key. A reopen after going flat -> a different key, because the
     first execution (and therefore its client_order_id) differs."""
-    first_order_id = trade.executions[0].order_id
-    raw = f"{trade.contract_key}|{first_order_id}"
-    return hashlib.sha256(raw.encode()).hexdigest()
+    return _trade_key(trade.contract_key, trade.executions[0].order_id)
 
 
 def _build_payload(user_id: str, trade: Trade) -> dict:
@@ -142,6 +144,156 @@ def write_trades(client: Client, user_id: str, trades: list[Trade]) -> WriteResu
             result.warnings.append(f"{trade.contract_key} ({compute_trade_key(trade)}): write failed ({exc!r})")
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Incremental sync support
+#
+# The sync pulls only a short recent window of orders (see sync.resolve_start_date),
+# but group_trades() is stateless -- it rebuilds positions from zero using only the
+# executions it's handed. Without the earlier fills, a close of a position opened
+# before the window would look like a brand-new short trade. So before grouping, the
+# sync "seeds" the grouper with the already-stored executions of:
+#   - every still-OPEN worker-synced trade (a multi-week hold continues correctly no
+#     matter how old its opening fill is), and
+#   - every trade that already contains one of the freshly pulled orders (a trade
+#     opened before the window and closed inside it regroups whole, not as a
+#     phantom trade made of just its tail).
+# ---------------------------------------------------------------------------
+
+_SEED_IN_CHUNK = 100  # keeps PostgREST `in.(...)` filters well under URL length limits
+_DEFAULT_MULTIPLIER = 100.0  # not stored per execution; standard equity option contract
+
+
+def get_last_successful_sync_at(client: Client, user_id: str) -> Optional[datetime]:
+    res = (
+        client.table("sync_log")
+        .select("ran_at")
+        .eq("user_id", user_id)
+        .eq("status", "success")
+        .order("ran_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        return None
+    return _parse_time(res.data[0]["ran_at"])
+
+
+def _recover_contract_key(trade_row: dict, detail: dict, order_ids: list[str]) -> Optional[str]:
+    """The DB doesn't store transform.py's contract_key, and rebuilding it from columns
+    risks tiny formatting drift (strike "500" vs "500.0", option_type casing) -- which
+    would change trade_key and silently fork the trade into a duplicate row. So try the
+    plausible spellings and only accept one whose hash reproduces the stored trade_key."""
+    symbol = trade_row["symbol"]
+    strike = detail["strike"]
+    expiration = str(detail["expiration"])
+    option_type = str(detail["option_type"])
+
+    strikes = {str(float(strike)), str(strike)}
+    expirations = {expiration, expiration.replace("-", "")}
+    option_types = {option_type.upper(), option_type, option_type.capitalize()}
+
+    for s in strikes:
+        for exp in expirations:
+            for ot in option_types:
+                candidate = f"{symbol}|{s}|{exp}|{ot}"
+                if any(_trade_key(candidate, oid) == trade_row["trade_key"] for oid in order_ids):
+                    return candidate
+    return None
+
+
+def load_seed_executions(
+    client: Client, user_id: str, pulled_order_ids: list[str]
+) -> tuple[list[Execution], list[str]]:
+    """Returns stored executions (rebuilt as transform.Execution objects) for every
+    worker-synced trade that is still OPEN or already contains one of
+    pulled_order_ids. See the section comment above for why."""
+    warnings: list[str] = []
+
+    open_res = (
+        client.table("trades")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("status", "OPEN")
+        .eq("manually_closed", False)
+        .eq("asset_type", "option")
+        .not_.is_("trade_key", "null")
+        .is_("import_key", "null")
+        .execute()
+    )
+    trade_ids = {row["id"] for row in open_res.data or []}
+
+    unique_order_ids = list(dict.fromkeys(oid for oid in pulled_order_ids if oid))
+    for i in range(0, len(unique_order_ids), _SEED_IN_CHUNK):
+        chunk = unique_order_ids[i : i + _SEED_IN_CHUNK]
+        linked_res = (
+            client.table("executions")
+            .select("trade_id")
+            .eq("user_id", user_id)
+            .in_("client_order_id", chunk)
+            .execute()
+        )
+        trade_ids.update(row["trade_id"] for row in linked_res.data or [] if row.get("trade_id"))
+
+    seed: list[Execution] = []
+    trade_id_list = list(trade_ids)
+    for i in range(0, len(trade_id_list), _SEED_IN_CHUNK):
+        chunk = trade_id_list[i : i + _SEED_IN_CHUNK]
+        res = (
+            client.table("trades")
+            .select(
+                "id, symbol, trade_key, "
+                "options_detail(option_type, strike, expiration), "
+                "executions(client_order_id, filled_at, action, side, price, quantity, estimated_fee, actual_fee)"
+            )
+            .in_("id", chunk)
+            .not_.is_("trade_key", "null")
+            .is_("import_key", "null")
+            .execute()
+        )
+        for row in res.data or []:
+            detail = row.get("options_detail")
+            if isinstance(detail, list):
+                detail = detail[0] if detail else None
+            execs = row.get("executions") or []
+            if not detail or not execs:
+                continue
+
+            order_ids = [e["client_order_id"] for e in execs]
+            contract_key = _recover_contract_key(row, detail, order_ids)
+            if contract_key is None:
+                warnings.append(
+                    f"trade {row['id']} ({row['symbol']}): couldn't reproduce its trade_key from stored "
+                    f"fields -- not seeded, so a fill on it this cycle may group incorrectly"
+                )
+                continue
+
+            symbol, strike, expiration, option_type = contract_key.split("|")
+            for e in execs:
+                price = float(e["price"])
+                quantity = float(e["quantity"])
+                seed.append(
+                    Execution(
+                        contract_key=contract_key,
+                        symbol=symbol,
+                        option_type=option_type,
+                        strike=float(strike),
+                        expiration=expiration,
+                        action="open" if e["action"] in ("entry", "add") else "close",
+                        side=e["side"],
+                        quantity=quantity,
+                        price_per_contract=price,
+                        multiplier=_DEFAULT_MULTIPLIER,
+                        dollar_value=price * quantity * _DEFAULT_MULTIPLIER,
+                        filled_at=_parse_time(e["filled_at"]),
+                        order_id=e["client_order_id"],
+                        estimated_fee=float(e["estimated_fee"] or 0),
+                        actual_fee=float(e["actual_fee"]) if e["actual_fee"] is not None else None,
+                    )
+                )
+
+    return seed, warnings
 
 
 def write_sync_log(

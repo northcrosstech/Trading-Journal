@@ -189,3 +189,89 @@ def test_should_sync_now_taper_budget_resets_on_a_new_day():
     assert sync._should_sync_now(day1_close.replace(minute=50))[0] is False  # budget used up on day 1
 
     assert sync._should_sync_now(day2_close)[0] is True  # fresh budget on day 2
+
+
+# ---------------------------------------------------------------------------
+# Incremental sync: start-date resolution + seeding the grouper with stored fills
+# ---------------------------------------------------------------------------
+
+from datetime import timezone
+
+import db_writer
+from transform import Execution, group_trades
+
+
+def test_resolve_start_date_explicit_override_wins(monkeypatch):
+    monkeypatch.setattr(sync, "START_DATE", "2026-01-01")
+    monkeypatch.setattr(sync, "get_last_successful_sync_at", lambda db, uid: pytest.fail("should not query"))
+    assert sync.resolve_start_date(db=None) == "2026-01-01"
+
+
+def test_resolve_start_date_first_sync_uses_webull_default(monkeypatch):
+    monkeypatch.setattr(sync, "START_DATE", None)
+    monkeypatch.setattr(sync, "get_last_successful_sync_at", lambda db, uid: None)
+    assert sync.resolve_start_date(db=None) is None
+
+
+def test_resolve_start_date_is_last_success_minus_overlap(monkeypatch):
+    monkeypatch.setattr(sync, "START_DATE", None)
+    monkeypatch.setattr(sync, "SYNC_OVERLAP_DAYS", 2)
+    # 01:30 UTC on Oct 9 is still Oct 8 in New York -- the market-tz date is what counts.
+    last = datetime(2026, 10, 9, 1, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(sync, "get_last_successful_sync_at", lambda db, uid: last)
+    now = datetime(2026, 10, 9, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert sync.resolve_start_date(db=None, now=now) == "2026-10-06"
+
+
+def test_resolve_start_date_catches_up_after_long_downtime(monkeypatch):
+    monkeypatch.setattr(sync, "START_DATE", None)
+    monkeypatch.setattr(sync, "SYNC_OVERLAP_DAYS", 2)
+    last = datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sync, "get_last_successful_sync_at", lambda db, uid: last)
+    now = datetime(2026, 10, 9, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert sync.resolve_start_date(db=None, now=now) == "2026-07-30"
+
+
+def _exec(order_id, side, qty, price, filled_at, contract_key="SPY|500.0|2026-12-18|CALL"):
+    symbol, strike, expiration, option_type = contract_key.split("|")
+    return Execution(
+        contract_key=contract_key, symbol=symbol, option_type=option_type, strike=float(strike),
+        expiration=expiration, action="open" if side == "buy" else "close", side=side,
+        quantity=qty, price_per_contract=price, multiplier=100, dollar_value=price * qty * 100,
+        filled_at=filled_at, order_id=order_id,
+    )
+
+
+def test_recover_contract_key_reproduces_stored_trade_key():
+    true_key = "SPY|500.0|2026-12-18|CALL"
+    stored = {"symbol": "SPY", "trade_key": db_writer._trade_key(true_key, "open-1")}
+    # DB hands strike back as a bare number and option_type lowercased.
+    detail = {"strike": 500, "expiration": "2026-12-18", "option_type": "call"}
+    assert db_writer._recover_contract_key(stored, detail, ["open-1", "close-1"]) == true_key
+
+
+def test_recover_contract_key_returns_none_when_nothing_matches():
+    stored = {"symbol": "SPY", "trade_key": "not-a-real-hash"}
+    detail = {"strike": 500, "expiration": "2026-12-18", "option_type": "call"}
+    assert db_writer._recover_contract_key(stored, detail, ["open-1"]) is None
+
+
+def test_seeded_open_fill_plus_pulled_close_regroups_into_the_same_trade():
+    """The bug incremental sync must not introduce: a position opened BEFORE the pull
+    window and closed inside it. Pulled alone, the close looks like a new short trade;
+    with the stored opening fill seeded in, it closes the original trade (same key)."""
+    t0 = datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 10, 8, 14, 0, tzinfo=timezone.utc)
+    stored_open = _exec("open-1", "buy", 2, 1.50, t0)
+    pulled_close = _exec("close-1", "sell", 2, 2.00, t1)
+
+    unseeded, _ = group_trades([_exec("close-1", "sell", 2, 2.00, t1)])
+    assert unseeded[0].trade_direction == "short"  # the phantom trade we're avoiding
+
+    trades, _ = group_trades([pulled_close, stored_open])
+    assert len(trades) == 1
+    trade = trades[0]
+    assert trade.status == "CLOSED"
+    assert trade.trade_direction == "long"
+    assert trade.realized_pnl_gross == pytest.approx(100.0)
+    assert db_writer.compute_trade_key(trade) == db_writer._trade_key("SPY|500.0|2026-12-18|CALL", "open-1")

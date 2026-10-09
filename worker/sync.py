@@ -34,7 +34,13 @@ from dotenv import load_dotenv
 from webull.core.client import ApiClient
 from webull.trade.trade_client import TradeClient
 
-from db_writer import get_client, write_sync_log, write_trades
+from db_writer import (
+    get_client,
+    get_last_successful_sync_at,
+    load_seed_executions,
+    write_sync_log,
+    write_trades,
+)
 from fees import DEFAULT_MAX_FETCHES_PER_CYCLE, FeesCache, annotate_execution_fees
 from market_calendar import is_trading_day
 from rate_limiter import RateLimiter
@@ -48,6 +54,8 @@ APP_SECRET = os.environ["WEBULL_APP_SECRET"]
 REGION_ID = os.environ.get("WEBULL_REGION_ID", "us")
 ENDPOINT = os.environ["WEBULL_ENDPOINT"]
 ACCOUNT_ID = os.environ.get("WEBULL_ACCOUNT_ID")
+# Explicit override (e.g. a one-off backfill). Unset -> incremental: pull from the last
+# successful sync minus SYNC_OVERLAP_DAYS -- see resolve_start_date.
 START_DATE = os.environ.get("WEBULL_ORDER_START_DATE")
 END_DATE = os.environ.get("WEBULL_ORDER_END_DATE")
 PAGE_SIZE = int(os.environ.get("WEBULL_ORDER_PAGE_SIZE", "100"))
@@ -71,11 +79,16 @@ AFTER_CLOSE_MAX_SYNCS = int(os.environ.get("SYNC_AFTER_CLOSE_MAX_SYNCS", "2"))
 
 MAX_PAGES = 50  # safety cap against a runaway pagination loop
 
+# How far before the last successful sync each incremental pull starts -- catches fills
+# and fee data that settle late, and absorbs clock/timezone slop at the date boundary.
+SYNC_OVERLAP_DAYS = int(os.environ.get("SYNC_OVERLAP_DAYS", "2"))
+
 
 @dataclass
 class SyncSummary:
     status: str  # "success" | "error"
     orders_pulled: int = 0
+    pull_start_date: Optional[str] = None  # None = Webull's own default window (last 7 days)
     trades_written: int = 0
     warnings: list = field(default_factory=list)
     error: Optional[str] = None
@@ -147,7 +160,25 @@ def _build_trade_client() -> tuple[TradeClient, str]:
     return trade_client, account_id
 
 
-def pull_all_orders(trade_client, account_id: str, rate_limiter: RateLimiter) -> list[dict]:
+def resolve_start_date(db, now: Optional[datetime] = None) -> Optional[str]:
+    """Where this cycle's order-history pull starts (yyyy-MM-dd), or None for Webull's
+    default (last 7 days). An explicit WEBULL_ORDER_START_DATE always wins; otherwise
+    it's the last successful sync's date minus SYNC_OVERLAP_DAYS, so a worker that was
+    down for any length of time catches up on its own. Old positions don't need to be
+    inside this window -- run_sync seeds the grouper with their stored fills."""
+    if START_DATE:
+        return START_DATE
+    last = get_last_successful_sync_at(db, WEBULL_USER_ID)
+    if last is None:
+        return None  # first-ever sync: Webull's default window; backfill older via START_DATE
+    last_date = last.astimezone(MARKET_TZ).date()
+    today = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ).date()
+    return (min(last_date, today) - timedelta(days=SYNC_OVERLAP_DAYS)).isoformat()
+
+
+def pull_all_orders(
+    trade_client, account_id: str, rate_limiter: RateLimiter, start_date: Optional[str] = START_DATE
+) -> list[dict]:
     """Pages through get_order_history until a page comes back shorter than
     PAGE_SIZE (or MAX_PAGES is hit as a safety cap). Every request -- including the
     first page -- goes through the shared rate_limiter, the same one used for
@@ -170,7 +201,7 @@ def pull_all_orders(trade_client, account_id: str, rate_limiter: RateLimiter) ->
         res = trade_client.order_v2.get_order_history(
             account_id,
             page_size=PAGE_SIZE,
-            start_date=START_DATE,
+            start_date=start_date,
             end_date=END_DATE,
             last_client_order_id=last_client_order_id,
         )
@@ -207,17 +238,29 @@ def run_sync() -> SyncSummary:
         trade_client, account_id = _build_trade_client()
         rate_limiter = RateLimiter(TRADE_API_MIN_INTERVAL_SECONDS)
 
-        raw_orders = pull_all_orders(trade_client, account_id, rate_limiter)
+        start_date = resolve_start_date(db)
+        raw_orders = pull_all_orders(trade_client, account_id, rate_limiter, start_date)
 
         executions, normalize_warnings = normalize_orders(raw_orders)
         warnings.extend(normalize_warnings)
 
+        # Stored fills of open trades + trades touched by this pull, so positions that
+        # started before the pull window still group correctly. A freshly pulled copy
+        # of the same order wins over the stored one.
+        pulled_ids = {e.order_id for e in executions if e.order_id}
+        seed, seed_warnings = load_seed_executions(db, WEBULL_USER_ID, list(pulled_ids))
+        warnings.extend(seed_warnings)
+        executions.extend(e for e in seed if e.order_id not in pulled_ids)
+
+        # Only executions whose actual fee isn't known yet -- annotate_execution_fees
+        # resets actual_fee to None for anything outside this cycle's fetch budget,
+        # which would wipe fees already stored on seeded executions.
         cache = FeesCache()
         warnings.extend(
             annotate_execution_fees(
                 trade_client,
                 account_id,
-                executions,
+                [e for e in executions if e.actual_fee is None],
                 cache,
                 rate_limiter,
                 max_fetches_per_cycle=FEE_BACKFILL_BATCH_SIZE,
@@ -235,6 +278,7 @@ def run_sync() -> SyncSummary:
         summary = SyncSummary(
             status=status,
             orders_pulled=len(raw_orders),
+            pull_start_date=start_date,
             trades_written=len(write_result.trade_ids),
             warnings=warnings,
         )
@@ -256,7 +300,8 @@ def run_sync() -> SyncSummary:
 
 def _print_summary(summary: SyncSummary) -> None:
     print(
-        f"[{datetime.now().isoformat()}] status={summary.status} orders_pulled={summary.orders_pulled} "
+        f"[{datetime.now().isoformat()}] status={summary.status} "
+        f"pull_start={summary.pull_start_date or 'webull-default'} orders_pulled={summary.orders_pulled} "
         f"trades_written={summary.trades_written} warnings={len(summary.warnings)}"
     )
     if summary.error:
