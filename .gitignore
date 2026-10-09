@@ -9,6 +9,12 @@ did.bin
 token.json
 *.token
 worker/.fees_cache.json
+# Webull SDK: cached auth token (conf/token.txt, wherever the SDK runs from) and its
+# rotating logs, which record full requests including the App Key/Secret and account id.
+conf/
+**/conf/token.txt
+webull_*.log*
+*.log.*
 
 # ---- Python (worker/) ----
 __pycache__/

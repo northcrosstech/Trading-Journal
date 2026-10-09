@@ -6,3 +6,5 @@ conf/
 .fees_cache.json
 *.log
 .env
+*.log.*
+webull_*.log*
