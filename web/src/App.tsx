@@ -8,7 +8,7 @@ import { TodayPage } from './pages/TodayPage'
 import { TradeLogPage } from './pages/TradeLogPage'
 import { TradeDetailPage } from './pages/TradeDetailPage'
 import { JournalPage } from './pages/JournalPage'
-import { CalendarPage } from './pages/CalendarPage'
+import { ReviewPage } from './pages/ReviewPage'
 import { StatsPage } from './pages/StatsPage'
 import { PlaybooksPage } from './pages/PlaybooksPage'
 import { PlaybookDetailPage } from './pages/PlaybookDetailPage'
@@ -16,7 +16,6 @@ import { AccountsPage } from './pages/AccountsPage'
 import { ManualTradeEntryPage } from './pages/ManualTradeEntryPage'
 import { CsvImportPage } from './pages/CsvImportPage'
 import { RobinhoodImportPage } from './pages/RobinhoodImportPage'
-import { PsychPassPage } from './pages/PsychPassPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
@@ -40,10 +39,10 @@ function App() {
             <Route path="/trades/:tradeId/edit" element={<ManualTradeEntryPage />} />
             <Route path="/trades/import" element={<CsvImportPage />} />
             <Route path="/trades/import/robinhood" element={<RobinhoodImportPage />} />
-            <Route path="/trades/psych-pass" element={<PsychPassPage />} />
             <Route path="/trades/:tradeId" element={<TradeDetailPage />} />
             <Route path="/journal" element={<JournalPage />} />
-            <Route path="/calendar" element={<CalendarPage />} />
+            <Route path="/review" element={<ReviewPage />} />
+            <Route path="/calendar" element={<Navigate to="/journal" replace />} />
             <Route path="/insights" element={<StatsPage />} />
             <Route path="/stats" element={<Navigate to="/insights" replace />} />
             <Route path="/playbooks" element={<PlaybooksPage />} />

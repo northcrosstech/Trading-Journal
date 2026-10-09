@@ -84,8 +84,6 @@ export type ManualTradeFields = {
   optionType?: 'call' | 'put'
   strike?: number
   expiration?: string // date, yyyy-mm-dd
-  thesisNote?: string
-  reflectionNote?: string
   notes?: string
 }
 
@@ -128,8 +126,6 @@ function computeManualTradeRow(fields: ManualTradeFields) {
       first_in_at: summary.firstFillTime,
       last_out_at: summary.closed ? summary.lastExitFillTime : null,
       notes: fields.notes?.trim() || null,
-      thesis_note: fields.thesisNote?.trim() || null,
-      reflection_note: fields.reflectionNote?.trim() || null,
     },
   }
 }

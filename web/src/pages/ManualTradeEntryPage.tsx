@@ -6,18 +6,12 @@ import {
   createManualTrade,
   updateManualTrade,
   fetchTradeWithDetails,
-  fetchEmotions,
-  ensureDefaultEmotions,
-  createEmotion,
-  setTradeEmotion,
-  replaceTradeEmotions,
   setTradePlaybook,
   removeTradePlaybook,
   fetchPlaybooks,
 } from '../lib/queries'
-import type { Emotion, Playbook } from '../lib/database.types'
+import type { Playbook } from '../lib/database.types'
 import { summarizeFills, type FillAction, type FillInput } from '../lib/manualTrade'
-import { PsychologyChips } from '../components/PsychologyChips'
 import { PlaybookChip } from '../components/PlaybookChip'
 import { priceFmt } from '../lib/format'
 
@@ -160,10 +154,6 @@ export function ManualTradeEntryPage() {
   const [allPlaybooks, setAllPlaybooks] = useState<Playbook[]>([])
   const [playbookId, setPlaybookId] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
-  const [allEmotions, setAllEmotions] = useState<Emotion[]>([])
-  const [selectedEmotions, setSelectedEmotions] = useState<{ emotion_id: string; phase: Emotion['phase'] }[]>([])
-  const [thesisNote, setThesisNote] = useState('')
-  const [reflectionNote, setReflectionNote] = useState('')
 
   // Edit mode: load the existing trade and populate every field from it. Guards
   // against editing a synced trade (trade_key !== null) -- this form only ever
@@ -191,10 +181,7 @@ export function ManualTradeEntryPage() {
         setFees(String(trade.actual_fee ?? trade.estimated_fee ?? 0))
         feesTouchedRef.current = true
         setNotes(trade.notes ?? '')
-        setThesisNote(trade.thesis_note ?? '')
-        setReflectionNote(trade.reflection_note ?? '')
         setPlaybookId(trade.trade_playbooks?.playbook_id ?? null)
-        setSelectedEmotions(trade.trade_emotions.map((te) => ({ emotion_id: te.emotion_id, phase: te.phase })))
 
         if (trade.options_detail) {
           setIsOption(true)
@@ -259,29 +246,6 @@ export function ManualTradeEntryPage() {
     fetchPlaybooks().then((p) => setAllPlaybooks((p ?? []).filter((pb) => !pb.archived)))
   }, [])
 
-  useEffect(() => {
-    if (!user) return
-    ensureDefaultEmotions(user.id)
-      .then(() => fetchEmotions())
-      .then(setAllEmotions)
-  }, [user])
-
-  function handleToggleEmotion(emotion: Emotion, on: boolean) {
-    setSelectedEmotions((prev) =>
-      on
-        ? [...prev.filter((e) => e.emotion_id !== emotion.id), { emotion_id: emotion.id, phase: emotion.phase }]
-        : prev.filter((e) => e.emotion_id !== emotion.id),
-    )
-  }
-
-  async function handleAddEmotion(phase: Emotion['phase'], name: string) {
-    if (!user) return
-    const nextOrder = allEmotions.length > 0 ? Math.max(...allEmotions.map((e) => e.sort_order)) + 1 : 0
-    const emotion = await createEmotion(user.id, phase, name, nextOrder)
-    setAllEmotions((prev) => [...prev, emotion])
-    handleToggleEmotion(emotion, true)
-  }
-
   const activeAccount = manualAccounts.find((a) => a.id === accountId)
 
   const fillsValid = fills.every((f) => f.price !== '' && Number(f.price) > 0 && f.quantity !== '' && Number(f.quantity) > 0)
@@ -309,8 +273,6 @@ export function ManualTradeEntryPage() {
         strike: isOption && strike ? Number(strike) : undefined,
         expiration: isOption && expiration ? expiration : undefined,
         notes,
-        thesisNote,
-        reflectionNote,
       }
 
       const trade = isEdit && tradeId ? await updateManualTrade(tradeId, tradeFields) : await createManualTrade(user.id, tradeFields)
@@ -319,12 +281,6 @@ export function ManualTradeEntryPage() {
         await setTradePlaybook(trade.id, playbookId)
       } else if (isEdit) {
         await removeTradePlaybook(trade.id)
-      }
-
-      if (isEdit) {
-        await replaceTradeEmotions(trade.id, selectedEmotions)
-      } else {
-        await Promise.all(selectedEmotions.map((em) => setTradeEmotion(trade.id, em.emotion_id, em.phase)))
       }
 
       navigate(`/trades/${trade.id}`)
@@ -532,13 +488,13 @@ export function ManualTradeEntryPage() {
           className="flex items-center gap-1 self-start text-xs text-neutral-500 hover:text-neutral-300"
         >
           <span className={`inline-block transition-transform ${showMore ? 'rotate-90' : ''}`}>▸</span>
-          More details (optional) -- playbook, psychology, notes
+          More details (optional) — setup, note
         </button>
 
         {showMore && (
           <div className="flex flex-col gap-4 border-t border-neutral-800 pt-3">
             <div>
-              <label className="mb-1.5 block text-xs text-neutral-500">Playbook</label>
+              <label className="mb-1.5 block text-xs text-neutral-500">Setup</label>
               <div className="flex flex-wrap items-center gap-1.5">
                 {playbookId && allPlaybooks.find((p) => p.id === playbookId) && (
                   <PlaybookChip playbook={allPlaybooks.find((p) => p.id === playbookId)!} onRemove={() => setPlaybookId(null)} />
@@ -571,19 +527,6 @@ export function ManualTradeEntryPage() {
               />
             </div>
 
-            <div>
-              <h2 className="mb-2 text-xs text-neutral-500">Psychology</h2>
-              <PsychologyChips
-                emotions={allEmotions}
-                selected={selectedEmotions}
-                thesisNote={thesisNote}
-                reflectionNote={reflectionNote}
-                onToggle={handleToggleEmotion}
-                onThesisNoteChange={setThesisNote}
-                onReflectionNoteChange={setReflectionNote}
-                onAddEmotion={handleAddEmotion}
-              />
-            </div>
           </div>
         )}
 
