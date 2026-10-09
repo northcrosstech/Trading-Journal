@@ -25,7 +25,7 @@ import argparse
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -176,6 +176,16 @@ def resolve_start_date(db, now: Optional[datetime] = None) -> Optional[str]:
     return (min(last_date, today) - timedelta(days=SYNC_OVERLAP_DAYS)).isoformat()
 
 
+def resolve_end_date(start_date: Optional[str], now: Optional[datetime] = None) -> Optional[str]:
+    """Webull rejects a start_date without an end_date (417 OPENAPI_PARAM_ERR), and
+    its end_date is EXCLUSIVE -- end_date=today returns nothing filled today (confirmed
+    against a real account). So default to tomorrow (UTC); a future date is accepted."""
+    if END_DATE or not start_date:
+        return END_DATE
+    today_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).date()
+    return (today_utc + timedelta(days=1)).isoformat()
+
+
 def pull_all_orders(
     trade_client, account_id: str, rate_limiter: RateLimiter, start_date: Optional[str] = START_DATE
 ) -> list[dict]:
@@ -202,7 +212,7 @@ def pull_all_orders(
             account_id,
             page_size=PAGE_SIZE,
             start_date=start_date,
-            end_date=END_DATE,
+            end_date=resolve_end_date(start_date),
             last_client_order_id=last_client_order_id,
         )
         if res.status_code != 200:

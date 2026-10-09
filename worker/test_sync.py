@@ -275,3 +275,20 @@ def test_seeded_open_fill_plus_pulled_close_regroups_into_the_same_trade():
     assert trade.trade_direction == "long"
     assert trade.realized_pnl_gross == pytest.approx(100.0)
     assert db_writer.compute_trade_key(trade) == db_writer._trade_key("SPY|500.0|2026-12-18|CALL", "open-1")
+
+
+def test_resolve_end_date_defaults_to_tomorrow_utc_when_start_set(monkeypatch):
+    # Webull's end_date is exclusive and required alongside start_date.
+    monkeypatch.setattr(sync, "END_DATE", None)
+    now = datetime(2026, 10, 9, 23, 30, tzinfo=ZoneInfo("America/New_York"))  # already Oct 10 in UTC
+    assert sync.resolve_end_date("2026-10-07", now=now) == "2026-10-11"
+
+
+def test_resolve_end_date_none_without_start(monkeypatch):
+    monkeypatch.setattr(sync, "END_DATE", None)
+    assert sync.resolve_end_date(None) is None
+
+
+def test_resolve_end_date_explicit_override_wins(monkeypatch):
+    monkeypatch.setattr(sync, "END_DATE", "2026-09-30")
+    assert sync.resolve_end_date("2026-09-01") == "2026-09-30"
