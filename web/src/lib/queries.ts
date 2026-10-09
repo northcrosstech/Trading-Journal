@@ -3,21 +3,14 @@ import type {
   Trade,
   Execution,
   TradeWithDetails,
-  TradeWithPlaybook,
   DailyJournal,
   TargetSettings,
   SyncLog,
   DailyPlanWithPlaybooks,
   Playbook,
-  PlaybookWithRules,
-  PlaybookRule,
-  DailyRule,
-  MissedTrade,
   Account,
-  Emotion,
 } from './database.types'
 import { summarizeFills, computeRealizedPnlGross, executionSide, type FillAction, type FillInput } from './manualTrade'
-import { DEFAULT_EMOTIONS } from './emotions'
 
 // ---------------------------------------------------------------------------
 // Accounts
@@ -398,25 +391,12 @@ export async function createImportedTrade(userId: string, fields: ImportedTradeF
   return trade
 }
 
-/** Replaces all of a trade's emotion tags wholesale -- used by the manual-trade edit
- * form, which re-derives the full selected set each save rather than diffing
- * individual toggles like the trade detail page's live PsychologyChips does. */
-export async function replaceTradeEmotions(tradeId: string, emotions: { emotion_id: string; phase: Emotion['phase'] }[]) {
-  const { error: delError } = await supabase.from('trade_emotions').delete().eq('trade_id', tradeId)
-  if (delError) throw delError
-  if (emotions.length === 0) return
-  const { error: insError } = await supabase
-    .from('trade_emotions')
-    .insert(emotions.map((e) => ({ trade_id: tradeId, emotion_id: e.emotion_id, phase: e.phase })))
-  if (insError) throw insError
-}
-
 const DAILY_PLAN_WITH_PLAYBOOKS_SELECT = '*, daily_plan_playbooks(playbook_id, playbooks(*))'
 
 const TRADE_WITH_DETAILS_SELECT =
-  '*, options_detail(*), executions(*), trade_playbooks(playbook_id, playbooks(*)), trade_rule_checks(rule_id, status, playbook_rules(*)), trade_emotions(emotion_id, phase, emotions(*))'
+  '*, options_detail(*), executions(*), trade_playbooks(playbook_id, playbooks(*))'
 
-/** Bare trades, no joins -- for pages (Dashboard, Calendar, Layout's balance) that
+/** Bare trades, no joins -- for pages (like the trade page's side list) that
  * only need the raw trade rows. `accountId` is the account switcher's selection:
  * omit/null/undefined for "All accounts" (no filter). */
 export async function fetchTrades(accountId?: string | null): Promise<Trade[]> {
@@ -434,18 +414,6 @@ export async function fetchTradesWithDetails(accountId?: string | null): Promise
 
   if (error) throw error
   return (data ?? []) as unknown as TradeWithDetails[]
-}
-
-/** Lighter than fetchTradesWithDetails -- just the playbook link. Used by the daily
- * plan feature (Dashboard's Today's Plan card) which only needs "which playbook was
- * each trade," not executions/options_detail/trade_rule_checks. */
-export async function fetchTradesWithPlaybook(accountId?: string | null): Promise<TradeWithPlaybook[]> {
-  let query = supabase.from('trades').select('*, trade_playbooks(playbook_id, playbooks(*))').order('first_in_at', { ascending: false })
-  if (accountId) query = query.eq('account_id', accountId)
-  const { data, error } = await query
-
-  if (error) throw error
-  return (data ?? []) as unknown as TradeWithPlaybook[]
 }
 
 export async function fetchTradeWithDetails(tradeId: string): Promise<TradeWithDetails | null> {
@@ -467,81 +435,9 @@ export async function updateTradeJournal(tradeId: string, patch: TradeJournalPat
   if (error) throw error
 }
 
-export async function updateTradeNotes(tradeId: string, notes: string) {
-  const { error } = await supabase.from('trades').update({ notes }).eq('id', tradeId)
-  if (error) throw error
-}
-
-export async function updateTradeThesisNote(tradeId: string, thesisNote: string) {
-  const { error } = await supabase.from('trades').update({ thesis_note: thesisNote }).eq('id', tradeId)
-  if (error) throw error
-}
-
-export async function updateTradeReflectionNote(tradeId: string, reflectionNote: string) {
-  const { error } = await supabase.from('trades').update({ reflection_note: reflectionNote }).eq('id', tradeId)
-  if (error) throw error
-}
-
 // ---------------------------------------------------------------------------
 // Trade psychology: emotions vocabulary + per-trade tagging
 // ---------------------------------------------------------------------------
-
-export async function fetchEmotions(): Promise<Emotion[]> {
-  const { data, error } = await supabase.from('emotions').select('*').order('sort_order')
-  if (error) throw error
-  return data ?? []
-}
-
-export async function createEmotion(userId: string, phase: Emotion['phase'], name: string, sortOrder: number): Promise<Emotion> {
-  const { data, error } = await supabase
-    .from('emotions')
-    .insert({ user_id: userId, phase, name, sort_order: sortOrder, archived: false })
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export async function setEmotionArchived(id: string, archived: boolean) {
-  const { error } = await supabase.from('emotions').update({ archived }).eq('id', id)
-  if (error) throw error
-}
-
-/** Seeds the default vocabulary (see lib/emotions.ts) the first time this user has
- * none -- lazy, client-side, and idempotent (unique(user_id, phase, name) means a
- * re-run/race just no-ops on conflict) rather than a SQL seed, so it also covers
- * future signups with no migration needed. No-ops if the user already has any
- * emotions, including if they've deleted down to zero on purpose -- checked by the
- * caller passing the current count, not re-derived here. */
-export async function ensureDefaultEmotions(userId: string): Promise<void> {
-  const existing = await fetchEmotions()
-  if (existing.length > 0) return
-  const rows = DEFAULT_EMOTIONS.map((e, i) => ({ user_id: userId, phase: e.phase, name: e.name, sort_order: i, archived: false }))
-  const { error } = await supabase.from('emotions').upsert(rows, { onConflict: 'user_id,phase,name', ignoreDuplicates: true })
-  if (error) throw error
-}
-
-export async function setTradeEmotion(tradeId: string, emotionId: string, phase: Emotion['phase']) {
-  const { error } = await supabase.from('trade_emotions').upsert({ trade_id: tradeId, emotion_id: emotionId, phase }, { onConflict: 'trade_id,emotion_id' })
-  if (error) throw error
-}
-
-export async function removeTradeEmotion(tradeId: string, emotionId: string) {
-  const { error } = await supabase.from('trade_emotions').delete().eq('trade_id', tradeId).eq('emotion_id', emotionId)
-  if (error) throw error
-}
-
-/** All trade_emotions rows for a set of trade ids in one query -- used by the quick
- * psych pass to figure out which of today's trades have zero tags yet, without an
- * N+1 per trade. */
-export async function fetchTradeEmotionCounts(tradeIds: string[]): Promise<Map<string, number>> {
-  if (tradeIds.length === 0) return new Map()
-  const { data, error } = await supabase.from('trade_emotions').select('trade_id').in('trade_id', tradeIds)
-  if (error) throw error
-  const counts = new Map<string, number>()
-  for (const row of data ?? []) counts.set(row.trade_id, (counts.get(row.trade_id) ?? 0) + 1)
-  return counts
-}
 
 export async function updateTradeScreenshot(tradeId: string, screenshotUrl: string | null) {
   const { error } = await supabase.from('trades').update({ screenshot_url: screenshotUrl }).eq('id', tradeId)
@@ -583,37 +479,6 @@ export async function fetchPlaybooks(): Promise<Playbook[]> {
   return data ?? []
 }
 
-/** Full "profile page" shape: the playbook plus its rule groups, each with their
- * rules, ordered. */
-export async function fetchPlaybookWithRules(playbookId: string): Promise<PlaybookWithRules | null> {
-  const { data, error } = await supabase
-    .from('playbooks')
-    .select('*, playbook_rule_groups(*, playbook_rules(*))')
-    .eq('id', playbookId)
-    .maybeSingle()
-  if (error) throw error
-  if (!data) return null
-
-  // Sort groups and rules by sort_order client-side -- PostgREST embeds don't
-  // support ORDER BY on nested resources.
-  const withRules = data as unknown as PlaybookWithRules
-  withRules.playbook_rule_groups.sort((a, b) => a.sort_order - b.sort_order)
-  for (const group of withRules.playbook_rule_groups) {
-    group.playbook_rules.sort((a, b) => a.sort_order - b.sort_order)
-  }
-  return withRules
-}
-
-/** Every playbook's rules, flattened -- used for the Dashboard's cross-playbook
- * "most expensive broken rule" headline, which needs every rule regardless of which
- * playbook it belongs to. */
-export async function fetchAllPlaybookRules(): Promise<PlaybookRule[]> {
-  const { data, error } = await supabase.from('playbooks').select('playbook_rule_groups(playbook_rules(*))').eq('archived', false)
-  if (error) throw error
-  const groups = (data ?? []) as unknown as { playbook_rule_groups: { playbook_rules: PlaybookRule[] }[] }[]
-  return groups.flatMap((p) => p.playbook_rule_groups.flatMap((g) => g.playbook_rules))
-}
-
 export async function createPlaybook(
   userId: string,
   fields: { name: string; color: string; description?: string | null; icon?: string | null; market_conditions?: string | null },
@@ -646,78 +511,9 @@ export async function setPlaybookArchived(id: string, archived: boolean) {
   if (error) throw error
 }
 
-/** Uploads to the private `playbook-assets` bucket under `${userId}/playbooks/${playbookId}/...`. */
-export async function uploadPlaybookChart(userId: string, playbookId: string, file: File): Promise<string> {
-  const path = `${userId}/playbooks/${playbookId}/${Date.now()}-${file.name}`
-  const { error } = await supabase.storage.from('playbook-assets').upload(path, file, { upsert: false })
-  if (error) throw error
-  return path
-}
-
-export async function getPlaybookAssetUrl(path: string): Promise<string> {
-  const { data, error } = await supabase.storage.from('playbook-assets').createSignedUrl(path, 3600)
-  if (error) throw error
-  return data.signedUrl
-}
-
-export async function deletePlaybookAsset(path: string) {
-  const { error } = await supabase.storage.from('playbook-assets').remove([path])
-  if (error) throw error
-}
-
 // ---------------------------------------------------------------------------
 // Playbook rule groups + rules
 // ---------------------------------------------------------------------------
-
-export async function createRuleGroup(playbookId: string, name: string, sortOrder: number) {
-  const { data, error } = await supabase
-    .from('playbook_rule_groups')
-    .insert({ playbook_id: playbookId, name, sort_order: sortOrder })
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export async function renameRuleGroup(id: string, name: string) {
-  const { error } = await supabase.from('playbook_rule_groups').update({ name }).eq('id', id)
-  if (error) throw error
-}
-
-export async function reorderRuleGroup(id: string, sortOrder: number) {
-  const { error } = await supabase.from('playbook_rule_groups').update({ sort_order: sortOrder }).eq('id', id)
-  if (error) throw error
-}
-
-export async function deleteRuleGroup(id: string) {
-  const { error } = await supabase.from('playbook_rule_groups').delete().eq('id', id)
-  if (error) throw error
-}
-
-export async function createPlaybookRule(groupId: string, text: string, sortOrder: number) {
-  const { data, error } = await supabase
-    .from('playbook_rules')
-    .insert({ group_id: groupId, text, sort_order: sortOrder })
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export async function updatePlaybookRuleText(id: string, text: string) {
-  const { error } = await supabase.from('playbook_rules').update({ text }).eq('id', id)
-  if (error) throw error
-}
-
-export async function reorderPlaybookRule(id: string, sortOrder: number) {
-  const { error } = await supabase.from('playbook_rules').update({ sort_order: sortOrder }).eq('id', id)
-  if (error) throw error
-}
-
-export async function deletePlaybookRule(id: string) {
-  const { error } = await supabase.from('playbook_rules').delete().eq('id', id)
-  if (error) throw error
-}
 
 // ---------------------------------------------------------------------------
 // Per-trade playbook link + rule checks
@@ -735,113 +531,13 @@ export async function removeTradePlaybook(tradeId: string) {
   if (error) throw error
 }
 
-export async function setTradeRuleCheckStatus(tradeId: string, ruleId: string, status: 'followed' | 'broken' | 'na') {
-  const { error } = await supabase
-    .from('trade_rule_checks')
-    .upsert({ trade_id: tradeId, rule_id: ruleId, status }, { onConflict: 'trade_id,rule_id' })
-  if (error) throw error
-}
-
 // ---------------------------------------------------------------------------
 // Daily rules (global qualitative discipline checklist) + per-day checks
 // ---------------------------------------------------------------------------
 
-export async function fetchDailyRules(): Promise<DailyRule[]> {
-  const { data, error } = await supabase.from('daily_rules').select('*').order('sort_order')
-  if (error) throw error
-  return data ?? []
-}
-
-export async function createDailyRule(userId: string, text: string, sortOrder: number) {
-  const { data, error } = await supabase
-    .from('daily_rules')
-    .insert({ user_id: userId, text, sort_order: sortOrder, archived: false })
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export async function renameDailyRule(id: string, text: string) {
-  const { error } = await supabase.from('daily_rules').update({ text }).eq('id', id)
-  if (error) throw error
-}
-
-export async function setDailyRuleArchived(id: string, archived: boolean) {
-  const { error } = await supabase.from('daily_rules').update({ archived }).eq('id', id)
-  if (error) throw error
-}
-
-export async function fetchDailyRuleChecks(checkDate: string): Promise<Map<string, boolean>> {
-  const { data, error } = await supabase.from('daily_rule_checks').select('rule_id, checked').eq('check_date', checkDate)
-  if (error) throw error
-  return new Map((data ?? []).map((r) => [r.rule_id, r.checked]))
-}
-
-/** All daily_rule_checks ever recorded -- used by the consistency stat ("days all
- * rules followed %"), which needs every day at once rather than one day at a time. */
-export async function fetchAllDailyRuleChecks(): Promise<{ check_date: string; rule_id: string; checked: boolean }[]> {
-  const { data, error } = await supabase.from('daily_rule_checks').select('check_date, rule_id, checked')
-  if (error) throw error
-  return data ?? []
-}
-
-export async function setDailyRuleCheck(userId: string, checkDate: string, ruleId: string, checked: boolean) {
-  const { error } = await supabase
-    .from('daily_rule_checks')
-    .upsert({ user_id: userId, check_date: checkDate, rule_id: ruleId, checked }, { onConflict: 'user_id,check_date,rule_id' })
-  if (error) throw error
-}
-
 // ---------------------------------------------------------------------------
 // Missed trades
 // ---------------------------------------------------------------------------
-
-export async function fetchMissedTrades(playbookId?: string): Promise<MissedTrade[]> {
-  let query = supabase.from('missed_trades').select('*').order('missed_date', { ascending: false })
-  if (playbookId) query = query.eq('playbook_id', playbookId)
-  const { data, error } = await query
-  if (error) throw error
-  return data ?? []
-}
-
-export async function createMissedTrade(
-  userId: string,
-  fields: {
-    playbook_id: string
-    missed_date: string
-    symbol: string
-    notes?: string | null
-    est_pnl_missed?: number | null
-    screenshot_url?: string | null
-  },
-): Promise<MissedTrade> {
-  const { data, error } = await supabase
-    .from('missed_trades')
-    .insert({ user_id: userId, ...fields })
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export async function deleteMissedTrade(id: string) {
-  const { error } = await supabase.from('missed_trades').delete().eq('id', id)
-  if (error) throw error
-}
-
-export async function updateMissedTradeScreenshot(id: string, screenshotUrl: string) {
-  const { error } = await supabase.from('missed_trades').update({ screenshot_url: screenshotUrl }).eq('id', id)
-  if (error) throw error
-}
-
-/** Uploads to the private `playbook-assets` bucket under `${userId}/missed-trades/${missedTradeId}/...`. */
-export async function uploadMissedTradeScreenshot(userId: string, missedTradeId: string, file: File): Promise<string> {
-  const path = `${userId}/missed-trades/${missedTradeId}/${Date.now()}-${file.name}`
-  const { error } = await supabase.storage.from('playbook-assets').upload(path, file, { upsert: false })
-  if (error) throw error
-  return path
-}
 
 // ---------------------------------------------------------------------------
 // Journal, targets, sync log, daily plan

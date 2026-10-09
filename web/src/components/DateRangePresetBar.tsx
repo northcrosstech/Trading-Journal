@@ -5,9 +5,7 @@ type Props = {
   onChange: (preset: DateRangePreset | null) => void
 }
 
-/** Shared date-range preset bar driving Dashboard, Stats, and Trade Log -- a single
- * source of truth for "what period am I looking at" across the three pages that
- * report on trades. `null` means Reset / all-time. */
+/** Date-range preset bar for Insights. `null` means Reset / all-time. */
 export function DateRangePresetBar({ value, onChange }: Props) {
   return (
     <div className="flex flex-wrap items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 p-1">

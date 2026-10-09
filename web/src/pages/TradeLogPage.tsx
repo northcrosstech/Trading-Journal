@@ -4,7 +4,8 @@ import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails } from '../lib/queries'
 import type { TradeWithDetails } from '../lib/database.types'
 import { currency, priceFmt, holdTimeFmt, optionLabel, dateFmt, percentFmt, dteLabel, centralDateStr } from '../lib/format'
-import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd, computeCostBasisAnalysis } from '../lib/metrics'
+import { returnOnCapitalPct, computeCostBasisAnalysis } from '../lib/metrics'
+import { TradeTags } from '../components/TradeTags'
 import { DATE_RANGE_PRESETS, presetRange, type DateRangePreset } from '../lib/dateRange'
 
 type SortKey = 'date' | 'holdTime' | 'netPnl' | 'symbol' | 'returnPct'
@@ -169,12 +170,12 @@ export function TradeLogPage() {
   }
 
   const sortIndicator = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '')
-  const COLUMN_COUNT = 13
+  const COLUMN_COUNT = 11
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-neutral-100">Trade Log</h1>
+        <h1 className="text-lg font-semibold text-neutral-100">Trades</h1>
         <div className="flex items-center gap-4">
           <div className="text-sm text-neutral-400">
             {summary.count} trade{summary.count === 1 ? '' : 's'} · {summary.closedCount} closed ·{' '}
@@ -183,18 +184,6 @@ export function TradeLogPage() {
             </span>
           </div>
           <div className="flex gap-2">
-            <Link
-              to="/trades/import"
-              className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-neutral-800"
-            >
-              Import CSV
-            </Link>
-            <Link
-              to="/trades/import/robinhood"
-              className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-neutral-800"
-            >
-              Import Robinhood CSV
-            </Link>
             <Link
               to="/trades/new"
               className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500"
@@ -219,7 +208,7 @@ export function TradeLogPage() {
           onChange={(e) => setPlaybookFilter(e.target.value)}
           className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
         >
-          <option value="all">All playbooks</option>
+          <option value="all">All setups</option>
           {allPlaybooks.map(([id, name]) => (
             <option key={id} value={id}>{name}</option>
           ))}
@@ -289,21 +278,19 @@ export function TradeLogPage() {
               <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('symbol')}>
                 Symbol{sortIndicator('symbol')}
               </th>
-              <th className="px-3 py-2.5">Status</th>
               <th className="px-3 py-2.5">Side</th>
               <th className="px-3 py-2.5 text-right">Qty</th>
               <th className="px-3 py-2.5 text-right">Entry</th>
               <th className="px-3 py-2.5 text-right">Exit</th>
-              <th className="px-3 py-2.5 text-right">Ent Tot</th>
-              <th className="px-3 py-2.5 text-right">Ext Tot</th>
               <th className="px-3 py-2.5 text-right" title="Peak dollar capital actually committed at any single moment in the trade">
                 Pos
               </th>
               <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('holdTime')}>
                 Hold{sortIndicator('holdTime')}
               </th>
+              <th className="px-3 py-2.5">Review</th>
               <th className="cursor-pointer select-none px-3 py-2.5 text-right" onClick={() => toggleSort('netPnl')}>
-                Return{sortIndicator('netPnl')}
+                P&L{sortIndicator('netPnl')}
               </th>
               <th className="cursor-pointer select-none px-3 py-2.5 text-right" onClick={() => toggleSort('returnPct')}>
                 Return %{sortIndicator('returnPct')}
@@ -320,7 +307,7 @@ export function TradeLogPage() {
                     onClick={() => toggleDateExpanded(group.date!)}
                     className="cursor-pointer border-b border-neutral-800/60 bg-neutral-800/30 hover:bg-neutral-800/50"
                   >
-                    <td colSpan={11} className="px-3 py-1.5 text-xs font-medium text-neutral-400">
+                    <td colSpan={9} className="px-3 py-1.5 text-xs font-medium text-neutral-400">
                       <span className={`mr-1.5 inline-block text-neutral-600 transition-transform ${collapsed ? '-rotate-90' : ''}`}>
                         ▾
                       </span>
@@ -359,27 +346,17 @@ export function TradeLogPage() {
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5">
-                        <span
-                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase ${
-                            t.status === 'OPEN' ? 'bg-blue-950 text-blue-300' : 'bg-neutral-800 text-neutral-400'
-                          }`}
-                        >
-                          {t.status}
-                        </span>
-                      </td>
                       <td className="px-3 py-2.5 capitalize text-neutral-400">{t.side}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-neutral-300">{t.total_contracts ?? '—'}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-neutral-300">{priceFmt(t.avg_entry)}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-neutral-300">
                         {t.status === 'CLOSED' ? priceFmt(t.avg_exit) : '—'}
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-neutral-400">{currency(entrySizeUsd(t))}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-neutral-400">
-                        {t.status === 'CLOSED' ? currency(exitSizeUsd(t)) : '—'}
-                      </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-neutral-300">{currency(pos)}</td>
                       <td className="px-3 py-2.5 text-neutral-400">{holdTimeFmt(t.hold_seconds)}</td>
+                      <td className="px-3 py-2.5">
+                        <TradeTags trade={t} />
+                      </td>
                       <td className="px-3 py-2.5 text-right tabular-nums">
                         {t.status === 'OPEN' ? (
                           <span className="text-neutral-500">OPEN</span>

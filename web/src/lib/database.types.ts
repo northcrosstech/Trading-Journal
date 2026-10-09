@@ -262,26 +262,11 @@ export type TargetSettings = TargetSettingsRow
 export type SyncLog = SyncLogRow
 export type DailyPlan = DailyPlanRow
 
-/** A playbook with its rule groups, each with their rules, ordered -- the full
- * "profile page" shape used by the playbook detail/edit view. */
-export type PlaybookWithRules = Playbook & {
-  playbook_rule_groups: (PlaybookRuleGroup & { playbook_rules: PlaybookRule[] })[]
-}
-
 export type TradeWithDetails = Trade & {
   options_detail: OptionsDetail | null
   executions: Execution[]
   // 1:1 (trade_playbooks.trade_id is its own primary key), same shape as
   // options_detail -- null until a playbook is linked.
-  trade_playbooks: { playbook_id: string; playbooks: Playbook | null } | null
-  trade_rule_checks: { rule_id: string; status: TradeRuleCheckRow['status']; playbook_rules: PlaybookRule | null }[]
-  trade_emotions: { emotion_id: string; phase: TradeEmotionRow['phase']; emotions: Emotion | null }[]
-}
-
-/** Leaner than TradeWithDetails -- just the playbook link, for pages (like the
- * Dashboard) that need "which playbook was this trade" without the full executions/
- * options_detail/trade_rule_checks joins. */
-export type TradeWithPlaybook = Trade & {
   trade_playbooks: { playbook_id: string; playbooks: Playbook | null } | null
 }
 

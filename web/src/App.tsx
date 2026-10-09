@@ -9,9 +9,7 @@ import { TradeLogPage } from './pages/TradeLogPage'
 import { TradeDetailPage } from './pages/TradeDetailPage'
 import { JournalPage } from './pages/JournalPage'
 import { ReviewPage } from './pages/ReviewPage'
-import { StatsPage } from './pages/StatsPage'
-import { PlaybooksPage } from './pages/PlaybooksPage'
-import { PlaybookDetailPage } from './pages/PlaybookDetailPage'
+import { InsightsPage } from './pages/InsightsPage'
 import { AccountsPage } from './pages/AccountsPage'
 import { ManualTradeEntryPage } from './pages/ManualTradeEntryPage'
 import { CsvImportPage } from './pages/CsvImportPage'
@@ -43,10 +41,9 @@ function App() {
             <Route path="/journal" element={<JournalPage />} />
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/calendar" element={<Navigate to="/journal" replace />} />
-            <Route path="/insights" element={<StatsPage />} />
+            <Route path="/insights" element={<InsightsPage />} />
             <Route path="/stats" element={<Navigate to="/insights" replace />} />
-            <Route path="/playbooks" element={<PlaybooksPage />} />
-            <Route path="/playbooks/:playbookId" element={<PlaybookDetailPage />} />
+            <Route path="/playbooks/*" element={<Navigate to="/settings" replace />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

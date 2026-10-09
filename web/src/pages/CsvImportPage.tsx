@@ -381,7 +381,7 @@ export function CsvImportPage() {
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       <div>
         <Link to="/trades" className="text-sm text-neutral-500 hover:text-neutral-300">
-          ← Trade Log
+          ← Trades
         </Link>
         <h1 className="mt-1 text-lg font-semibold text-neutral-100">Import CSV</h1>
         <p className="mt-1 text-sm text-neutral-500">
@@ -518,7 +518,7 @@ export function CsvImportPage() {
               )}
               {results.success > 0 && (
                 <button onClick={() => navigate('/trades')} className="mt-3 text-xs text-blue-400 hover:underline">
-                  View in Trade Log →
+                  View in Trades →
                 </button>
               )}
             </div>

@@ -191,7 +191,7 @@ export function TradeDetailPage() {
       <div className="flex min-w-0 flex-1 flex-col gap-5">
       <div>
         <Link to="/trades" className="text-sm text-neutral-500 hover:text-neutral-300">
-          ← Trade Log
+          ← Trades
         </Link>
         <div className="mt-1 flex items-center gap-3">
           <h1 className="text-xl font-semibold text-neutral-100">

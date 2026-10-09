@@ -6,6 +6,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (col
       {TAG_COLORS.map((hex) => (
         <button
           key={hex}
+          type="button"
           onClick={() => onChange(hex)}
           title={hex}
           style={{ backgroundColor: hex }}

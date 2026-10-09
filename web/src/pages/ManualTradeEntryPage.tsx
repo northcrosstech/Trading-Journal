@@ -324,7 +324,7 @@ export function ManualTradeEntryPage() {
     <div className="mx-auto flex max-w-lg flex-col gap-4">
       <div>
         <Link to={isEdit ? `/trades/${tradeId}` : '/trades'} className="text-sm text-neutral-500 hover:text-neutral-300">
-          {isEdit ? '← Back to Trade' : '← Trade Log'}
+          {isEdit ? '← Back to Trade' : '← Trades'}
         </Link>
         <h1 className="mt-1 text-lg font-semibold text-neutral-100">{isEdit ? 'Edit Trade' : 'Add Manual Trade'}</h1>
       </div>

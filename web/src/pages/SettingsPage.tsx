@@ -1,14 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import {
-  fetchTargetSettings,
-  upsertTargetSettings,
-  fetchDailyRules,
-  createDailyRule,
-  renameDailyRule,
-  setDailyRuleArchived,
-} from '../lib/queries'
-import type { DailyRule } from '../lib/database.types'
+import { fetchTargetSettings, upsertTargetSettings, fetchPlaybooks, createPlaybook, updatePlaybook, setPlaybookArchived } from '../lib/queries'
+import type { Playbook } from '../lib/database.types'
+import { TAG_COLORS, tagChipStyle } from '../lib/tagColors'
+import { ColorPicker } from '../components/ColorPicker'
 
 function DollarInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
@@ -28,7 +24,7 @@ function DollarInput({ value, onChange, placeholder }: { value: string; onChange
   )
 }
 
-function TargetSettingsCard() {
+function RiskCard() {
   const { user } = useAuth()
   const [profitTarget, setProfitTarget] = useState('')
   const [lossLimit, setLossLimit] = useState('')
@@ -63,19 +59,19 @@ function TargetSettingsCard() {
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-      <h2 className="mb-1 text-sm font-medium text-neutral-300">Daily Targets</h2>
+      <h2 className="mb-1 text-sm font-medium text-neutral-300">Daily risk</h2>
       <p className="mb-3 text-xs text-neutral-500">
-        Dollar amounts only for now. Used to mark hit/gave-it-back/breach days on the calendar and show today's live
-        benchmark on the dashboard.
+        Your default max daily loss — pre-filled into each day's plan and tracked live on Today. The profit target marks
+        green days on the calendar.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="mb-1 block text-xs text-neutral-500">Profit Target</label>
-          <DollarInput value={profitTarget} onChange={setProfitTarget} placeholder="e.g. 300" />
+          <label className="mb-1 block text-xs text-neutral-500">Max daily loss</label>
+          <DollarInput value={lossLimit} onChange={setLossLimit} placeholder="e.g. 200" />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-neutral-500">Max Loss Limit</label>
-          <DollarInput value={lossLimit} onChange={setLossLimit} placeholder="e.g. 200" />
+          <label className="mb-1 block text-xs text-neutral-500">Daily profit target</label>
+          <DollarInput value={profitTarget} onChange={setProfitTarget} placeholder="e.g. 300" />
         </div>
       </div>
       <div className="mt-3 flex items-center justify-end gap-2">
@@ -91,114 +87,135 @@ function TargetSettingsCard() {
   )
 }
 
-function DailyRuleRow({ rule, onRename, onToggleArchived }: { rule: DailyRule; onRename: (text: string) => void; onToggleArchived: () => void }) {
+function SetupRow({ setup, onChanged }: { setup: Playbook; onChanged: () => void }) {
   const [editing, setEditing] = useState(false)
-  const [text, setText] = useState(rule.text)
+  const [name, setName] = useState(setup.name)
+
+  function commit() {
+    setEditing(false)
+    if (name.trim() && name.trim() !== setup.name) updatePlaybook(setup.id, { name: name.trim() }).then(onChanged)
+    else setName(setup.name)
+  }
 
   return (
-    <div className="flex items-center gap-2 py-1.5">
+    <div className={`flex items-center gap-2 py-1.5 ${setup.archived ? 'opacity-50' : ''}`}>
+      <span style={tagChipStyle(setup.color)} className="h-3 w-3 shrink-0 rounded-full border" />
       {editing ? (
         <input
           autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={() => {
-            if (text.trim()) onRename(text.trim())
-            setEditing(false)
-          }}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={commit}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              if (text.trim()) onRename(text.trim())
+            if (e.key === 'Enter') commit()
+            if (e.key === 'Escape') {
+              setName(setup.name)
               setEditing(false)
             }
-            if (e.key === 'Escape') setEditing(false)
           }}
           className="flex-1 rounded-md border border-blue-500 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none"
         />
       ) : (
-        <button
-          onClick={() => setEditing(true)}
-          className={`flex-1 text-left text-sm hover:text-neutral-100 ${rule.archived ? 'text-neutral-600 line-through' : 'text-neutral-200'}`}
-        >
-          {rule.text}
+        <button onClick={() => setEditing(true)} className="flex-1 text-left text-sm text-neutral-200 hover:text-neutral-50">
+          {setup.icon && <span className="mr-1">{setup.icon}</span>}
+          {setup.name}
         </button>
       )}
-      <button onClick={onToggleArchived} className="shrink-0 text-xs text-neutral-600 hover:text-neutral-300">
-        {rule.archived ? 'Unarchive' : 'Archive'}
+      <button
+        onClick={() => setPlaybookArchived(setup.id, !setup.archived).then(onChanged)}
+        className="shrink-0 text-xs text-neutral-600 hover:text-neutral-300"
+      >
+        {setup.archived ? 'Unarchive' : 'Archive'}
       </button>
     </div>
   )
 }
 
-/** Global, qualitative discipline rules (e.g. "waited for confirmation candle,"
- * "no revenge entries") -- distinct from the numeric per-day limits in
- * TargetSettingsCard/the pre-market plan, which are already auto-computed. */
-function DailyRulesCard() {
+/** Setups are the named patterns you trade (ORB, VWAP reclaim, ...) -- one tap per
+ * trade in review, and the "By setup" table on Insights shows which ones pay. */
+function SetupsCard() {
   const { user } = useAuth()
-  const [rules, setRules] = useState<DailyRule[]>([])
-  const [loaded, setLoaded] = useState(false)
-  const [newRuleText, setNewRuleText] = useState('')
+  const [setups, setSetups] = useState<Playbook[] | null>(null)
+  const [name, setName] = useState('')
+  const [color, setColor] = useState<string>(TAG_COLORS[8])
+  const [showArchived, setShowArchived] = useState(false)
 
-  const load = useCallback(async () => {
-    const r = await fetchDailyRules()
-    setRules(r)
-    setLoaded(true)
+  const load = useCallback(() => {
+    fetchPlaybooks().then((p) => setSetups(p ?? []))
   }, [])
 
-  useEffect(() => {
-    load()
-  }, [load])
+  useEffect(load, [load])
 
-  async function handleAdd(e: React.FormEvent) {
+  async function handleAdd(e: FormEvent) {
     e.preventDefault()
-    if (!user || !newRuleText.trim()) return
-    const nextOrder = rules.length > 0 ? Math.max(...rules.map((r) => r.sort_order)) + 1 : 0
-    await createDailyRule(user.id, newRuleText.trim(), nextOrder)
-    setNewRuleText('')
+    if (!user || !name.trim()) return
+    await createPlaybook(user.id, { name: name.trim(), color })
+    setName('')
     load()
   }
 
-  if (!loaded) {
-    return (
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-        <div className="text-sm text-neutral-500">Loading…</div>
-      </div>
-    )
-  }
+  const visible = (setups ?? []).filter((s) => showArchived || !s.archived)
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-      <h2 className="mb-1 text-sm font-medium text-neutral-300">Daily Rules</h2>
-      <p className="mb-3 text-xs text-neutral-500">
-        Qualitative discipline checks for your end-of-day checklist -- things that can't be auto-derived from your
-        trades, like "waited for confirmation candle" or "no revenge entries."
-      </p>
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-neutral-300">Setups</h2>
+        {(setups ?? []).some((s) => s.archived) && (
+          <label className="flex items-center gap-1.5 text-xs text-neutral-500">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+            Show archived
+          </label>
+        )}
+      </div>
+      <p className="mb-3 text-xs text-neutral-500">The patterns you trade. Tag each trade with one during review. Click a name to rename.</p>
       <div className="flex flex-col divide-y divide-neutral-800/60">
-        {rules.length === 0 && <div className="py-2 text-xs text-neutral-600">No daily rules yet.</div>}
-        {rules.map((rule) => (
-          <DailyRuleRow
-            key={rule.id}
-            rule={rule}
-            onRename={(text) => renameDailyRule(rule.id, text).then(load)}
-            onToggleArchived={() => setDailyRuleArchived(rule.id, !rule.archived).then(load)}
-          />
+        {setups === null && <div className="py-2 text-xs text-neutral-600">Loading…</div>}
+        {setups !== null && visible.length === 0 && <div className="py-2 text-xs text-neutral-600">No setups yet.</div>}
+        {visible.map((s) => (
+          <SetupRow key={s.id} setup={s} onChanged={load} />
         ))}
       </div>
-      <form onSubmit={handleAdd} className="mt-2 flex gap-2">
-        <input
-          value={newRuleText}
-          onChange={(e) => setNewRuleText(e.target.value)}
-          placeholder="Add a daily rule…"
-          className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
-        />
-        <button
-          type="submit"
-          disabled={!newRuleText.trim()}
-          className="rounded-md border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
-        >
-          Add
-        </button>
+      <form onSubmit={handleAdd} className="mt-3 flex flex-col gap-2">
+        <div className="flex gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="New setup, e.g. Opening range breakout"
+            className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          />
+          <button
+            type="submit"
+            disabled={!name.trim()}
+            className="rounded-md border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+          >
+            Add
+          </button>
+        </div>
+        <ColorPicker value={color} onChange={setColor} />
       </form>
+    </div>
+  )
+}
+
+const linkClass =
+  'flex items-center justify-between rounded-lg px-3 py-2 text-sm text-neutral-300 transition hover:bg-neutral-800 hover:text-neutral-100'
+
+function DataCard() {
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-2">
+      <h2 className="px-3 pb-1 pt-2 text-sm font-medium text-neutral-300">Accounts & data</h2>
+      <Link to="/accounts" className={linkClass}>
+        Broker accounts <span className="text-neutral-600">→</span>
+      </Link>
+      <Link to="/trades/new" className={linkClass}>
+        Add a trade manually <span className="text-neutral-600">→</span>
+      </Link>
+      <Link to="/trades/import" className={linkClass}>
+        Import CSV <span className="text-neutral-600">→</span>
+      </Link>
+      <Link to="/trades/import/robinhood" className={linkClass}>
+        Import Robinhood CSV <span className="text-neutral-600">→</span>
+      </Link>
     </div>
   )
 }
@@ -209,9 +226,10 @@ export function SettingsPage() {
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4">
       <h1 className="text-lg font-semibold text-neutral-100">Settings</h1>
-
+      <RiskCard />
+      <SetupsCard />
+      <DataCard />
       <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-        <h2 className="mb-3 text-sm font-medium text-neutral-300">Account</h2>
         <div className="flex items-center justify-between">
           <span className="text-sm text-neutral-400">{user?.email}</span>
           <button
@@ -222,9 +240,6 @@ export function SettingsPage() {
           </button>
         </div>
       </div>
-
-      <TargetSettingsCard />
-      <DailyRulesCard />
     </div>
   )
 }
