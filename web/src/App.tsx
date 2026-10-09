@@ -1,10 +1,10 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './auth/RequireAuth'
 import { LoginPage } from './auth/LoginPage'
 import { AccountProvider } from './accounts/AccountContext'
 import { Layout } from './components/Layout'
-import { DashboardPage } from './pages/DashboardPage'
+import { TodayPage } from './pages/TodayPage'
 import { TradeLogPage } from './pages/TradeLogPage'
 import { TradeDetailPage } from './pages/TradeDetailPage'
 import { JournalPage } from './pages/JournalPage'
@@ -34,7 +34,7 @@ function App() {
               </RequireAuth>
             }
           >
-            <Route path="/" element={<DashboardPage />} />
+            <Route path="/" element={<TodayPage />} />
             <Route path="/trades" element={<TradeLogPage />} />
             <Route path="/trades/new" element={<ManualTradeEntryPage />} />
             <Route path="/trades/:tradeId/edit" element={<ManualTradeEntryPage />} />
@@ -44,7 +44,8 @@ function App() {
             <Route path="/trades/:tradeId" element={<TradeDetailPage />} />
             <Route path="/journal" element={<JournalPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
-            <Route path="/stats" element={<StatsPage />} />
+            <Route path="/insights" element={<StatsPage />} />
+            <Route path="/stats" element={<Navigate to="/insights" replace />} />
             <Route path="/playbooks" element={<PlaybooksPage />} />
             <Route path="/playbooks/:playbookId" element={<PlaybookDetailPage />} />
             <Route path="/accounts" element={<AccountsPage />} />

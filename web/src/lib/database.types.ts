@@ -40,6 +40,9 @@ export type TradeRow = {
   thesis_note: string | null
   reflection_note: string | null
   screenshot_url: string | null
+  planned: boolean | null
+  mistakes: string[]
+  reviewed_at: string | null
   first_in_at: string | null
   last_out_at: string | null
   created_at: string
@@ -174,7 +177,9 @@ export type DailyPlanRow = {
   plan_date: string
   planned_max_trades: number | null
   planned_max_loss: number | null
-  plan_notes: string | null
+  plan_notes: string | null // the watchlist + triggers
+  market_read: string | null
+  focus: string | null
   created_at: string
   updated_at: string
 }

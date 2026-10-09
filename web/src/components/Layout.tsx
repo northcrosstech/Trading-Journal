@@ -1,37 +1,20 @@
-import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
-import { fetchTrades } from '../lib/queries'
-import { currency } from '../lib/format'
 import { SyncStatus } from './SyncStatus'
 
+// The daily loop, in order: plan + trade (Today) -> review (Journal) -> learn (Insights).
 const navItems = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/trades', label: 'Trade Log' },
-  { to: '/calendar', label: 'Calendar' },
-  { to: '/stats', label: 'Stats' },
-  { to: '/playbooks', label: 'Playbooks' },
-  { to: '/accounts', label: 'Accounts' },
+  { to: '/', label: 'Today', end: true },
+  { to: '/journal', label: 'Journal' },
+  { to: '/trades', label: 'Trades' },
+  { to: '/insights', label: 'Insights' },
   { to: '/settings', label: 'Settings' },
 ]
 
 export function Layout() {
   const { user, signOut } = useAuth()
   const { accounts, selectedAccountId, setSelectedAccountId } = useAccountFilter()
-  const [balance, setBalance] = useState<number | null>(null)
-
-  // All-time cumulative net P&L, unaffected by any page's date-range filter -- a
-  // synthetic estimate (no real starting capital or cash deposits/withdrawals are
-  // tracked), so it's explicitly labeled "Est." rather than presented as real cash.
-  // Respects the account switcher: re-fetches whenever the selection changes.
-  useEffect(() => {
-    fetchTrades(selectedAccountId).then((trades) => {
-      const closed = trades.filter((t) => t.status === 'CLOSED')
-      setBalance(closed.reduce((sum, t) => sum + (t.realized_pnl_net ?? 0), 0))
-    })
-  }, [selectedAccountId])
-
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null
 
   return (
@@ -58,9 +41,6 @@ export function Layout() {
                 </option>
               ))}
             </select>
-          </div>
-          <div className="truncate pl-3.5 text-[11px] tabular-nums text-neutral-500">
-            {balance === null ? '—' : `Est. ${currency(balance)}`}
           </div>
         </div>
 

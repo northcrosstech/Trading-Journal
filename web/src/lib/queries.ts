@@ -463,6 +463,14 @@ export async function fetchTradeWithDetails(tradeId: string): Promise<TradeWithD
   return data as unknown as TradeWithDetails | null
 }
 
+/** The review fields a trader edits on a trade (review queue + trade detail). */
+export type TradeJournalPatch = Partial<Pick<Trade, 'planned' | 'mistakes' | 'notes' | 'reviewed_at'>>
+
+export async function updateTradeJournal(tradeId: string, patch: TradeJournalPatch) {
+  const { error } = await supabase.from('trades').update(patch).eq('id', tradeId)
+  if (error) throw error
+}
+
 export async function updateTradeNotes(tradeId: string, notes: string) {
   const { error } = await supabase.from('trades').update({ notes }).eq('id', tradeId)
   if (error) throw error
@@ -921,7 +929,13 @@ export async function fetchAllDailyPlans(): Promise<DailyPlanWithPlaybooks[]> {
 export async function upsertDailyPlan(
   userId: string,
   planDate: string,
-  fields: { planned_max_trades?: number | null; planned_max_loss?: number | null; plan_notes?: string | null },
+  fields: {
+    planned_max_trades?: number | null
+    planned_max_loss?: number | null
+    plan_notes?: string | null
+    market_read?: string | null
+    focus?: string | null
+  },
 ): Promise<DailyPlanWithPlaybooks> {
   const { data, error } = await supabase
     .from('daily_plans')
