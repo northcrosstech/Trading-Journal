@@ -1,6 +1,8 @@
 import type { Trade, TradeWithDetails } from './database.types'
 import { TRADING_TIMEZONE } from './format'
 import { MISTAKE_TAGS } from './mistakes'
+import { STRENGTH_TAGS, strengthsOf } from './strengths'
+import { tradeOutcome, type OutcomeKind } from './whatIf'
 
 /** Closed trades with a booked P&L, in close order -- the population every metric here uses. */
 export function closedTrades<T extends Trade>(trades: T[]): T[] {
@@ -165,4 +167,59 @@ export function bySymbol(trades: Trade[], minTrades = 3): GroupRow[] {
   return Array.from(groups, ([sym, list]) => row(sym, sym, list))
     .filter((r) => r.count >= minTrades)
     .sort((a, b) => b.netPnl - a.netPnl)
+}
+
+/** What's working: the net P&L of trades carrying each "done right" habit, best first. */
+export function strengthStats(trades: TradeWithDetails[]): GroupRow[] {
+  const closed = closedTrades(trades)
+  return STRENGTH_TAGS.map((tag) => row(tag, tag, closed.filter((t) => strengthsOf(t).includes(tag))))
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.netPnl - a.netPnl)
+}
+
+export type ExecutionSummary = {
+  byKind: Record<OutcomeKind, { total: number; count: number }> // total = |what-if - actual| dollars
+  rTrades: number // trades with a stop, i.e. a defined 1R
+  avgPlannedR: number | null
+  avgRealizedR: number | null
+  rCaptured: number | null // realized R / planned R over trades that have both
+}
+
+/** Opportunity cost of exits (from alt exit prices) and R-multiple execution (from stops
+ * and targets), over closed trades where those prices were filled in during review. */
+export function executionSummary(trades: TradeWithDetails[]): ExecutionSummary {
+  const byKind = {
+    left_on_table: { total: 0, count: 0 },
+    cost_of_ignoring_stop: { total: 0, count: 0 },
+    cost_of_discipline: { total: 0, count: 0 },
+    saved_by_discipline: { total: 0, count: 0 },
+    beat_alternative: { total: 0, count: 0 },
+  }
+  const planned: number[] = []
+  const realized: number[] = []
+  let capturedRealized = 0
+  let capturedPlanned = 0
+
+  for (const t of closedTrades(trades)) {
+    const o = tradeOutcome(t)
+    if (o.kind && o.delta !== null) {
+      byKind[o.kind].total += Math.abs(o.delta)
+      byKind[o.kind].count += 1
+    }
+    if (o.realizedR !== null) realized.push(o.realizedR)
+    if (o.plannedR !== null) planned.push(o.plannedR)
+    if (o.realizedR !== null && o.plannedR !== null && o.plannedR > 0) {
+      capturedRealized += o.realizedR
+      capturedPlanned += o.plannedR
+    }
+  }
+
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
+  return {
+    byKind,
+    rTrades: realized.length,
+    avgPlannedR: avg(planned),
+    avgRealizedR: avg(realized),
+    rCaptured: capturedPlanned > 0 ? capturedRealized / capturedPlanned : null,
+  }
 }

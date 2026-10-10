@@ -12,8 +12,12 @@ import {
   byTimeOfDay,
   byHoldTime,
   bySymbol,
+  strengthStats,
+  executionSummary,
+  type ExecutionSummary,
   type GroupRow,
 } from '../lib/insights'
+import { rFmt } from '../lib/whatIf'
 import { filterTradesByDateRange, presetRange, type DateRangePreset } from '../lib/dateRange'
 import { currency } from '../lib/format'
 import { DateRangePresetBar } from '../components/DateRangePresetBar'
@@ -84,7 +88,17 @@ function GroupTable({ title, hint, rows, footer }: { title: string; hint?: strin
 
 /** Plain-language takeaways from the review data -- the point of journaling is these
  * sentences, not the tables. */
-function Takeaways({ planned, mistakes }: { planned: GroupRow[]; mistakes: GroupRow[] }) {
+function Takeaways({
+  planned,
+  mistakes,
+  strengths,
+  execution,
+}: {
+  planned: GroupRow[]
+  mistakes: GroupRow[]
+  strengths: GroupRow[]
+  execution: ExecutionSummary
+}) {
   const lines: { text: string; tone: 'good' | 'bad' }[] = []
   const p = planned.find((r) => r.key === 'planned')
   const u = planned.find((r) => r.key === 'unplanned')
@@ -101,11 +115,25 @@ function Takeaways({ planned, mistakes }: { planned: GroupRow[]; mistakes: Group
   if (worst && worst.netPnl < 0) {
     lines.push({ text: `Your costliest mistake is ${worst.label}: ${currency(worst.netPnl)} across ${worst.count} trade${worst.count === 1 ? '' : 's'}.`, tone: 'bad' })
   }
+  const best = [...strengths].filter((r) => r.count >= 2).sort((a, b) => (b.expectancy ?? 0) - (a.expectancy ?? 0))[0]
+  if (best && best.expectancy !== null && best.expectancy > 0) {
+    lines.push({ text: `When you ${best.label.toLowerCase()}, a trade averages ${currency(best.expectancy)}. Do more of that.`, tone: 'good' })
+  }
+  const leaks = execution.byKind.left_on_table.total + execution.byKind.cost_of_ignoring_stop.total
+  if (leaks > 0) {
+    lines.push({ text: `Execution leaks: ${currency(leaks)} left vs your planned exits and stops.`, tone: 'bad' })
+  }
+  if (execution.rCaptured !== null) {
+    lines.push({
+      text: `You capture ${Math.round(execution.rCaptured * 100)}% of the R you plan for.`,
+      tone: execution.rCaptured >= 0.8 ? 'good' : 'bad',
+    })
+  }
 
   if (lines.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-neutral-800 px-4 py-3 text-sm text-neutral-500">
-        Review your trades (planned? mistakes?) and this is where the lessons show up.{' '}
+        Review your trades (planned? done right? mistakes?) and this is where the lessons show up.{' '}
         <Link to="/journal" className="text-blue-400 hover:underline">
           Go to Journal
         </Link>
@@ -120,6 +148,46 @@ function Takeaways({ planned, mistakes }: { planned: GroupRow[]; mistakes: Group
           <span className="text-neutral-200">{l.text}</span>
         </div>
       ))}
+    </div>
+  )
+}
+
+function ExecutionCard({ e }: { e: ExecutionSummary }) {
+  const k = e.byKind
+  const cell = (label: string, total: number, count: number, tone: string, hint?: string) => (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[11px] uppercase tracking-wide text-neutral-500">{label}</span>
+      <span className={`text-lg font-semibold tabular-nums ${count ? tone : 'text-neutral-600'}`}>{count ? currency(total) : '—'}</span>
+      <span className="text-[11px] text-neutral-600">{count ? `${count} trade${count === 1 ? '' : 's'}` : (hint ?? 'none logged')}</span>
+    </div>
+  )
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <div className="mb-3">
+        <h2 className="text-sm font-medium text-neutral-200">Execution</h2>
+        <p className="text-xs text-neutral-500">From the stop / target / alt-exit prices you log in review. Cost of discipline is the price of good process, not a mistake.</p>
+      </div>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
+        {cell('Left on table', k.left_on_table.total, k.left_on_table.count, 'text-(--status-critical)')}
+        {cell('Ignored stops', k.cost_of_ignoring_stop.total, k.cost_of_ignoring_stop.count, 'text-(--status-critical)')}
+        {cell('Saved by discipline', k.saved_by_discipline.total, k.saved_by_discipline.count, 'text-(--status-good)')}
+        {cell('Cost of discipline', k.cost_of_discipline.total, k.cost_of_discipline.count, 'text-neutral-400')}
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500">Planned R</span>
+          <span className="text-lg font-semibold tabular-nums text-neutral-100">{rFmt(e.avgPlannedR)}</span>
+          <span className="text-[11px] text-neutral-600">avg target</span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500">Realized R</span>
+          <span className={`text-lg font-semibold tabular-nums ${pnlClass(e.avgRealizedR)}`}>{rFmt(e.avgRealizedR)}</span>
+          <span className="text-[11px] text-neutral-600">{e.rTrades ? `${e.rTrades} trades with a stop` : 'log stops to see R'}</span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500">R captured</span>
+          <span className="text-lg font-semibold tabular-nums text-neutral-100">{e.rCaptured === null ? '—' : `${Math.round(e.rCaptured * 100)}%`}</span>
+          <span className="text-[11px] text-neutral-600">realized ÷ planned</span>
+        </div>
+      </div>
     </div>
   )
 }
@@ -146,6 +214,8 @@ export function InsightsPage() {
   const timeOfDay = useMemo(() => byTimeOfDay(filtered), [filtered])
   const hold = useMemo(() => byHoldTime(filtered), [filtered])
   const symbols = useMemo(() => bySymbol(filtered), [filtered])
+  const strengths = useMemo(() => strengthStats(filtered), [filtered])
+  const execution = useMemo(() => executionSummary(filtered), [filtered])
 
   if (trades === null) return <div className="text-neutral-500">Loading insights…</div>
 
@@ -169,7 +239,9 @@ export function InsightsPage() {
         <Kpi label="Max drawdown" value={currency(s.maxDrawdown)} tone={s.maxDrawdown < 0 ? -1 : null} />
       </div>
 
-      <Takeaways planned={planned.rows} mistakes={mistakes.rows} />
+      <Takeaways planned={planned.rows} mistakes={mistakes.rows} strengths={strengths} execution={execution} />
+
+      <ExecutionCard e={execution} />
 
       <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
         <h2 className="mb-2 text-sm font-medium text-neutral-200">Equity curve</h2>
@@ -182,6 +254,7 @@ export function InsightsPage() {
           hint={planned.untagged > 0 ? `${planned.untagged} trade${planned.untagged === 1 ? '' : 's'} not tagged yet` : undefined}
           rows={planned.rows}
         />
+        <GroupTable title="What's working" hint="Net P&L of trades where you did it right" rows={strengths} />
         <GroupTable title="Cost of mistakes" hint="Net P&L of trades carrying each mistake" rows={mistakes.rows} footer={mistakes.clean} />
         <GroupTable title="By setup" rows={setups} />
         <GroupTable title="By time of day" hint="Entry time, Central" rows={timeOfDay} />

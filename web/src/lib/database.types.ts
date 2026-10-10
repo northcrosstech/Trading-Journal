@@ -42,6 +42,10 @@ export type TradeRow = {
   screenshot_url: string | null
   planned: boolean | null
   mistakes: string[]
+  strengths: string[]
+  stop_price: number | null
+  target_price: number | null
+  alt_exit_price: number | null
   reviewed_at: string | null
   first_in_at: string | null
   last_out_at: string | null

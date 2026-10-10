@@ -14,6 +14,8 @@ import {
 import type { DailyPlanWithPlaybooks, Playbook, TradeWithDetails } from '../lib/database.types'
 import { useTradeJournal } from '../lib/useTradeJournal'
 import { MISTAKE_TAGS } from '../lib/mistakes'
+import { STRENGTH_TAGS, strengthsOf } from '../lib/strengths'
+import { tradeOutcome } from '../lib/whatIf'
 import { MOODS } from '../lib/moods'
 import { toDateStr } from '../lib/dateRange'
 import { tradeDay, longDayLabel, nextTradingDay, watchlistSymbols } from '../lib/tradingDay'
@@ -50,6 +52,13 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
   const net = trades.reduce((sum, t) => sum + (t.realized_pnl_net ?? 0), 0)
   const planned = trades.filter((t) => t.planned === true).length
   const unplanned = trades.filter((t) => t.planned === false).length
+  const strengthCounts = STRENGTH_TAGS.map((tag) => ({ tag, count: trades.filter((t) => strengthsOf(t).includes(tag)).length })).filter(
+    (m) => m.count > 0,
+  )
+  const leftOnTable = trades.reduce((sum, t) => {
+    const o = tradeOutcome(t)
+    return o.kind === 'left_on_table' || o.kind === 'cost_of_ignoring_stop' ? sum + (o.delta ?? 0) : sum
+  }, 0)
   const mistakeCounts = MISTAKE_TAGS.map((tag) => ({ tag, count: trades.filter((t) => t.mistakes.includes(tag)).length })).filter(
     (m) => m.count > 0,
   )
@@ -75,6 +84,18 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
           <span className="text-emerald-400">{planned} planned</span>
           <span className="text-amber-400">{unplanned} unplanned</span>
         </div>
+        {strengthCounts.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {strengthCounts.map((m) => (
+              <span key={m.tag} className="rounded-full bg-emerald-950/70 px-2 py-0.5 text-xs text-emerald-300">
+                {m.tag} ×{m.count}
+              </span>
+            ))}
+          </div>
+        )}
+        {leftOnTable > 0 && (
+          <p className="mt-3 text-sm text-red-400">Execution leaks today: {currency(leftOnTable)} vs your planned exits.</p>
+        )}
         {mistakeCounts.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-1.5">
             {mistakeCounts.map((m) => (
@@ -137,8 +158,8 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
 
 /** The review queue: one closed trade at a time for a day -- chart on the left,
  * planned? / mistakes / setup / note / screenshot on the right, then the next trade.
- * Keyboard: P / U planned, 1-7 mistakes, N or → next, ← back, Ctrl+Enter next from
- * the note box. */
+ * Keyboard: P / U planned, Shift+1-6 done right, 1-7 mistakes, N or → next, ← back,
+ * Ctrl+Enter next from the note box. */
 export function ReviewPage() {
   const { user } = useAuth()
   const { selectedAccountId } = useAccountFilter()
@@ -217,6 +238,13 @@ export function ReviewPage() {
         return
       }
       if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
+      // Shift+digit gives '!' etc. in e.key, so match the physical key instead.
+      const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
+      if (e.shiftKey && digit && Number(digit) <= STRENGTH_TAGS.length) {
+        journal.toggleStrength(STRENGTH_TAGS[Number(digit) - 1])
+        e.preventDefault()
+        return
+      }
       const key = e.key.toLowerCase()
       if (key === 'p') journal.setPlanned(current.planned === true ? null : true)
       else if (key === 'u') journal.setPlanned(current.planned === false ? null : false)

@@ -1,8 +1,9 @@
 import type { TradeWithDetails } from '../lib/database.types'
 import { tagChipStyle } from '../lib/tagColors'
+import { strengthsOf } from '../lib/strengths'
 
-/** Compact read-only summary of a trade's review: setup, planned/unplanned, mistakes,
- * or a "to review" hint when it hasn't been reviewed yet. */
+/** Compact read-only summary of a trade's review: setup, planned/unplanned, done-right
+ * and mistake tags, or a "to review" hint when it hasn't been reviewed yet. */
 export function TradeTags({ trade }: { trade: TradeWithDetails }) {
   const setup = trade.trade_playbooks?.playbooks ?? null
   const unreviewed = trade.status === 'CLOSED' && !trade.reviewed_at
@@ -20,6 +21,11 @@ export function TradeTags({ trade }: { trade: TradeWithDetails }) {
       {trade.planned === false && (
         <span className="rounded-full border border-amber-800 px-1.5 py-0.5 text-[10px] text-amber-400">Unplanned</span>
       )}
+      {strengthsOf(trade).map((m) => (
+        <span key={m} className="rounded-full bg-emerald-950/70 px-1.5 py-0.5 text-[10px] text-emerald-300">
+          {m}
+        </span>
+      ))}
       {trade.mistakes.map((m) => (
         <span key={m} className="rounded-full bg-red-950/70 px-1.5 py-0.5 text-[10px] text-red-300">
           {m}

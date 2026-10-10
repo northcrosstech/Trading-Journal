@@ -1,13 +1,129 @@
+import { useEffect, useState } from 'react'
 import type { Playbook, TradeWithDetails } from '../lib/database.types'
 import type { TradeJournal } from '../lib/useTradeJournal'
 import { MISTAKE_TAGS } from '../lib/mistakes'
+import { STRENGTH_TAGS, strengthsOf } from '../lib/strengths'
+import { tradeOutcome, OUTCOME_LABEL, rFmt, type OutcomeKind } from '../lib/whatIf'
+import { currency } from '../lib/format'
 import { tagChipStyle } from '../lib/tagColors'
 
 function Kbd({ children }: { children: string }) {
   return <kbd className="ml-1.5 rounded border border-neutral-700 px-1 text-[10px] text-neutral-500">{children}</kbd>
 }
 
-/** The whole per-trade journal: planned?, setup, mistakes, one note, screenshot.
+type PriceField = 'stop_price' | 'target_price' | 'alt_exit_price'
+
+/** Option-premium price box that saves on blur / Enter; blank clears it. */
+function PriceInput({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string
+  value: number | null
+  onCommit: (v: number | null) => void
+}) {
+  const [draft, setDraft] = useState(value === null ? '' : String(value))
+  useEffect(() => setDraft(value === null ? '' : String(value)), [value])
+
+  function commit() {
+    const trimmed = draft.trim()
+    const next = trimmed === '' ? null : Number(trimmed)
+    if (next !== null && (!Number.isFinite(next) || next < 0)) {
+      setDraft(value === null ? '' : String(value))
+      return
+    }
+    if (next !== value) onCommit(next)
+  }
+
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-[11px] text-neutral-500">{label}</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        min="0"
+        step="0.01"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        }}
+        className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm tabular-nums text-neutral-100 outline-none focus:border-blue-500"
+      />
+    </label>
+  )
+}
+
+const OUTCOME_TONE: Record<OutcomeKind, string> = {
+  left_on_table: 'text-red-400',
+  cost_of_ignoring_stop: 'text-red-400',
+  cost_of_discipline: 'text-neutral-400',
+  saved_by_discipline: 'text-emerald-400',
+  beat_alternative: 'text-emerald-400',
+}
+
+/** Stop / target / alternative exit, all in option premium, and what they imply: 1R,
+ * planned vs realized R, and the dollar difference to the alternative exit. Keyed by
+ * trade id so inputs and open state reset when the review moves to the next trade. */
+function WhatIf({ trade, journal }: { trade: TradeWithDetails; journal: TradeJournal }) {
+  const hasAny = trade.stop_price != null || trade.target_price != null || trade.alt_exit_price != null
+  const [open, setOpen] = useState(hasAny)
+
+  const o = tradeOutcome(trade)
+  const set = (field: PriceField) => (v: number | null) => journal.setPrice(field, v)
+
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mb-1.5 flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-neutral-500 hover:text-neutral-300"
+      >
+        <span className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`}>▸</span>
+        What if
+        {!open && o.kind && <span className={`ml-1 normal-case ${OUTCOME_TONE[o.kind]}`}>· {OUTCOME_LABEL[o.kind]}</span>}
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <PriceInput label="Stop" value={trade.stop_price ?? null} onCommit={set('stop_price')} />
+            <PriceInput label="Target" value={trade.target_price ?? null} onCommit={set('target_price')} />
+            <PriceInput label="Alt exit" value={trade.alt_exit_price ?? null} onCommit={set('alt_exit_price')} />
+          </div>
+          <p className="text-[11px] text-neutral-600">
+            Option premium. Alt exit = where the whole position could have closed instead (held to target, honored the stop…).
+          </p>
+          {(o.risk !== null || o.kind) && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-lg bg-neutral-950 px-3 py-2 text-xs text-neutral-400">
+              {o.risk !== null && (
+                <>
+                  <span>
+                    1R <span className="text-neutral-200">{currency(o.risk)}</span>
+                  </span>
+                  <span>
+                    planned <span className="text-neutral-200">{rFmt(o.plannedR)}</span>
+                  </span>
+                  <span>
+                    realized <span className="text-neutral-200">{rFmt(o.realizedR)}</span>
+                  </span>
+                </>
+              )}
+              {o.kind && o.delta !== null && (
+                <span className={OUTCOME_TONE[o.kind]}>
+                  {OUTCOME_LABEL[o.kind]}: {currency(Math.abs(o.delta))}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** The whole per-trade journal: planned?, done right, mistakes, what if, setup, one note, screenshot.
  * `shortcuts` shows the review queue's key hints next to each control. */
 export function TradeJournalPanel({
   trade,
@@ -51,6 +167,27 @@ export function TradeJournalPanel({
       </section>
 
       <section>
+        <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Done right</h3>
+        <div className="flex flex-wrap gap-1.5">
+          {STRENGTH_TAGS.map((tag, i) => {
+            const active = strengthsOf(trade).includes(tag)
+            return (
+              <button
+                key={tag}
+                onClick={() => journal.toggleStrength(tag)}
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                  active ? 'border-emerald-500/60 bg-emerald-950/60 text-emerald-300' : 'border-neutral-700 text-neutral-400 hover:bg-neutral-800'
+                }`}
+              >
+                {tag}
+                {shortcuts && <Kbd>{`⇧${i + 1}`}</Kbd>}
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Mistakes</h3>
         <div className="flex flex-wrap gap-1.5">
           {MISTAKE_TAGS.map((tag, i) => {
@@ -85,6 +222,8 @@ export function TradeJournalPanel({
           <p className="mt-1.5 text-xs text-emerald-500/80">Clean trade — no mistakes.</p>
         )}
       </section>
+
+      <WhatIf key={trade.id} trade={trade} journal={journal} />
 
       <section>
         <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Setup</h3>

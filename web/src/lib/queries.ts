@@ -428,7 +428,10 @@ export async function fetchTradeWithDetails(tradeId: string): Promise<TradeWithD
 }
 
 /** The review fields a trader edits on a trade (review queue + trade detail). */
-export type TradeJournalPatch = Partial<Pick<Trade, 'planned' | 'mistakes' | 'notes' | 'reviewed_at'>>
+export type TradeJournalPatch = Partial<Pick<
+  Trade,
+  'planned' | 'mistakes' | 'strengths' | 'notes' | 'reviewed_at' | 'stop_price' | 'target_price' | 'alt_exit_price'
+>>
 
 export async function updateTradeJournal(tradeId: string, patch: TradeJournalPatch) {
   const { error } = await supabase.from('trades').update(patch).eq('id', tradeId)

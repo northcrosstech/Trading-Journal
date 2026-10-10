@@ -6,6 +6,7 @@ import { fetchTradesWithDetails, fetchAllDailyJournal, upsertDailyJournal, fetch
 import type { DailyJournal, DailyPlanWithPlaybooks, TargetSettings, TradeWithDetails } from '../lib/database.types'
 import { computeCalendarDays, computeDailyTargetStats } from '../lib/metrics'
 import { MOODS } from '../lib/moods'
+import { strengthsOf } from '../lib/strengths'
 import { tradeDay, longDayLabel } from '../lib/tradingDay'
 import { currency, holdTimeFmt, optionLabel, dteLabel, timeOnlyFmt } from '../lib/format'
 import { PnlCalendarHeatmap } from '../components/PnlCalendarHeatmap'
@@ -40,6 +41,7 @@ const DayCard = forwardRef<
   const planned = closed.filter((t) => t.planned === true).length
   const unplanned = closed.filter((t) => t.planned === false).length
   const mistakes = closed.reduce((n, t) => n + t.mistakes.length, 0)
+  const doneRight = closed.reduce((n, t) => n + strengthsOf(t).length, 0)
   const mood = MOODS.find((m) => m.value === journal?.mood_rating)
 
   return (
@@ -59,6 +61,7 @@ const DayCard = forwardRef<
                 {' '}· <span className="text-emerald-400">{planned} planned</span> · <span className="text-amber-400">{unplanned} unplanned</span>
               </>
             )}
+            {doneRight > 0 && <span className="text-emerald-400"> · {doneRight} done right</span>}
             {mistakes > 0 && <span className="text-red-400"> · {mistakes} mistake{mistakes === 1 ? '' : 's'}</span>}
           </div>
         </div>

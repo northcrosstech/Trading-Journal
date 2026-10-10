@@ -63,14 +63,27 @@ export function useTradeJournal(trade: TradeWithDetails | null, userId: string |
     [tradeId, updateTrade, run],
   )
 
-  const toggleMistake = useCallback(
-    (tag: string) => {
+  const toggleTag = useCallback(
+    (field: 'mistakes' | 'strengths', tag: string) => {
       if (!trade) return
-      const mistakes = trade.mistakes.includes(tag) ? trade.mistakes.filter((m) => m !== tag) : [...trade.mistakes, tag]
-      updateTrade(trade.id, (t) => ({ ...t, mistakes }))
-      run(updateTradeJournal(trade.id, { mistakes }))
+      const current = trade[field] ?? []
+      const next = current.includes(tag) ? current.filter((m) => m !== tag) : [...current, tag]
+      updateTrade(trade.id, (t) => ({ ...t, [field]: next }))
+      run(updateTradeJournal(trade.id, { [field]: next }))
     },
     [trade, updateTrade, run],
+  )
+  const toggleMistake = useCallback((tag: string) => toggleTag('mistakes', tag), [toggleTag])
+  const toggleStrength = useCallback((tag: string) => toggleTag('strengths', tag), [toggleTag])
+
+  /** Stop / target / alt-exit price (option premium); null clears it. */
+  const setPrice = useCallback(
+    (field: 'stop_price' | 'target_price' | 'alt_exit_price', value: number | null) => {
+      if (!tradeId) return
+      updateTrade(tradeId, (t) => ({ ...t, [field]: value }))
+      run(updateTradeJournal(tradeId, { [field]: value }))
+    },
+    [tradeId, updateTrade, run],
   )
 
   const setSetup = useCallback(
@@ -138,7 +151,21 @@ export function useTradeJournal(trade: TradeWithDetails | null, userId: string |
     return () => window.removeEventListener('paste', onPaste)
   }, [uploadScreenshot])
 
-  return { note, noteSaved, setNote, setPlanned, toggleMistake, setSetup, screenshotUrl, uploading, uploadScreenshot, removeScreenshot, error }
+  return {
+    note,
+    noteSaved,
+    setNote,
+    setPlanned,
+    toggleMistake,
+    toggleStrength,
+    setPrice,
+    setSetup,
+    screenshotUrl,
+    uploading,
+    uploadScreenshot,
+    removeScreenshot,
+    error,
+  }
 }
 
 export type TradeJournal = ReturnType<typeof useTradeJournal>
