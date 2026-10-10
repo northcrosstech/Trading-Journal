@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './auth/RequireAuth'
 import { LoginPage } from './auth/LoginPage'
+import { ResetPasswordPage } from './auth/ResetPasswordPage'
 import { AccountProvider } from './accounts/AccountContext'
 import { Layout } from './components/Layout'
 import { TodayPage } from './pages/TodayPage'
@@ -22,6 +23,7 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route
             element={
               <RequireAuth>

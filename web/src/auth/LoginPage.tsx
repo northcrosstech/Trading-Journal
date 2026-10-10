@@ -3,15 +3,16 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 
 export function LoginPage() {
-  const { signIn, signUp } = useAuth()
+  const { signIn, signUp, sendPasswordReset } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [mode, setMode] = useState<'signin' | 'signup' | 'reset'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [signupDone, setSignupDone] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
 
   const redirectTo = (location.state as { from?: string } | null)?.from ?? '/'
 
@@ -20,11 +21,16 @@ export function LoginPage() {
     setError(null)
     setSubmitting(true)
 
-    const result = mode === 'signin' ? await signIn(email, password) : await signUp(email, password)
+    const result =
+      mode === 'signin' ? await signIn(email, password) : mode === 'signup' ? await signUp(email, password) : await sendPasswordReset(email)
 
     setSubmitting(false)
     if (result.error) {
       setError(result.error)
+      return
+    }
+    if (mode === 'reset') {
+      setResetSent(true)
       return
     }
     if (mode === 'signup') {
@@ -39,12 +45,14 @@ export function LoginPage() {
       <div className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-8 shadow-xl">
         <h1 className="mb-1 text-xl font-semibold text-neutral-50">Trading Journal</h1>
         <p className="mb-6 text-sm text-neutral-400">
-          {mode === 'signin' ? 'Sign in to your journal' : 'Create your account'}
+          {mode === 'signin' ? 'Sign in to your journal' : mode === 'signup' ? 'Create your account' : 'Reset your password'}
         </p>
 
-        {signupDone ? (
+        {signupDone || resetSent ? (
           <div className="rounded-lg border border-emerald-900 bg-emerald-950/50 p-4 text-sm text-emerald-300">
-            Check your email to confirm your account, then sign in.
+            {resetSent
+              ? 'If that email has an account, a reset link is on its way. Open it on this device to set a new password.'
+              : 'Check your email to confirm your account, then sign in.'}
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -59,6 +67,7 @@ export function LoginPage() {
                 className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-neutral-100 outline-none focus:border-blue-500"
               />
             </label>
+            {mode !== 'reset' && (
             <label className="flex flex-col gap-1.5 text-sm text-neutral-300">
               Password
               <input
@@ -71,6 +80,7 @@ export function LoginPage() {
                 className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-neutral-100 outline-none focus:border-blue-500"
               />
             </label>
+            )}
 
             {error && <p className="text-sm text-red-400">{error}</p>}
 
@@ -79,8 +89,20 @@ export function LoginPage() {
               disabled={submitting}
               className="mt-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
             >
-              {submitting ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Sign up'}
+              {submitting ? 'Please wait…' : mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Sign up' : 'Send reset link'}
             </button>
+            {mode === 'signin' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('reset')
+                  setError(null)
+                }}
+                className="-mt-1 self-end text-xs text-neutral-500 hover:text-neutral-300"
+              >
+                Forgot password?
+              </button>
+            )}
           </form>
         )}
 
@@ -90,6 +112,7 @@ export function LoginPage() {
             setMode(mode === 'signin' ? 'signup' : 'signin')
             setError(null)
             setSignupDone(false)
+            setResetSent(false)
           }}
           className="mt-5 text-sm text-neutral-400 hover:text-neutral-200"
         >
