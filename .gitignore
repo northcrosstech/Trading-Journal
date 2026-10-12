@@ -62,3 +62,6 @@ Thumbs.db
 
 # ---- claude ----
 claude.md
+
+# graphify knowledge-graph output
+graphify-out/

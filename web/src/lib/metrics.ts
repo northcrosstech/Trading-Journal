@@ -7,6 +7,10 @@ import { centralDateStr } from './format'
 // would be wrong for an unusual adjusted contract. Revisit if that ever comes up.
 const ASSUMED_OPTION_MULTIPLIER = 100
 
+function contractMultiplier(assetType: Trade['asset_type']): number {
+  return assetType === 'option' ? ASSUMED_OPTION_MULTIPLIER : 1
+}
+
 export type TrimResult = {
   /** Gross -- no fee allocation. A trade's fee typically lands on one execution (see
    * buildFillExecutions in lib/queries.ts), so splitting it across trims would imply a
@@ -44,7 +48,7 @@ export type CostBasisAnalysis = {
 export function computeCostBasisAnalysis(
   trade: Pick<Trade, 'side' | 'asset_type'> & { executions: Pick<Execution, 'id' | 'action' | 'quantity' | 'price' | 'filled_at'>[] },
 ): CostBasisAnalysis {
-  const multiplier = trade.asset_type === 'option' ? ASSUMED_OPTION_MULTIPLIER : 1
+  const multiplier = contractMultiplier(trade.asset_type)
   const direction = trade.side === 'long' ? 1 : -1
   const sorted = [...trade.executions].sort((a, b) => new Date(a.filled_at).getTime() - new Date(b.filled_at).getTime())
 
@@ -84,23 +88,23 @@ export function computeCostBasisAnalysis(
  * schema yet) -- so it reads as "return relative to premium involved" rather than a
  * true margin-based ROI for shorts.
  */
-export function returnOnCapitalPct(trade: Pick<Trade, 'avg_entry' | 'total_contracts' | 'realized_pnl_net'>): number | null {
+export function returnOnCapitalPct(trade: Pick<Trade, 'avg_entry' | 'total_contracts' | 'realized_pnl_net' | 'asset_type'>): number | null {
   if (trade.avg_entry === null || trade.total_contracts === null || trade.realized_pnl_net === null) return null
-  const capital = trade.avg_entry * trade.total_contracts * ASSUMED_OPTION_MULTIPLIER
+  const capital = trade.avg_entry * trade.total_contracts * contractMultiplier(trade.asset_type)
   if (capital === 0) return null
   return trade.realized_pnl_net / capital
 }
 
 /** Total dollar size at entry: avg_entry * contracts * multiplier. */
-export function entrySizeUsd(trade: Pick<Trade, 'avg_entry' | 'total_contracts'>): number | null {
+export function entrySizeUsd(trade: Pick<Trade, 'avg_entry' | 'total_contracts' | 'asset_type'>): number | null {
   if (trade.avg_entry === null || trade.total_contracts === null) return null
-  return trade.avg_entry * trade.total_contracts * ASSUMED_OPTION_MULTIPLIER
+  return trade.avg_entry * trade.total_contracts * contractMultiplier(trade.asset_type)
 }
 
 /** Total dollar size at exit: avg_exit * contracts * multiplier. */
-export function exitSizeUsd(trade: Pick<Trade, 'avg_exit' | 'total_contracts'>): number | null {
+export function exitSizeUsd(trade: Pick<Trade, 'avg_exit' | 'total_contracts' | 'asset_type'>): number | null {
   if (trade.avg_exit === null || trade.total_contracts === null) return null
-  return trade.avg_exit * trade.total_contracts * ASSUMED_OPTION_MULTIPLIER
+  return trade.avg_exit * trade.total_contracts * contractMultiplier(trade.asset_type)
 }
 
 export type EquityPoint = {
@@ -249,4 +253,44 @@ export function computeCalendarDays(trades: Trade[]): Map<string, CalendarDay> {
   }
 
   return byDay
+}
+
+/** Thresholds for flagging an unusually large position against the trader's own history. */
+export const OVERSIZE_LOOKBACK_TRADES = 30
+export const OVERSIZE_MIN_HISTORY = 10
+export const OVERSIZE_RATIO = 1.5
+
+/** "Usual" position size per asset type: the median peak exposure of the most recent
+ * closed trades before `beforeDate` (yyyy-mm-dd, Central). Median rather than mean so
+ * one oversized blowup doesn't drag the baseline up and hide the next one. Options and
+ * stock are kept apart since their dollar sizes aren't comparable. Null until there's
+ * enough history for the baseline to mean anything. */
+export function typicalPositionSize(
+  trades: (Pick<Trade, 'side' | 'asset_type' | 'status' | 'last_out_at'> & {
+    executions: Pick<Execution, 'id' | 'action' | 'quantity' | 'price' | 'filled_at'>[]
+  })[],
+  beforeDate: string,
+): Map<Trade['asset_type'], number> {
+  const recent = trades
+    .filter((t) => t.status === 'CLOSED' && t.last_out_at && centralDateStr(new Date(t.last_out_at)) < beforeDate)
+    .sort((a, b) => (b.last_out_at ?? '').localeCompare(a.last_out_at ?? ''))
+
+  const sizesByType = new Map<Trade['asset_type'], number[]>()
+  for (const t of recent) {
+    const sizes = sizesByType.get(t.asset_type) ?? []
+    if (sizes.length >= OVERSIZE_LOOKBACK_TRADES) continue
+    const size = computeCostBasisAnalysis(t).peakExposureUsd
+    if (size === null || size <= 0) continue
+    sizes.push(size)
+    sizesByType.set(t.asset_type, sizes)
+  }
+
+  const result = new Map<Trade['asset_type'], number>()
+  for (const [type, sizes] of sizesByType) {
+    if (sizes.length < OVERSIZE_MIN_HISTORY) continue
+    const s = [...sizes].sort((a, b) => a - b)
+    const mid = Math.floor(s.length / 2)
+    result.set(type, s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2)
+  }
+  return result
 }

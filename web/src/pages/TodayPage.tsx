@@ -4,8 +4,8 @@ import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails, fetchDailyPlan, fetchTargetSettings } from '../lib/queries'
 import type { DailyPlanWithPlaybooks, TargetSettings, TradeWithDetails } from '../lib/database.types'
-import { computeCalendarDays } from '../lib/metrics'
-import { currency, holdTimeFmt, optionLabel, dteLabel, timeOnlyFmt } from '../lib/format'
+import { computeCalendarDays, computeCostBasisAnalysis, returnOnCapitalPct, entrySizeUsd, typicalPositionSize, OVERSIZE_RATIO } from '../lib/metrics'
+import { currency, holdTimeFmt, optionLabel, dteLabel, timeOnlyFmt, percentFmt } from '../lib/format'
 import { toDateStr } from '../lib/dateRange'
 import { tradeDay, longDayLabel } from '../lib/tradingDay'
 import { PlanCard } from '../components/PlanCard'
@@ -32,6 +32,17 @@ function RiskCard({
     net += t.realized_pnl_net ?? 0
     worst = Math.min(worst, net)
   }
+  // Same denominator as each row's % (entry size), so this is the capital-weighted
+  // average of the per-trade returns -- not a % of account balance, which isn't tracked.
+  let deployed = 0
+  let deployedNet = 0
+  for (const t of closed) {
+    const size = entrySizeUsd(t)
+    if (!size || t.realized_pnl_net === null) continue
+    deployed += size
+    deployedNet += t.realized_pnl_net
+  }
+  const returnOnDeployed = deployed > 0 ? deployedNet / deployed : null
   const wins = closed.filter((t) => (t.realized_pnl_net ?? 0) > 0).length
   const losses = closed.filter((t) => (t.realized_pnl_net ?? 0) < 0).length
   const tradeCount = closed.length + openCount
@@ -43,7 +54,17 @@ function RiskCard({
     <div className="flex flex-col gap-4 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
       <div>
         <div className="text-xs uppercase tracking-wide text-neutral-500">Net P&L today</div>
-        <div className={`mt-1 text-3xl font-semibold tabular-nums ${pnlClass(net)}`}>{currency(net)}</div>
+        <div className="mt-1 flex items-baseline gap-2">
+          <span className={`text-3xl font-semibold tabular-nums ${pnlClass(net)}`}>{currency(net)}</span>
+          {returnOnDeployed !== null && (
+            <span
+              className={`text-sm font-medium tabular-nums ${pnlClass(returnOnDeployed)}`}
+              title={`Return on ${currency(deployed)} of capital deployed across today's closed trades`}
+            >
+              {percentFmt(returnOnDeployed)}
+            </span>
+          )}
+        </div>
         <div className="mt-1 text-xs text-neutral-500">
           {wins}W · {losses}L{openCount > 0 && ` · ${openCount} open`}
           {worst < 0 && <> · worst point <span className="text-neutral-300">{currency(worst)}</span></>}
@@ -120,6 +141,7 @@ export function TodayPage() {
         .sort((a, b) => (a.first_in_at ?? '').localeCompare(b.first_in_at ?? '')),
     [trades, today],
   )
+  const usualSize = useMemo(() => typicalPositionSize(trades ?? [], today), [trades, today])
   const closed = todays.filter((t) => t.status === 'CLOSED')
   const toReview = closed.filter((t) => !t.reviewed_at).length
 
@@ -179,7 +201,13 @@ export function TodayPage() {
           <div className="px-4 py-8 text-center text-sm text-neutral-500">No trades yet today.</div>
         ) : (
           <div className="divide-y divide-neutral-800/60">
-            {todays.map((t) => (
+            {todays.map((t) => {
+              const pos = computeCostBasisAnalysis(t).peakExposureUsd
+              const returnPct = t.status === 'CLOSED' ? returnOnCapitalPct(t) : null
+              const usual = usualSize.get(t.asset_type) ?? null
+              const sizeRatio = pos !== null && usual ? pos / usual : null
+              const oversized = sizeRatio !== null && sizeRatio >= OVERSIZE_RATIO
+              return (
               <Link
                 key={t.id}
                 to={`/trades/${t.id}`}
@@ -198,11 +226,26 @@ export function TodayPage() {
                 <span className="min-w-0 flex-1">
                   <TradeTags trade={t} />
                 </span>
+                <span
+                  className={`w-24 shrink-0 text-right text-xs tabular-nums ${oversized ? 'font-medium text-amber-400' : 'text-neutral-400'}`}
+                  title={
+                    oversized
+                      ? `${sizeRatio!.toFixed(1)}× your usual size (median ${currency(usual)} over your recent ${t.asset_type} trades)`
+                      : 'Position size: peak dollar capital committed at any single moment'
+                  }
+                >
+                  {oversized && '⚠ '}
+                  {pos !== null ? currency(pos) : '—'}
+                </span>
                 <span className={`w-24 shrink-0 text-right font-medium tabular-nums ${t.status === 'OPEN' ? 'text-neutral-500' : pnlClass(t.realized_pnl_net ?? 0)}`}>
                   {t.status === 'OPEN' ? 'OPEN' : currency(t.realized_pnl_net)}
                 </span>
+                <span className={`w-16 shrink-0 text-right text-xs tabular-nums ${returnPct === null ? 'text-neutral-500' : pnlClass(returnPct)}`}>
+                  {returnPct === null ? '—' : percentFmt(returnPct)}
+                </span>
               </Link>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
