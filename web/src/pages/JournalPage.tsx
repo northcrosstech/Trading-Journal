@@ -3,14 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails, fetchAllDailyJournal, upsertDailyJournal, fetchAllDailyPlans, fetchTargetSettings } from '../lib/queries'
-import type { DailyJournal, DailyPlanWithPlaybooks, TargetSettings, TradeWithDetails } from '../lib/database.types'
-import { computeCalendarDays, computeDailyTargetStats } from '../lib/metrics'
+import type { DailyJournal, DailyPlanWithPlaybooks, TargetSettings, Trade, TradeWithDetails } from '../lib/database.types'
+import { computeCalendarDays, computeDailyTargetStats, typicalPositionSize } from '../lib/metrics'
 import { MOODS } from '../lib/moods'
 import { strengthsOf } from '../lib/strengths'
 import { tradeDay, longDayLabel } from '../lib/tradingDay'
-import { currency, holdTimeFmt, optionLabel, dteLabel, timeOnlyFmt } from '../lib/format'
+import { currency } from '../lib/format'
 import { PnlCalendarHeatmap } from '../components/PnlCalendarHeatmap'
-import { TradeTags } from '../components/TradeTags'
+import { TradeRow } from '../components/TradeRow'
 
 const PAGE_SIZE = 15
 
@@ -27,9 +27,10 @@ const DayCard = forwardRef<
     journal: DailyJournal | null
     plan: DailyPlanWithPlaybooks | null
     highlighted: boolean
+    usualSize: Map<Trade['asset_type'], number>
     onSaveNote: (date: string, fields: { notes?: string | null; mood_rating?: number | null }) => void
   }
->(function DayCard({ day, journal, plan, highlighted, onSaveNote }, ref) {
+>(function DayCard({ day, journal, plan, highlighted, usualSize, onSaveNote }, ref) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
 
@@ -145,24 +146,7 @@ const DayCard = forwardRef<
 
       <div className="divide-y divide-neutral-800/60">
         {day.trades.map((t) => (
-          <Link key={t.id} to={`/trades/${t.id}`} className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-neutral-800/40">
-            <span className="w-20 shrink-0 text-xs tabular-nums text-neutral-500">{timeOnlyFmt(t.first_in_at)}</span>
-            <span className="w-40 shrink-0 truncate font-medium text-neutral-200">
-              {t.symbol}
-              {t.options_detail && (
-                <span className="ml-1.5 text-xs font-normal text-neutral-500">
-                  {optionLabel(t.options_detail.strike, t.options_detail.option_type)} {dteLabel(t.first_in_at, t.options_detail.expiration)}
-                </span>
-              )}
-            </span>
-            <span className="w-14 shrink-0 text-xs text-neutral-500">{holdTimeFmt(t.hold_seconds)}</span>
-            <span className="min-w-0 flex-1">
-              <TradeTags trade={t} />
-            </span>
-            <span className={`w-24 shrink-0 text-right tabular-nums ${t.status === 'OPEN' ? 'text-neutral-500' : pnlClass(t.realized_pnl_net ?? 0)}`}>
-              {t.status === 'OPEN' ? 'OPEN' : currency(t.realized_pnl_net)}
-            </span>
-          </Link>
+          <TradeRow key={t.id} trade={t} usualSize={usualSize} />
         ))}
       </div>
     </div>
@@ -279,6 +263,7 @@ export function JournalPage() {
               journal={journalByDate.get(day.date) ?? null}
               plan={planByDate.get(day.date) ?? null}
               highlighted={day.date === focusDate}
+              usualSize={typicalPositionSize(trades, day.date)}
               onSaveNote={handleSaveNote}
             />
           ))}

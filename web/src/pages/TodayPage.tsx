@@ -4,12 +4,12 @@ import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails, fetchDailyPlan, fetchTargetSettings } from '../lib/queries'
 import type { DailyPlanWithPlaybooks, TargetSettings, TradeWithDetails } from '../lib/database.types'
-import { computeCalendarDays, computeCostBasisAnalysis, returnOnCapitalPct, entrySizeUsd, typicalPositionSize, OVERSIZE_RATIO } from '../lib/metrics'
-import { currency, holdTimeFmt, optionLabel, dteLabel, timeOnlyFmt, percentFmt } from '../lib/format'
+import { computeCalendarDays, entrySizeUsd, typicalPositionSize } from '../lib/metrics'
+import { currency, percentFmt } from '../lib/format'
 import { toDateStr } from '../lib/dateRange'
 import { tradeDay, longDayLabel } from '../lib/tradingDay'
 import { PlanCard } from '../components/PlanCard'
-import { TradeTags } from '../components/TradeTags'
+import { TradeRow } from '../components/TradeRow'
 
 function pnlClass(v: number) {
   return v > 0 ? 'text-(--status-good)' : v < 0 ? 'text-(--status-critical)' : 'text-neutral-300'
@@ -201,51 +201,9 @@ export function TodayPage() {
           <div className="px-4 py-8 text-center text-sm text-neutral-500">No trades yet today.</div>
         ) : (
           <div className="divide-y divide-neutral-800/60">
-            {todays.map((t) => {
-              const pos = computeCostBasisAnalysis(t).peakExposureUsd
-              const returnPct = t.status === 'CLOSED' ? returnOnCapitalPct(t) : null
-              const usual = usualSize.get(t.asset_type) ?? null
-              const sizeRatio = pos !== null && usual ? pos / usual : null
-              const oversized = sizeRatio !== null && sizeRatio >= OVERSIZE_RATIO
-              return (
-              <Link
-                key={t.id}
-                to={`/trades/${t.id}`}
-                className="flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-neutral-800/40"
-              >
-                <span className="w-20 shrink-0 text-xs tabular-nums text-neutral-500">{timeOnlyFmt(t.first_in_at)}</span>
-                <span className="w-40 shrink-0 truncate font-medium text-neutral-100">
-                  {t.symbol}
-                  {t.options_detail && (
-                    <span className="ml-1.5 text-xs font-normal text-neutral-500">
-                      {optionLabel(t.options_detail.strike, t.options_detail.option_type)} {dteLabel(t.first_in_at, t.options_detail.expiration)}
-                    </span>
-                  )}
-                </span>
-                <span className="w-16 shrink-0 text-xs text-neutral-500">{holdTimeFmt(t.hold_seconds)}</span>
-                <span className="min-w-0 flex-1">
-                  <TradeTags trade={t} />
-                </span>
-                <span
-                  className={`w-24 shrink-0 text-right text-xs tabular-nums ${oversized ? 'font-medium text-amber-400' : 'text-neutral-400'}`}
-                  title={
-                    oversized
-                      ? `${sizeRatio!.toFixed(1)}× your usual size (median ${currency(usual)} over your recent ${t.asset_type} trades)`
-                      : 'Position size: peak dollar capital committed at any single moment'
-                  }
-                >
-                  {oversized && '⚠ '}
-                  {pos !== null ? currency(pos) : '—'}
-                </span>
-                <span className={`w-24 shrink-0 text-right font-medium tabular-nums ${t.status === 'OPEN' ? 'text-neutral-500' : pnlClass(t.realized_pnl_net ?? 0)}`}>
-                  {t.status === 'OPEN' ? 'OPEN' : currency(t.realized_pnl_net)}
-                </span>
-                <span className={`w-16 shrink-0 text-right text-xs tabular-nums ${returnPct === null ? 'text-neutral-500' : pnlClass(returnPct)}`}>
-                  {returnPct === null ? '—' : percentFmt(returnPct)}
-                </span>
-              </Link>
-              )
-            })}
+            {todays.map((t) => (
+              <TradeRow key={t.id} trade={t} usualSize={usualSize} />
+            ))}
           </div>
         )}
       </div>
