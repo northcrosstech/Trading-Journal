@@ -1,3 +1,4 @@
+import type { Playbook, TradeWithDetails } from './database.types'
 import { strengthsOf } from './strengths'
 
 /** The review tags regrouped into the four decisions of a trade, so a trade list reads
@@ -28,4 +29,20 @@ export function reviewChecks(t: { mistakes: string[]; strengths?: string[] | nul
     return { label: c.label, status: bad.length ? ('bad' as const) : good.length ? ('good' as const) : null, tags: [...bad, ...good] }
   })
   return { checks, otherMistakes: t.mistakes.filter((m) => !grouped.has(m)) }
+}
+
+/** Review sections still unanswered, in panel order: whose idea, the four checks, and
+ * the setup (only when there are setups to pick from). The review queue warns on Next
+ * when this is non-empty, but lets the trader move on anyway. */
+export function reviewMissing(
+  t: TradeWithDetails,
+  setups: Pick<Playbook, 'id' | 'archived'>[],
+): string[] {
+  const missing: string[] = []
+  if (!t.trade_origin) missing.push('Whose idea')
+  for (const c of reviewChecks(t).checks) if (!c.status) missing.push(c.label)
+  const currentSetupId = t.trade_playbooks?.playbook_id ?? null
+  const canPickSetup = setups.some((s) => !s.archived || s.id === currentSetupId)
+  if (canPickSetup && !currentSetupId) missing.push('Setup')
+  return missing
 }

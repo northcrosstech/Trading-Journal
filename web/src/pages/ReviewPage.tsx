@@ -15,6 +15,7 @@ import type { DailyPlanWithPlaybooks, Playbook, TradeWithDetails } from '../lib/
 import { useTradeJournal } from '../lib/useTradeJournal'
 import { MISTAKE_TAGS } from '../lib/mistakes'
 import { STRENGTH_TAGS, strengthsOf } from '../lib/strengths'
+import { reviewMissing } from '../lib/reviewChecks'
 import { tradeOutcome } from '../lib/whatIf'
 import { MOODS } from '../lib/moods'
 import { toDateStr } from '../lib/dateRange'
@@ -219,15 +220,27 @@ export function ReviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per trade shown
   }, [currentId, suggestPlanned])
 
+  // Next with unanswered required sections warns once (highlighting them); pressing
+  // Next again on the same trade moves on anyway, but the trade is only marked
+  // reviewed once it's complete -- a skipped one stays "to review".
+  const [warnedId, setWarnedId] = useState<string | null>(null)
+  const missing = current ? reviewMissing(current, setups) : []
+  const warned = !!current && warnedId === current.id && missing.length > 0
+
   const next = useCallback(() => {
     if (!current) return
-    if (!current.reviewed_at) {
+    if (missing.length > 0 && warnedId !== current.id) {
+      setWarnedId(current.id)
+      return
+    }
+    setWarnedId(null)
+    if (!current.reviewed_at && missing.length === 0) {
       const reviewedAt = new Date().toISOString()
       updateTrade(current.id, (t) => ({ ...t, reviewed_at: reviewedAt }))
       updateTradeJournal(current.id, { reviewed_at: reviewedAt })
     }
     setIndex((i) => i + 1)
-  }, [current, updateTrade])
+  }, [current, updateTrade, missing.length, warnedId])
 
   const back = useCallback(() => setIndex((i) => Math.max(0, i - 1)), [])
 
@@ -343,8 +356,13 @@ export function ReviewPage() {
 
         <div className="flex flex-col gap-4 lg:col-span-2">
           <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-            <TradeJournalPanel trade={current} journal={journal} setups={setups} shortcuts />
+            <TradeJournalPanel trade={current} journal={journal} setups={setups} shortcuts highlightMissing={warned} />
           </div>
+          {warned && (
+            <div className="rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
+              Still to answer: {missing.join(', ')}. Press Next again to skip — it stays “to review”.
+            </div>
+          )}
           <div className="flex gap-2">
             <button
               onClick={back}

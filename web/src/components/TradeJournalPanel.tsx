@@ -3,6 +3,7 @@ import type { Playbook, TradeWithDetails } from '../lib/database.types'
 import type { TradeJournal } from '../lib/useTradeJournal'
 import { MISTAKE_TAGS } from '../lib/mistakes'
 import { STRENGTH_TAGS, strengthsOf } from '../lib/strengths'
+import { REVIEW_CHECKS, reviewMissing } from '../lib/reviewChecks'
 import { tradeOutcome, OUTCOME_LABEL, rFmt, type OutcomeKind } from '../lib/whatIf'
 import { currency } from '../lib/format'
 import { ORIGINS } from '../lib/origin'
@@ -130,26 +131,78 @@ function WhatIf({ trade, journal }: { trade: TradeWithDetails; journal: TradeJou
   )
 }
 
-/** The whole per-trade journal: whose idea (planned / unplanned / followed), done right, mistakes, what if, setup, one note, screenshot.
- * `shortcuts` shows the review queue's key hints next to each control. */
+/** Section heading; required sections get a dot, and turn amber when `missing` is set
+ * (the review queue sets it after a Next with unanswered sections). */
+function SectionTitle({ children, required = false, missing = false }: { children: string; required?: boolean; missing?: boolean }) {
+  return (
+    <h3 className={`mb-1.5 text-xs font-medium uppercase tracking-wide ${missing ? 'text-amber-400' : 'text-neutral-500'}`}>
+      {children}
+      {required && <span className={missing ? 'text-amber-400' : 'text-neutral-600'}> •</span>}
+    </h3>
+  )
+}
+
+function TagChip({
+  tag,
+  active,
+  tone,
+  kbd,
+  onClick,
+}: {
+  tag: string
+  active: boolean
+  tone: 'good' | 'bad'
+  kbd: string | null
+  onClick: () => void
+}) {
+  const activeClass = tone === 'good' ? 'border-emerald-500/60 bg-emerald-950/60 text-emerald-300' : 'border-red-500/60 bg-red-950/60 text-red-300'
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+        active ? activeClass : 'border-neutral-700 text-neutral-400 hover:bg-neutral-800'
+      }`}
+    >
+      {tone === 'good' ? '✓ ' : '✗ '}
+      {tag}
+      {kbd && <Kbd>{kbd}</Kbd>}
+    </button>
+  )
+}
+
+/** The whole per-trade journal: whose idea (planned / unplanned / followed), the
+ * Entry / Size / Stop / TP checklist, setup, what if, one note, screenshot. Whose idea,
+ * the four checks and setup are required -- `highlightMissing` marks the unanswered
+ * ones. `shortcuts` shows the review queue's key hints next to each control. */
 export function TradeJournalPanel({
   trade,
   journal,
   setups,
   shortcuts = false,
+  highlightMissing = false,
 }: {
   trade: TradeWithDetails
   journal: TradeJournal
   setups: Playbook[]
   shortcuts?: boolean
+  highlightMissing?: boolean
 }) {
   const currentSetupId = trade.trade_playbooks?.playbook_id ?? null
   const visibleSetups = setups.filter((s) => !s.archived || s.id === currentSetupId)
+  const missing = new Set(highlightMissing ? reviewMissing(trade, setups) : [])
+  const strengths = strengthsOf(trade)
+  const checkedMistakes = new Set<string>(REVIEW_CHECKS.flatMap((c) => c.bad))
+  const otherMistakes = [...MISTAKE_TAGS.filter((m) => !checkedMistakes.has(m)), ...trade.mistakes.filter((m) => !(MISTAKE_TAGS as readonly string[]).includes(m))]
+  const strengthKey = (tag: string) => (shortcuts ? `⇧${STRENGTH_TAGS.indexOf(tag as (typeof STRENGTH_TAGS)[number]) + 1}` : null)
+  const mistakeKey = (tag: string) => {
+    const i = MISTAKE_TAGS.indexOf(tag as (typeof MISTAKE_TAGS)[number])
+    return shortcuts && i >= 0 ? String(i + 1) : null
+  }
 
   return (
     <div className="flex flex-col gap-4">
       <section>
-        <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Whose idea was it?</h3>
+        <SectionTitle required missing={missing.has('Whose idea')}>Whose idea was it?</SectionTitle>
         <div className="grid grid-cols-3 gap-2">
           {ORIGINS.map(({ value, label, key }) => {
             const active = trade.trade_origin === value
@@ -171,66 +224,36 @@ export function TradeJournalPanel({
       </section>
 
       <section>
-        <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Done right</h3>
-        <div className="flex flex-wrap gap-1.5">
-          {STRENGTH_TAGS.map((tag, i) => {
-            const active = strengthsOf(trade).includes(tag)
-            return (
-              <button
-                key={tag}
-                onClick={() => journal.toggleStrength(tag)}
-                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                  active ? 'border-emerald-500/60 bg-emerald-950/60 text-emerald-300' : 'border-neutral-700 text-neutral-400 hover:bg-neutral-800'
-                }`}
-              >
-                {tag}
-                {shortcuts && <Kbd>{`⇧${i + 1}`}</Kbd>}
-              </button>
-            )
-          })}
+        <SectionTitle required missing={REVIEW_CHECKS.some((c) => missing.has(c.label))}>Checklist</SectionTitle>
+        <div className="flex flex-col gap-2">
+          {REVIEW_CHECKS.map((c) => (
+            <div key={c.label} className="flex items-start gap-2">
+              <span className={`w-11 shrink-0 pt-1 text-xs font-medium ${missing.has(c.label) ? 'text-amber-400' : 'text-neutral-400'}`}>{c.label}</span>
+              <div className="flex flex-wrap gap-1.5">
+                {c.good.map((tag) => (
+                  <TagChip key={tag} tag={tag} tone="good" active={strengths.includes(tag)} kbd={strengthKey(tag)} onClick={() => journal.toggleStrength(tag)} />
+                ))}
+                {c.bad.map((tag) => (
+                  <TagChip key={tag} tag={tag} tone="bad" active={trade.mistakes.includes(tag)} kbd={mistakeKey(tag)} onClick={() => journal.toggleMistake(tag)} />
+                ))}
+              </div>
+            </div>
+          ))}
+          {otherMistakes.length > 0 && (
+            <div className="flex items-start gap-2">
+              <span className="w-11 shrink-0 pt-1 text-xs font-medium text-neutral-500">Other</span>
+              <div className="flex flex-wrap gap-1.5">
+                {otherMistakes.map((tag) => (
+                  <TagChip key={tag} tag={tag} tone="bad" active={trade.mistakes.includes(tag)} kbd={mistakeKey(tag)} onClick={() => journal.toggleMistake(tag)} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
       <section>
-        <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Mistakes</h3>
-        <div className="flex flex-wrap gap-1.5">
-          {MISTAKE_TAGS.map((tag, i) => {
-            const active = trade.mistakes.includes(tag)
-            return (
-              <button
-                key={tag}
-                onClick={() => journal.toggleMistake(tag)}
-                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                  active ? 'border-red-500/60 bg-red-950/60 text-red-300' : 'border-neutral-700 text-neutral-400 hover:bg-neutral-800'
-                }`}
-              >
-                {tag}
-                {shortcuts && <Kbd>{String(i + 1)}</Kbd>}
-              </button>
-            )
-          })}
-          {/* Legacy free-form tags carried over from older versions stay visible/removable. */}
-          {trade.mistakes
-            .filter((m) => !(MISTAKE_TAGS as readonly string[]).includes(m))
-            .map((m) => (
-              <button
-                key={m}
-                onClick={() => journal.toggleMistake(m)}
-                className="rounded-full border border-red-500/60 bg-red-950/60 px-2.5 py-1 text-xs font-medium text-red-300"
-              >
-                {m} ×
-              </button>
-            ))}
-        </div>
-        {trade.mistakes.length === 0 && trade.reviewed_at && (
-          <p className="mt-1.5 text-xs text-emerald-500/80">Clean trade — no mistakes.</p>
-        )}
-      </section>
-
-      <WhatIf key={trade.id} trade={trade} journal={journal} />
-
-      <section>
-        <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Setup</h3>
+        <SectionTitle required={visibleSetups.length > 0} missing={missing.has('Setup')}>Setup</SectionTitle>
         {visibleSetups.length === 0 ? (
           <p className="text-xs text-neutral-600">No setups yet — add them in Settings.</p>
         ) : (
@@ -254,6 +277,8 @@ export function TradeJournalPanel({
           </div>
         )}
       </section>
+
+      <WhatIf key={trade.id} trade={trade} journal={journal} />
 
       <section>
         <div className="mb-1.5 flex items-center justify-between">
