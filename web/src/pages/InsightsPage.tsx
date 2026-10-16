@@ -133,7 +133,7 @@ function Takeaways({
   if (lines.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-neutral-800 px-4 py-3 text-sm text-neutral-500">
-        Review your trades (planned? done right? mistakes?) and this is where the lessons show up.{' '}
+        Review your trades (whose idea? done right? mistakes?) and this is where the lessons show up.{' '}
         <Link to="/journal" className="text-blue-400 hover:underline">
           Go to Journal
         </Link>
@@ -250,7 +250,7 @@ export function InsightsPage() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <GroupTable
-          title="Planned vs unplanned"
+          title="Planned vs unplanned vs followed"
           hint={planned.untagged > 0 ? `${planned.untagged} trade${planned.untagged === 1 ? '' : 's'} not tagged yet` : undefined}
           rows={planned.rows}
         />

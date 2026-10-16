@@ -5,6 +5,7 @@ import { MISTAKE_TAGS } from '../lib/mistakes'
 import { STRENGTH_TAGS, strengthsOf } from '../lib/strengths'
 import { tradeOutcome, OUTCOME_LABEL, rFmt, type OutcomeKind } from '../lib/whatIf'
 import { currency } from '../lib/format'
+import { ORIGINS } from '../lib/origin'
 import { tagChipStyle } from '../lib/tagColors'
 
 function Kbd({ children }: { children: string }) {
@@ -55,6 +56,12 @@ function PriceInput({
     </label>
   )
 }
+
+const ORIGIN_ACTIVE = {
+  planned: 'border-emerald-600 bg-emerald-950/60 text-emerald-300',
+  unplanned: 'border-amber-600 bg-amber-950/50 text-amber-300',
+  followed: 'border-sky-600 bg-sky-950/50 text-sky-300',
+} as const
 
 const OUTCOME_TONE: Record<OutcomeKind, string> = {
   left_on_table: 'text-red-400',
@@ -123,7 +130,7 @@ function WhatIf({ trade, journal }: { trade: TradeWithDetails; journal: TradeJou
   )
 }
 
-/** The whole per-trade journal: planned?, done right, mistakes, what if, setup, one note, screenshot.
+/** The whole per-trade journal: whose idea (planned / unplanned / followed), done right, mistakes, what if, setup, one note, screenshot.
  * `shortcuts` shows the review queue's key hints next to each control. */
 export function TradeJournalPanel({
   trade,
@@ -142,24 +149,21 @@ export function TradeJournalPanel({
   return (
     <div className="flex flex-col gap-4">
       <section>
-        <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Was it in your plan?</h3>
-        <div className="grid grid-cols-2 gap-2">
-          {([true, false] as const).map((value) => {
-            const active = trade.planned === value
+        <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Whose idea was it?</h3>
+        <div className="grid grid-cols-3 gap-2">
+          {ORIGINS.map(({ value, label, key }) => {
+            const active = trade.trade_origin === value
             return (
               <button
-                key={String(value)}
-                onClick={() => journal.setPlanned(active ? null : value)}
+                key={value}
+                onClick={() => journal.setOrigin(active ? null : value)}
+                title={value === 'followed' ? 'Someone else\u2019s call: alert, Discord, mentor, signal' : undefined}
                 className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                  active
-                    ? value
-                      ? 'border-emerald-600 bg-emerald-950/60 text-emerald-300'
-                      : 'border-amber-600 bg-amber-950/50 text-amber-300'
-                    : 'border-neutral-700 text-neutral-400 hover:bg-neutral-800'
+                  active ? ORIGIN_ACTIVE[value] : 'border-neutral-700 text-neutral-400 hover:bg-neutral-800'
                 }`}
               >
-                {value ? 'Planned' : 'Unplanned'}
-                {shortcuts && <Kbd>{value ? 'P' : 'U'}</Kbd>}
+                {label}
+                {shortcuts && <Kbd>{key}</Kbd>}
               </button>
             )
           })}

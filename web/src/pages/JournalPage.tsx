@@ -39,8 +39,9 @@ const DayCard = forwardRef<
   const wins = closed.filter((t) => (t.realized_pnl_net ?? 0) > 0).length
   const losses = closed.filter((t) => (t.realized_pnl_net ?? 0) < 0).length
   const toReview = closed.filter((t) => !t.reviewed_at).length
-  const planned = closed.filter((t) => t.planned === true).length
-  const unplanned = closed.filter((t) => t.planned === false).length
+  const planned = closed.filter((t) => t.trade_origin === 'planned').length
+  const unplanned = closed.filter((t) => t.trade_origin === 'unplanned').length
+  const followed = closed.filter((t) => t.trade_origin === 'followed').length
   const mistakes = closed.reduce((n, t) => n + t.mistakes.length, 0)
   const doneRight = closed.reduce((n, t) => n + strengthsOf(t).length, 0)
   const mood = MOODS.find((m) => m.value === journal?.mood_rating)
@@ -57,9 +58,10 @@ const DayCard = forwardRef<
           </div>
           <div className="text-xs text-neutral-500">
             {wins}W · {losses}L
-            {(planned > 0 || unplanned > 0) && (
+            {(planned > 0 || unplanned > 0 || followed > 0) && (
               <>
                 {' '}· <span className="text-emerald-400">{planned} planned</span> · <span className="text-amber-400">{unplanned} unplanned</span>
+                {followed > 0 && <> · <span className="text-sky-400">{followed} followed</span></>}
               </>
             )}
             {doneRight > 0 && <span className="text-emerald-400"> · {doneRight} done right</span>}

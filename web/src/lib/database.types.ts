@@ -40,7 +40,8 @@ export type TradeRow = {
   thesis_note: string | null
   reflection_note: string | null
   screenshot_url: string | null
-  planned: boolean | null
+  /** Whose idea the trade was; null = not reviewed yet. */
+  trade_origin: TradeOrigin | null
   mistakes: string[]
   strengths: string[]
   stop_price: number | null
@@ -192,6 +193,8 @@ export type DailyPlanPlaybookRow = {
   daily_plan_id: string
   playbook_id: string
 }
+
+export type TradeOrigin = 'planned' | 'unplanned' | 'followed'
 
 export type TargetSettingsRow = {
   id: string

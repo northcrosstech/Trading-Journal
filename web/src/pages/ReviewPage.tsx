@@ -50,8 +50,9 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
   }, [date, tomorrow])
 
   const net = trades.reduce((sum, t) => sum + (t.realized_pnl_net ?? 0), 0)
-  const planned = trades.filter((t) => t.planned === true).length
-  const unplanned = trades.filter((t) => t.planned === false).length
+  const planned = trades.filter((t) => t.trade_origin === 'planned').length
+  const unplanned = trades.filter((t) => t.trade_origin === 'unplanned').length
+  const followed = trades.filter((t) => t.trade_origin === 'followed').length
   const strengthCounts = STRENGTH_TAGS.map((tag) => ({ tag, count: trades.filter((t) => strengthsOf(t).includes(tag)).length })).filter(
     (m) => m.count > 0,
   )
@@ -83,6 +84,7 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
           <span>{trades.length} trades</span>
           <span className="text-emerald-400">{planned} planned</span>
           <span className="text-amber-400">{unplanned} unplanned</span>
+          {followed > 0 && <span className="text-sky-400">{followed} followed</span>}
         </div>
         {strengthCounts.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -157,8 +159,8 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
 }
 
 /** The review queue: one closed trade at a time for a day -- chart on the left,
- * planned? / mistakes / setup / note / screenshot on the right, then the next trade.
- * Keyboard: P / U planned, Shift+1-6 done right, 1-7 mistakes, N or → next, ← back,
+ * whose idea? / mistakes / setup / note / screenshot on the right, then the next trade.
+ * Keyboard: P / U / F planned / unplanned / followed, Shift+1-6 done right, 1-7 mistakes, N or → next, ← back,
  * Ctrl+Enter next from the note box. */
 export function ReviewPage() {
   const { user } = useAuth()
@@ -211,9 +213,9 @@ export function ReviewPage() {
   // A trade on a watchlist ticker starts out marked Planned -- one less tap; easy to flip.
   const watchlist = useMemo(() => watchlistSymbols(plan?.plan_notes), [plan])
   const currentId = current?.id
-  const suggestPlanned = !!current && current.planned === null && !current.reviewed_at && watchlist.has(current.symbol)
+  const suggestPlanned = !!current && current.trade_origin === null && !current.reviewed_at && watchlist.has(current.symbol)
   useEffect(() => {
-    if (suggestPlanned) journal.setPlanned(true)
+    if (suggestPlanned) journal.setOrigin('planned')
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per trade shown
   }, [currentId, suggestPlanned])
 
@@ -246,8 +248,8 @@ export function ReviewPage() {
         return
       }
       const key = e.key.toLowerCase()
-      if (key === 'p') journal.setPlanned(current.planned === true ? null : true)
-      else if (key === 'u') journal.setPlanned(current.planned === false ? null : false)
+      const origin = ({ p: 'planned', u: 'unplanned', f: 'followed' } as const)[key as 'p' | 'u' | 'f']
+      if (origin) journal.setOrigin(current.trade_origin === origin ? null : origin)
       else if (key === 'n' || e.key === 'ArrowRight') next()
       else if (e.key === 'ArrowLeft') back()
       else if (/^[1-9]$/.test(e.key) && Number(e.key) <= MISTAKE_TAGS.length) journal.toggleMistake(MISTAKE_TAGS[Number(e.key) - 1])

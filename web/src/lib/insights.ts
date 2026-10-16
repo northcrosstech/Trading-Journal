@@ -92,13 +92,14 @@ function groupBy<T extends Trade>(trades: T[], keyOf: (t: T) => string | null): 
   return out
 }
 
-/** Planned vs unplanned, over reviewed trades only (planned is null until reviewed). */
+/** Planned vs unplanned vs followed, over reviewed trades only (origin is null until reviewed). */
 export function plannedVsUnplanned(trades: TradeWithDetails[]): { rows: GroupRow[]; untagged: number } {
   const closed = closedTrades(trades)
-  const planned = closed.filter((t) => t.planned === true)
-  const unplanned = closed.filter((t) => t.planned === false)
-  const rows = [row('planned', 'Planned', planned), row('unplanned', 'Unplanned', unplanned)].filter((r) => r.count > 0)
-  return { rows, untagged: closed.length - planned.length - unplanned.length }
+  const of = (o: string) => closed.filter((t) => t.trade_origin === o)
+  const rows = [row('planned', 'Planned', of('planned')), row('unplanned', 'Unplanned', of('unplanned')), row('followed', 'Followed', of('followed'))].filter(
+    (r) => r.count > 0,
+  )
+  return { rows, untagged: closed.length - rows.reduce((n, r) => n + r.count, 0) }
 }
 
 /** What each mistake cost: the net P&L of the trades carrying it, worst first, with

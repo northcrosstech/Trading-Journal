@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Playbook, TradeWithDetails } from './database.types'
+import type { Playbook, TradeOrigin, TradeWithDetails } from './database.types'
 import {
   updateTradeJournal,
   setTradePlaybook,
@@ -54,11 +54,11 @@ export function useTradeJournal(trade: TradeWithDetails | null, userId: string |
     p.catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
 
-  const setPlanned = useCallback(
-    (planned: boolean | null) => {
+  const setOrigin = useCallback(
+    (trade_origin: TradeOrigin | null) => {
       if (!tradeId) return
-      updateTrade(tradeId, (t) => ({ ...t, planned }))
-      run(updateTradeJournal(tradeId, { planned }))
+      updateTrade(tradeId, (t) => ({ ...t, trade_origin }))
+      run(updateTradeJournal(tradeId, { trade_origin }))
     },
     [tradeId, updateTrade, run],
   )
@@ -155,7 +155,7 @@ export function useTradeJournal(trade: TradeWithDetails | null, userId: string |
     note,
     noteSaved,
     setNote,
-    setPlanned,
+    setOrigin,
     toggleMistake,
     toggleStrength,
     setPrice,

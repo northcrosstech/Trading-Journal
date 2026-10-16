@@ -10,6 +10,7 @@ import { toDateStr } from '../lib/dateRange'
 import { tradeDay, longDayLabel } from '../lib/tradingDay'
 import { PlanCard } from '../components/PlanCard'
 import { TradeRow } from '../components/TradeRow'
+import { ORIGINS, ORIGIN_TEXT } from '../lib/origin'
 
 function pnlClass(v: number) {
   return v > 0 ? 'text-(--status-good)' : v < 0 ? 'text-(--status-critical)' : 'text-neutral-300'
@@ -194,7 +195,16 @@ export function TodayPage() {
 
       <div className="rounded-xl border border-neutral-800 bg-neutral-900">
         <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
-          <h2 className="text-sm font-medium text-neutral-300">Today's trades</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-medium text-neutral-300">Today's trades</h2>
+            <span className="flex gap-2 text-[11px]">
+              {ORIGINS.map((o) => (
+                <span key={o.value} className={ORIGIN_TEXT[o.value]}>
+                  ● {o.label}
+                </span>
+              ))}
+            </span>
+          </div>
           {closed.length > 0 && toReview === 0 && <span className="text-xs text-emerald-500">All reviewed ✓</span>}
         </div>
         {todays.length === 0 ? (
