@@ -205,6 +205,9 @@ export type TargetSettingsRow = {
   // computation. See migration 20260709010000_target_settings.sql. TODO(percent-mode).
   profit_target_pct: number | null
   loss_limit_pct: number | null
+  /** Absent until migration 20261017010000_review_checklist is applied; null = default list.
+   * Read via normalizeChecklist(). */
+  review_checklist?: unknown
   created_at: string
   updated_at: string
 }

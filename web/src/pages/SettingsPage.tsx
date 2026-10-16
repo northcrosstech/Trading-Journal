@@ -5,6 +5,7 @@ import { fetchTargetSettings, upsertTargetSettings, fetchPlaybooks, createPlaybo
 import type { Playbook } from '../lib/database.types'
 import { TAG_COLORS, tagChipStyle } from '../lib/tagColors'
 import { ColorPicker } from '../components/ColorPicker'
+import { ReviewChecklistCard } from '../components/ReviewChecklistCard'
 
 function DollarInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
@@ -228,6 +229,7 @@ export function SettingsPage() {
       <h1 className="text-lg font-semibold text-neutral-100">Settings</h1>
       <RiskCard />
       <SetupsCard />
+      <ReviewChecklistCard />
       <DataCard />
       <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
         <div className="flex items-center justify-between">

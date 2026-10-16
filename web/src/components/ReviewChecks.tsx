@@ -1,6 +1,7 @@
 import type { TradeWithDetails } from '../lib/database.types'
 import { tagChipStyle } from '../lib/tagColors'
 import { reviewChecks } from '../lib/reviewChecks'
+import { useReviewChecklist } from '../lib/reviewChecklistContext'
 
 const MARK = { good: '✓', bad: '✗' } as const
 const TONE = { good: 'text-emerald-400', bad: 'text-red-400' } as const
@@ -10,7 +11,8 @@ const TONE = { good: 'text-emerald-400', bad: 'text-red-400' } as const
  * tags behind it. Mistakes outside those four areas show as a red +N. */
 export function ReviewChecks({ trade }: { trade: TradeWithDetails }) {
   const setup = trade.trade_playbooks?.playbooks ?? null
-  const { checks, otherMistakes } = reviewChecks(trade)
+  const { checklist } = useReviewChecklist()
+  const { checks, otherMistakes } = reviewChecks(trade, checklist)
   const unreviewed = trade.status === 'CLOSED' && !trade.reviewed_at
   const anyTagged = checks.some((c) => c.status) || otherMistakes.length > 0
 

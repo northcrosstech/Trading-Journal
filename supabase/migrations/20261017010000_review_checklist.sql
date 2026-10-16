@@ -1,0 +1,11 @@
+-- Per-user review checklist: which "done right" (good) and mistake (bad) labels are
+-- offered under each section of trade review (Entry / Size / Stop / TP, plus Other
+-- mistakes). Shape:
+--   {"sections": [{"label": "Entry", "good": [...], "bad": [...]}, ...], "other": [...]}
+-- null = the built-in default list (web/src/lib/reviewChecks.ts DEFAULT_CHECKLIST).
+-- Labels are plain text that trades.strengths / trades.mistakes store, so removing one
+-- here never changes trades already tagged with it.
+--
+-- Additive and safe to re-run. The web app works before this is applied (it falls
+-- back to the default list); only saving changes in Settings needs it.
+alter table target_settings add column if not exists review_checklist jsonb;

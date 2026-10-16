@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import type { ReviewChecklist } from './reviewChecks'
 import type {
   Trade,
   Execution,
@@ -589,6 +590,13 @@ export async function upsertTargetSettings(
       { user_id: userId, ...fields, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' },
     )
+  if (error) throw error
+}
+
+export async function saveReviewChecklist(userId: string, checklist: ReviewChecklist) {
+  const { error } = await supabase
+    .from('target_settings')
+    .upsert({ user_id: userId, review_checklist: checklist, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
   if (error) throw error
 }
 

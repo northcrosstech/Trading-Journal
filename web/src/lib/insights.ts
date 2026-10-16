@@ -1,7 +1,7 @@
 import type { Trade, TradeWithDetails } from './database.types'
 import { TRADING_TIMEZONE } from './format'
-import { MISTAKE_TAGS } from './mistakes'
-import { STRENGTH_TAGS, strengthsOf } from './strengths'
+import { strengthsOf } from './strengths'
+import type { ReviewChecklist } from './reviewChecks'
 import { tradeOutcome, type OutcomeKind } from './whatIf'
 
 /** Closed trades with a booked P&L, in close order -- the population every metric here uses. */
@@ -104,10 +104,11 @@ export function plannedVsUnplanned(trades: TradeWithDetails[]): { rows: GroupRow
 
 /** What each mistake cost: the net P&L of the trades carrying it, worst first, with
  * clean reviewed trades (no mistakes) as the baseline to compare against. */
-export function mistakeCost(trades: TradeWithDetails[]): { rows: GroupRow[]; clean: GroupRow | null } {
+export function mistakeCost(trades: TradeWithDetails[], cl: ReviewChecklist): { rows: GroupRow[]; clean: GroupRow | null } {
   const closed = closedTrades(trades)
-  const known = new Set<string>(MISTAKE_TAGS)
-  const tags = [...MISTAKE_TAGS, ...new Set(closed.flatMap((t) => t.mistakes).filter((m) => !known.has(m)))]
+  const vocab = [...cl.sections.flatMap((s) => s.bad), ...cl.other]
+  const known = new Set(vocab)
+  const tags = [...vocab, ...new Set(closed.flatMap((t) => t.mistakes).filter((m) => !known.has(m)))]
   const rows = tags
     .map((tag) => row(tag, tag, closed.filter((t) => t.mistakes.includes(tag))))
     .filter((r) => r.count > 0)
@@ -171,9 +172,13 @@ export function bySymbol(trades: Trade[], minTrades = 3): GroupRow[] {
 }
 
 /** What's working: the net P&L of trades carrying each "done right" habit, best first. */
-export function strengthStats(trades: TradeWithDetails[]): GroupRow[] {
+export function strengthStats(trades: TradeWithDetails[], cl: ReviewChecklist): GroupRow[] {
   const closed = closedTrades(trades)
-  return STRENGTH_TAGS.map((tag) => row(tag, tag, closed.filter((t) => strengthsOf(t).includes(tag))))
+  const vocab = cl.sections.flatMap((s) => s.good)
+  const known = new Set(vocab)
+  const tags = [...vocab, ...new Set(closed.flatMap(strengthsOf).filter((s) => !known.has(s)))]
+  return tags
+    .map((tag) => row(tag, tag, closed.filter((t) => strengthsOf(t).includes(tag))))
     .filter((r) => r.count > 0)
     .sort((a, b) => b.netPnl - a.netPnl)
 }

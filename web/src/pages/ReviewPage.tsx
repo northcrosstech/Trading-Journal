@@ -13,9 +13,9 @@ import {
 } from '../lib/queries'
 import type { DailyPlanWithPlaybooks, Playbook, TradeWithDetails } from '../lib/database.types'
 import { useTradeJournal } from '../lib/useTradeJournal'
-import { MISTAKE_TAGS } from '../lib/mistakes'
-import { STRENGTH_TAGS, strengthsOf } from '../lib/strengths'
-import { reviewMissing } from '../lib/reviewChecks'
+import { strengthsOf } from '../lib/strengths'
+import { reviewMissing, shortcutTags } from '../lib/reviewChecks'
+import { useReviewChecklist } from '../lib/reviewChecklistContext'
 import { tradeOutcome } from '../lib/whatIf'
 import { MOODS } from '../lib/moods'
 import { toDateStr } from '../lib/dateRange'
@@ -23,6 +23,14 @@ import { tradeDay, longDayLabel, nextTradingDay, watchlistSymbols } from '../lib
 import { currency, priceFmt, holdTimeFmt, optionLabel, dteLabel, timeOnlyFmt } from '../lib/format'
 import { TradeChart } from '../components/TradeChart'
 import { TradeJournalPanel } from '../components/TradeJournalPanel'
+
+/** How many trades carry each tag, most common first -- whatever labels were used,
+ * so tags since removed from the checklist still count. */
+function tagCounts(tagLists: string[][]): { tag: string; count: number }[] {
+  const counts = new Map<string, number>()
+  for (const tags of tagLists) for (const tag of new Set(tags)) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  return Array.from(counts, ([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count)
+}
 
 function pnlClass(v: number) {
   return v > 0 ? 'text-(--status-good)' : v < 0 ? 'text-(--status-critical)' : 'text-neutral-300'
@@ -54,16 +62,12 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
   const planned = trades.filter((t) => t.trade_origin === 'planned').length
   const unplanned = trades.filter((t) => t.trade_origin === 'unplanned').length
   const followed = trades.filter((t) => t.trade_origin === 'followed').length
-  const strengthCounts = STRENGTH_TAGS.map((tag) => ({ tag, count: trades.filter((t) => strengthsOf(t).includes(tag)).length })).filter(
-    (m) => m.count > 0,
-  )
+  const strengthCounts = tagCounts(trades.map(strengthsOf))
   const leftOnTable = trades.reduce((sum, t) => {
     const o = tradeOutcome(t)
     return o.kind === 'left_on_table' || o.kind === 'cost_of_ignoring_stop' ? sum + (o.delta ?? 0) : sum
   }, 0)
-  const mistakeCounts = MISTAKE_TAGS.map((tag) => ({ tag, count: trades.filter((t) => t.mistakes.includes(tag)).length })).filter(
-    (m) => m.count > 0,
-  )
+  const mistakeCounts = tagCounts(trades.map((t) => t.mistakes))
 
   async function handleFinish() {
     setSaving(true)
@@ -224,7 +228,9 @@ export function ReviewPage() {
   // Next again on the same trade moves on anyway, but the trade is only marked
   // reviewed once it's complete -- a skipped one stays "to review".
   const [warnedId, setWarnedId] = useState<string | null>(null)
-  const missing = current ? reviewMissing(current, setups) : []
+  const { checklist } = useReviewChecklist()
+  const keys = useMemo(() => shortcutTags(checklist), [checklist])
+  const missing = current ? reviewMissing(current, setups, checklist) : []
   const warned = !!current && warnedId === current.id && missing.length > 0
 
   const next = useCallback(() => {
@@ -255,8 +261,8 @@ export function ReviewPage() {
       if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       // Shift+digit gives '!' etc. in e.key, so match the physical key instead.
       const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
-      if (e.shiftKey && digit && Number(digit) <= STRENGTH_TAGS.length) {
-        journal.toggleStrength(STRENGTH_TAGS[Number(digit) - 1])
+      if (e.shiftKey && digit && Number(digit) <= keys.good.length) {
+        journal.toggleStrength(keys.good[Number(digit) - 1])
         e.preventDefault()
         return
       }
@@ -265,13 +271,13 @@ export function ReviewPage() {
       if (origin) journal.setOrigin(current.trade_origin === origin ? null : origin)
       else if (key === 'n' || e.key === 'ArrowRight') next()
       else if (e.key === 'ArrowLeft') back()
-      else if (/^[1-9]$/.test(e.key) && Number(e.key) <= MISTAKE_TAGS.length) journal.toggleMistake(MISTAKE_TAGS[Number(e.key) - 1])
+      else if (/^[1-9]$/.test(e.key) && Number(e.key) <= keys.bad.length) journal.toggleMistake(keys.bad[Number(e.key) - 1])
       else return
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, journal, next, back])
+  }, [current, journal, next, back, keys])
 
   if (dayTrades === null || !user) return <div className="text-neutral-500">Loading review…</div>
 

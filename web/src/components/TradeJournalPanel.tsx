@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { Playbook, TradeWithDetails } from '../lib/database.types'
 import type { TradeJournal } from '../lib/useTradeJournal'
-import { MISTAKE_TAGS } from '../lib/mistakes'
-import { STRENGTH_TAGS, strengthsOf } from '../lib/strengths'
-import { REVIEW_CHECKS, reviewMissing } from '../lib/reviewChecks'
+import { strengthsOf } from '../lib/strengths'
+import { allLabels, reviewMissing, shortcutTags } from '../lib/reviewChecks'
+import { useReviewChecklist } from '../lib/reviewChecklistContext'
 import { tradeOutcome, OUTCOME_LABEL, rFmt, type OutcomeKind } from '../lib/whatIf'
 import { currency } from '../lib/format'
 import { ORIGINS } from '../lib/origin'
@@ -189,15 +189,21 @@ export function TradeJournalPanel({
 }) {
   const currentSetupId = trade.trade_playbooks?.playbook_id ?? null
   const visibleSetups = setups.filter((s) => !s.archived || s.id === currentSetupId)
-  const missing = new Set(highlightMissing ? reviewMissing(trade, setups) : [])
+  const { checklist } = useReviewChecklist()
+  const missing = new Set(highlightMissing ? reviewMissing(trade, setups, checklist) : [])
   const strengths = strengthsOf(trade)
-  const checkedMistakes = new Set<string>(REVIEW_CHECKS.flatMap((c) => c.bad))
-  const otherMistakes = [...MISTAKE_TAGS.filter((m) => !checkedMistakes.has(m)), ...trade.mistakes.filter((m) => !(MISTAKE_TAGS as readonly string[]).includes(m))]
-  const strengthKey = (tag: string) => (shortcuts ? `⇧${STRENGTH_TAGS.indexOf(tag as (typeof STRENGTH_TAGS)[number]) + 1}` : null)
-  const mistakeKey = (tag: string) => {
-    const i = MISTAKE_TAGS.indexOf(tag as (typeof MISTAKE_TAGS)[number])
-    return shortcuts && i >= 0 ? String(i + 1) : null
+  // Other = the checklist's Other mistakes, plus any tag on this trade whose label has
+  // since been removed from the checklist (kept visible so it can still be untagged).
+  const known = new Set(allLabels(checklist))
+  const otherMistakes = [...checklist.other, ...trade.mistakes.filter((m) => !known.has(m))]
+  const otherStrengths = strengths.filter((s) => !known.has(s))
+  const keys = shortcutTags(checklist)
+  const keyOf = (list: string[], tag: string, prefix: string) => {
+    const i = list.indexOf(tag)
+    return shortcuts && i >= 0 && i < 9 ? `${prefix}${i + 1}` : null
   }
+  const strengthKey = (tag: string) => keyOf(keys.good, tag, '⇧')
+  const mistakeKey = (tag: string) => keyOf(keys.bad, tag, '')
 
   return (
     <div className="flex flex-col gap-4">
@@ -224,9 +230,9 @@ export function TradeJournalPanel({
       </section>
 
       <section>
-        <SectionTitle required missing={REVIEW_CHECKS.some((c) => missing.has(c.label))}>Checklist</SectionTitle>
+        <SectionTitle required missing={checklist.sections.some((c) => missing.has(c.label))}>Checklist</SectionTitle>
         <div className="flex flex-col gap-2">
-          {REVIEW_CHECKS.map((c) => (
+          {checklist.sections.map((c) => (
             <div key={c.label} className="flex items-start gap-2">
               <span className={`w-11 shrink-0 pt-1 text-xs font-medium ${missing.has(c.label) ? 'text-amber-400' : 'text-neutral-400'}`}>{c.label}</span>
               <div className="flex flex-wrap gap-1.5">
@@ -239,10 +245,13 @@ export function TradeJournalPanel({
               </div>
             </div>
           ))}
-          {otherMistakes.length > 0 && (
+          {(otherMistakes.length > 0 || otherStrengths.length > 0) && (
             <div className="flex items-start gap-2">
               <span className="w-11 shrink-0 pt-1 text-xs font-medium text-neutral-500">Other</span>
               <div className="flex flex-wrap gap-1.5">
+                {otherStrengths.map((tag) => (
+                  <TagChip key={tag} tag={tag} tone="good" active kbd={null} onClick={() => journal.toggleStrength(tag)} />
+                ))}
                 {otherMistakes.map((tag) => (
                   <TagChip key={tag} tag={tag} tone="bad" active={trade.mistakes.includes(tag)} kbd={mistakeKey(tag)} onClick={() => journal.toggleMistake(tag)} />
                 ))}

@@ -5,6 +5,7 @@ import { LoginPage } from './auth/LoginPage'
 import { ResetPasswordPage } from './auth/ResetPasswordPage'
 import { AccountProvider } from './accounts/AccountContext'
 import { Layout } from './components/Layout'
+import { ReviewChecklistProvider } from './components/ReviewChecklistProvider'
 import { TodayPage } from './pages/TodayPage'
 import { TradeLogPage } from './pages/TradeLogPage'
 import { TradeDetailPage } from './pages/TradeDetailPage'
@@ -28,7 +29,9 @@ function App() {
             element={
               <RequireAuth>
                 <AccountProvider>
-                  <Layout />
+                  <ReviewChecklistProvider>
+                    <Layout />
+                  </ReviewChecklistProvider>
                 </AccountProvider>
               </RequireAuth>
             }

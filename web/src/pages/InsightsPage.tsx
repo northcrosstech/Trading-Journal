@@ -18,6 +18,7 @@ import {
   type GroupRow,
 } from '../lib/insights'
 import { rFmt } from '../lib/whatIf'
+import { useReviewChecklist } from '../lib/reviewChecklistContext'
 import { filterTradesByDateRange, presetRange, type DateRangePreset } from '../lib/dateRange'
 import { currency } from '../lib/format'
 import { DateRangePresetBar } from '../components/DateRangePresetBar'
@@ -209,12 +210,13 @@ export function InsightsPage() {
   const s = useMemo(() => summarize(filtered), [filtered])
   const equity = useMemo(() => computeEquityCurve(filtered), [filtered])
   const planned = useMemo(() => plannedVsUnplanned(filtered), [filtered])
-  const mistakes = useMemo(() => mistakeCost(filtered), [filtered])
+  const { checklist } = useReviewChecklist()
+  const mistakes = useMemo(() => mistakeCost(filtered, checklist), [filtered, checklist])
   const setups = useMemo(() => bySetup(filtered), [filtered])
   const timeOfDay = useMemo(() => byTimeOfDay(filtered), [filtered])
   const hold = useMemo(() => byHoldTime(filtered), [filtered])
   const symbols = useMemo(() => bySymbol(filtered), [filtered])
-  const strengths = useMemo(() => strengthStats(filtered), [filtered])
+  const strengths = useMemo(() => strengthStats(filtered, checklist), [filtered, checklist])
   const execution = useMemo(() => executionSummary(filtered), [filtered])
 
   if (trades === null) return <div className="text-neutral-500">Loading insights…</div>
