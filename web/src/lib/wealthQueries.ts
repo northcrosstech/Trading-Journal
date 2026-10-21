@@ -373,3 +373,13 @@ export async function unmarkInstallmentPaid(accountId: string, month: string) {
   const { error } = await supabase.from('installment_payments').delete().eq('account_id', accountId).eq('month', month)
   if (error) throw error
 }
+
+/** Money in/out of every portfolio (activity rows that carry an external flow), for cash flow. */
+export async function fetchExternalFlows(): Promise<Pick<PortfolioActivity, 'portfolio_id' | 'kind' | 'external_flow' | 'occurred_on'>[]> {
+  const { data, error } = await supabase
+    .from('portfolio_activity')
+    .select('portfolio_id, kind, external_flow, occurred_on')
+    .neq('external_flow', 0)
+  if (error) throw error
+  return data ?? []
+}

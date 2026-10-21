@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
+  ArrowLeftRight,
   BarChart3,
   BookOpen,
   CalendarCheck,
@@ -34,10 +35,11 @@ const NAV: Record<Workspace, { to: string; label: string; icon: typeof BookOpen;
     { to: '/wealth', label: 'Overview', icon: LayoutDashboard, end: true },
     { to: '/portfolios', label: 'Portfolios', icon: PieChart },
     { to: '/networth', label: 'Net worth', icon: Landmark },
+    { to: '/cashflow', label: 'Cash flow', icon: ArrowLeftRight },
   ],
 }
 const HOME: Record<Workspace, string> = { trading: '/', wealth: '/wealth' }
-const WEALTH_PREFIXES = ['/wealth', '/portfolios', '/networth']
+const WEALTH_PREFIXES = ['/wealth', '/portfolios', '/networth', '/cashflow']
 const SHARED_PREFIXES = ['/settings', '/accounts']
 const STORAGE_KEY = 'tj.workspace'
 

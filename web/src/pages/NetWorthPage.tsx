@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Landmark, Plus, Settings2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { InstallmentPayment, NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, PortfolioDailyValue } from '../lib/database.types'
@@ -23,6 +23,7 @@ import { signedCurrency as signed } from '../lib/portfolio'
 import { NetWorthChart } from '../components/WealthCharts'
 import { NetWorthComposition } from '../components/NetWorthComposition'
 import { InstallmentsCard } from '../components/InstallmentsCard'
+import { CloseMonthBanner } from '../components/CloseMonthBanner'
 import { usePaymentSetup } from '../lib/usePaymentSetup'
 import { Kpi } from '../components/WealthBits'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -446,7 +447,13 @@ function ManageAccounts({ accounts, defaultMonth, onChanged }: { accounts: Netwo
 
 export function NetWorthPage() {
   const currentMonth = monthOf(centralDateStr(new Date()))
-  const [month, setMonth] = useState(currentMonth)
+  const [searchParams] = useSearchParams()
+  const requested = searchParams.get('month')
+  const [month, setMonth] = useState(requested && /^\d{4}-\d{2}$/.test(requested) ? `${requested}-01` : currentMonth)
+  // The month-end checklist links here with ?month=yyyy-mm.
+  useEffect(() => {
+    if (requested && /^\d{4}-\d{2}$/.test(requested)) setMonth(`${requested}-01`)
+  }, [requested])
   const [year, setYear] = useState(Number(currentMonth.slice(0, 4)))
   const [accounts, setAccounts] = useState<NetworthAccount[] | null>(null)
   const [balances, setBalances] = useState<NetworthBalance[]>([])
@@ -530,6 +537,8 @@ export function NetWorthPage() {
           </>
         }
       />
+
+      <CloseMonthBanner accounts={accounts} balances={balances} payments={payments} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Kpi label={`Net worth · ${monthLabel(month)}`} value={currency(totals.net)} sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`} accent />

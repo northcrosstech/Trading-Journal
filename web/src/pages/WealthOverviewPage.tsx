@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Landmark, PieChart } from 'lucide-react'
-import type { DividendInfo, NetworthAccount, NetworthBalance } from '../lib/database.types'
-import { fetchDividendInfo, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
+import type { DividendInfo, InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
+import { fetchDividendInfo, fetchInstallmentPayments, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
+import { CloseMonthBanner } from '../components/CloseMonthBanner'
 import { addMonths, categoryLabel, isDebt, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
 import { KIND_TONE, kindLabel, signedCurrency as signed } from '../lib/portfolio'
 import { dividendRows } from '../lib/dividends'
@@ -27,13 +28,15 @@ export function WealthOverviewPage() {
   const [accounts, setAccounts] = useState<NetworthAccount[] | null>(null)
   const [balances, setBalances] = useState<NetworthBalance[]>([])
   const [dividends, setDividends] = useState<Map<string, DividendInfo>>(new Map())
+  const [payments, setPayments] = useState<InstallmentPayment[]>([])
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchDividendInfo()])
-      .then(([a, b, d]) => {
+    Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchDividendInfo(), fetchInstallmentPayments()])
+      .then(([a, b, d, ip]) => {
         setAccounts(a)
         setBalances(b)
+        setPayments(ip)
         setDividends(new Map(d.map((x) => [x.symbol, x])))
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -82,6 +85,8 @@ export function WealthOverviewPage() {
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
       <PageHeader title="Wealth" subtitle={`${monthLabel(month)} · net worth, investments and income at a glance`} />
+
+      <CloseMonthBanner accounts={accounts ?? []} balances={balances} payments={payments} />
 
       {nothingYet ? (
         <Card>
