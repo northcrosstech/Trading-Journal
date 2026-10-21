@@ -53,8 +53,11 @@ export function InstallmentsCard({
       const due = dueDateIn(month, a.payment_day ?? 1)
       const paid = payments.find((p) => p.account_id === a.id && p.month === month) ?? null
       const balance = latestBalance(a)
-      const plan = balance !== null ? payoff(balance, a.interest_rate ?? null, Number(a.payment_amount), month) : null
-      return { a, due, paid, balance, plan }
+      // Escrow (property tax + insurance) doesn't pay down the loan: payoff uses principal + interest only.
+      const escrow = Number(a.escrow_amount ?? 0)
+      const principalAndInterest = Number(a.payment_amount) - escrow
+      const plan = balance !== null ? payoff(balance, a.interest_rate ?? null, principalAndInterest, month) : null
+      return { a, due, paid, balance, plan, escrow, principalAndInterest }
     })
     .sort((x, y) => x.due.localeCompare(y.due))
 
@@ -148,7 +151,14 @@ export function InstallmentsCard({
                     <div className="font-medium text-white">{r.a.name}</div>
                     <div className="text-xs text-neutral-500">{categoryLabel(r.a.category)}</div>
                   </td>
-                  <td className="px-3 py-3 text-right font-medium tabular-nums text-white">{currency(Number(r.a.payment_amount))}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    <div className="font-medium text-white">{currency(Number(r.a.payment_amount))}</div>
+                    {r.escrow > 0 && (
+                      <div className="whitespace-nowrap text-xs text-neutral-500" title="Principal & interest · escrow (property tax + insurance)">
+                        {currency(r.principalAndInterest)} P&amp;I · {currency(r.escrow)} escrow
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{r.a.interest_rate != null ? `${Number(r.a.interest_rate)}%` : '—'}</td>
                   <td className="px-3 py-3 text-right tabular-nums text-neutral-300">{r.balance !== null ? currency(r.balance) : '—'}</td>
                   <td className="px-3 py-3">

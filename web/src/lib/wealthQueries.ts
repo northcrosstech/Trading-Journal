@@ -39,7 +39,7 @@ export async function createNetworthAccount(
 
 export async function updateNetworthAccount(
   id: string,
-  patch: Partial<Pick<NetworthAccount, 'name' | 'category' | 'opened_month' | 'closed_month' | 'sort_order' | 'payment_amount' | 'payment_day' | 'interest_rate'>>,
+  patch: Partial<Pick<NetworthAccount, 'name' | 'category' | 'opened_month' | 'closed_month' | 'sort_order' | 'payment_amount' | 'payment_day' | 'interest_rate' | 'escrow_amount'>>,
 ) {
   const { error } = await supabase.from('networth_accounts').update(patch).eq('id', id)
   if (error) throw error

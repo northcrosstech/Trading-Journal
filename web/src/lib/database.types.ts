@@ -251,6 +251,9 @@ export type NetworthAccountRow = {
   payment_amount?: number | null
   payment_day?: number | null // 1-31
   interest_rate?: number | null // APR, percent
+  /** Part of payment_amount held in escrow (property tax + insurance). Absent until
+   * migration 20261024020000_installment_escrow. */
+  escrow_amount?: number | null
   created_at: string
 }
 

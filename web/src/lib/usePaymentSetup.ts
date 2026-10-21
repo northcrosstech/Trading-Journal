@@ -50,15 +50,34 @@ export function usePaymentSetup(onChanged: () => void) {
             hint: 'Optional — used to estimate when it’s paid off and the interest left.',
             validate: validators.nonNegative,
           },
+          {
+            name: 'escrow',
+            label: 'Escrow (property tax + insurance)',
+            type: 'number',
+            prefix: '$',
+            optional: true,
+            defaultValue: a.escrow_amount != null ? String(Number(a.escrow_amount)) : '',
+            placeholder: 'e.g. 450',
+            hint: 'Optional — the part of the monthly payment held in escrow. Your servicer’s statement shows it; update it when they re-calculate escrow.',
+            validate: (s, all) => {
+              const bad = validators.nonNegative(s)
+              if (bad || s.trim() === '' || all.amount === '') return bad
+              return parseAmount(s)! < (parseAmount(all.amount) ?? 0) ? null : 'Escrow must be less than the monthly payment'
+            },
+          },
         ],
       })
       if (!v) return
       const amount = v.amount === '' ? null : parseAmount(v.amount)
+      const escrow = amount === null || v.escrow === '' ? null : parseAmount(v.escrow)
       try {
         await updateNetworthAccount(a.id, {
           payment_amount: amount,
           payment_day: amount === null ? null : Number(v.day || 1),
           interest_rate: amount === null || v.apr === '' ? null : parseAmount(v.apr),
+          // Only send escrow when there is (or was) one, so saving still works before the
+          // escrow migration has been run.
+          ...(escrow !== null || a.escrow_amount != null ? { escrow_amount: escrow } : {}),
         })
         toast(amount === null ? `Removed the payment for ${a.name}` : `Saved the payment for ${a.name}`)
         onChanged()
