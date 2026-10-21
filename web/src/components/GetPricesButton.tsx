@@ -3,7 +3,10 @@ import { supabase } from '../lib/supabase'
 import { fetchLatestPrices } from '../lib/wealthQueries'
 
 const POLL_INTERVAL_MS = 3000
-const POLL_MAX_ATTEMPTS = 20 // ~60s -- new tickers normally land in a few seconds
+// The worker fetches 8 tickers a minute (Twelve Data free tier), so wait about a
+// minute per batch of 8, plus a margin.
+const BATCH_SIZE = 8
+const pollAttemptsFor = (n: number) => Math.ceil(n / BATCH_SIZE) * 22 + 5
 
 /** "Get prices now" for tickers that have never been priced: asks the worker (through
  * /api/trigger-sync?job=prices, same sign-in check and secret as Sync now) to fetch
@@ -27,9 +30,10 @@ export function GetPricesButton({ symbols, onDone }: { symbols: string[]; onDone
       .then((found) => {
         if (!mounted.current) return
         const missing = symbols.filter((s) => !found.has(s))
-        if (missing.length === 0 || attempt >= POLL_MAX_ATTEMPTS) {
+        if (missing.length === 0 || attempt >= pollAttemptsFor(symbols.length)) {
           setBusy(false)
-          if (missing.length > 0) setMessage(`No price found for ${missing.join(', ')} — check the ticker spelling.`)
+          if (missing.length > 0)
+            setMessage(`Still no price for ${missing.join(', ')}. Try again in a couple of minutes — if one never appears, check its spelling.`)
           onDone()
           return
         }
@@ -79,7 +83,7 @@ export function GetPricesButton({ symbols, onDone }: { symbols: string[]; onDone
         disabled={busy}
         className="rounded-md border border-amber-700 px-2 py-0.5 text-xs font-medium text-amber-200 transition hover:bg-amber-900/40 disabled:opacity-50"
       >
-        {busy ? 'Getting prices…' : 'Get prices now'}
+        {busy ? (symbols.length > BATCH_SIZE ? `Getting prices… (~${Math.ceil(symbols.length / BATCH_SIZE)} min)` : 'Getting prices…') : 'Get prices now'}
       </button>
       {message && <span className="text-xs text-amber-300/90">{message}</span>}
     </span>

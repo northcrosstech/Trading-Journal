@@ -177,6 +177,9 @@ export function PortfolioDetailPage() {
     if (snap.collateral > 0) rows.push({ key: 'collateral', label: 'Put collateral', value: Math.min(snap.collateral, Math.max(0, snap.cash)) })
     return rows
   }, [snap, openOptions, prices])
+  // Weights share the Allocation card's base -- everything held (shares, long options,
+  // positive cash) -- so a negative cash balance can't inflate them past 100%.
+  const allocationTotal = allocation.reduce((s, r) => s + r.value, 0)
 
   if (error) return <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-red-300">{error}</div>
   if (portfolio === undefined || !snap) return <div className="text-neutral-500">Loading portfolio…</div>
@@ -261,7 +264,7 @@ export function PortfolioDetailPage() {
         <div className="flex flex-col gap-5 lg:col-span-3">
           <div className={CARD}>
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Holdings</h2>
-            <HoldingsTable views={snap.holdings} total={snap.total} onEdit={(h) => editHolding(h, load, setError)} />
+            <HoldingsTable views={snap.holdings} total={allocationTotal} onEdit={(h) => editHolding(h, load, setError)} />
           </div>
           <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} />
           <div className={CARD}>
@@ -278,7 +281,7 @@ export function PortfolioDetailPage() {
           <PortfolioActions portfolioId={p.id} holdings={holdings} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
           <div className={CARD}>
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Allocation</h2>
-            <AllocationList rows={allocation} total={allocation.reduce((s, r) => s + r.value, 0)} />
+            <AllocationList rows={allocation} total={allocationTotal} />
           </div>
         </div>
       </div>
