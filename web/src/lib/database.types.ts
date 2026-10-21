@@ -313,6 +313,13 @@ export type PortfolioActivityKind =
   | 'csp_close'
   | 'csp_expire'
   | 'csp_assign'
+  | 'option_buy'
+  | 'option_sell'
+  | 'option_write'
+  | 'option_buyback'
+  | 'option_expire'
+  | 'option_exercise'
+  | 'option_assign'
 
 export type PortfolioActivityRow = {
   id: string
@@ -327,6 +334,7 @@ export type PortfolioActivityRow = {
   external_flow: number
   realized_gain: number | null
   csp_id: string | null
+  option_id: string | null
   created_at: string
 }
 
@@ -344,10 +352,34 @@ export type PortfolioDailyValueRow = {
   holdings_value: number
   cash: number
   csp_liability: number
+  options_value: number
   total_value: number
   cost_basis: number
   net_flow: number
   computed_at: string
+}
+
+export type OptionStatus = 'open' | 'closed' | 'expired' | 'exercised' | 'assigned'
+
+/** Long calls/puts (bought) and covered calls (sold). Cash-secured puts are CspPositionRow. */
+export type OptionPositionRow = {
+  id: string
+  user_id: string
+  portfolio_id: string
+  symbol: string
+  option_type: 'call' | 'put'
+  side: 'long' | 'short'
+  strike: number
+  expiration: string
+  contracts: number
+  open_price: number // per share: paid (long) or received (short)
+  opened_on: string
+  status: OptionStatus
+  closed_on: string | null
+  close_price: number | null
+  mark: number | null
+  is_hedge: boolean
+  created_at: string
 }
 
 export type DividendFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual'
@@ -396,6 +428,7 @@ export type Database = {
       prices: ReturnType<typeof table<PriceRow>>
       portfolio_daily_values: ReturnType<typeof table<PortfolioDailyValueRow>>
       dividend_info: ReturnType<typeof table<DividendInfoRow>>
+      option_positions: ReturnType<typeof table<OptionPositionRow>>
     }
     Views: Record<string, never>
     Functions: {
@@ -422,6 +455,25 @@ export type Database = {
           p_on?: string
         }
         Returns: string
+      }
+      option_open: {
+        Args: {
+          p_portfolio: string
+          p_symbol: string
+          p_option_type: 'call' | 'put'
+          p_side: 'long' | 'short'
+          p_strike: number
+          p_expiration: string
+          p_contracts: number
+          p_price: number
+          p_is_hedge?: boolean
+          p_on?: string
+        }
+        Returns: string
+      }
+      option_close: {
+        Args: { p_option: string; p_outcome: 'closed' | 'expired' | 'exercised' | 'assigned'; p_price?: number | null; p_on?: string }
+        Returns: undefined
       }
       csp_resolve: {
         Args: { p_csp: string; p_outcome: 'expired' | 'closed' | 'assigned'; p_price?: number | null; p_on?: string }
@@ -455,6 +507,7 @@ export type CspPosition = CspPositionRow
 export type PortfolioActivity = PortfolioActivityRow
 export type PortfolioDailyValue = PortfolioDailyValueRow
 export type DividendInfo = DividendInfoRow
+export type OptionPosition = OptionPositionRow
 
 export type TradeWithDetails = Trade & {
   options_detail: OptionsDetail | null

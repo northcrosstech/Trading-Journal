@@ -85,8 +85,29 @@ def csp_liability(csp: dict, underlying_close: Optional[float]) -> float:
     return float(per_share) * OPTION_MULTIPLIER * int(csp["contracts"])
 
 
+def option_value(opt: dict, underlying_close: Optional[float]) -> float:
+    """Signed value of an open option from option_positions. Long (bought calls/puts):
+    the entered mark, else what was paid -- no free option prices, and intrinsic value
+    would wrongly show an out-of-the-money LEAPS or hedge as worthless. Short (covered
+    call): minus the cost to buy it back -- the mark, else max(0, stock - strike)."""
+    contracts = int(opt["contracts"]) * OPTION_MULTIPLIER
+    if opt["side"] == "long":
+        per_share = opt.get("mark")
+        if per_share is None:
+            per_share = opt["open_price"]
+        return float(per_share) * contracts
+    per_share = opt.get("mark")
+    if per_share is None:
+        per_share = max(0.0, underlying_close - float(opt["strike"])) if underlying_close is not None else 0.0
+    return -float(per_share) * contracts
+
+
 def value_portfolio(
-    portfolio: dict, holdings: list[dict], open_csps: list[dict], closes: dict[str, float]
+    portfolio: dict,
+    holdings: list[dict],
+    open_csps: list[dict],
+    closes: dict[str, float],
+    open_options: Iterable[dict] = (),
 ) -> tuple[dict, list[str]]:
     """One portfolio's value from its holdings, cash and open puts. A holding with no
     price yet is valued at its average cost (and flagged) so the total isn't understated."""
@@ -105,13 +126,15 @@ def value_portfolio(
         holdings_value += qty * float(price)
         cost_basis += qty * avg
     liability = sum(csp_liability(c, closes.get(c["symbol"])) for c in open_csps)
+    options = sum(option_value(o, closes.get(o["symbol"])) for o in open_options)
     cash = float(portfolio["cash"])
     return (
         {
             "holdings_value": round(holdings_value, 2),
             "cash": round(cash, 2),
             "csp_liability": round(liability, 2),
-            "total_value": round(holdings_value + cash - liability, 2),
+            "options_value": round(options, 2),
+            "total_value": round(holdings_value + cash - liability + options, 2),
             "cost_basis": round(cost_basis, 2),
         },
         warnings,
@@ -164,8 +187,16 @@ def run_pricing(
             client.table("csp_positions").select("portfolio_id,symbol,strike,contracts,mark").eq("status", "open")
         )
 
+        open_options = _all_rows(
+            client.table("option_positions")
+            .select("portfolio_id,symbol,side,strike,contracts,open_price,mark")
+            .eq("status", "open")
+        )
+
         symbols = sorted(
-            {h["symbol"] for h in holdings if h.get("manual_price") is None} | {c["symbol"] for c in open_csps}
+            {h["symbol"] for h in holdings if h.get("manual_price") is None}
+            | {c["symbol"] for c in open_csps}
+            | {o["symbol"] for o in open_options}
         )
         if only_new and symbols:
             already = {
@@ -228,6 +259,7 @@ def run_pricing(
                 [h for h in holdings if h["portfolio_id"] == p["id"]],
                 [c for c in open_csps if c["portfolio_id"] == p["id"]],
                 latest,
+                [o for o in open_options if o["portfolio_id"] == p["id"]],
             )
             summary.warnings.extend(warnings)
 

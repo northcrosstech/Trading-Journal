@@ -1,7 +1,7 @@
 """Unit tests for the pure parts of prices.py -- no network, no database."""
 import pytest
 
-from prices import chunked, csp_liability, parse_eod_response, value_portfolio
+from prices import chunked, csp_liability, option_value, parse_eod_response, value_portfolio
 
 
 def test_chunked_splits_into_batches():
@@ -130,6 +130,7 @@ def test_only_new_fetches_unpriced_tickers_and_skips_daily_values(monkeypatch):
                 {"portfolio_id": "p", "symbol": "NEW", "quantity": 1, "avg_cost": 1, "manual_price": None},
             ],
             "csp_positions": [],
+            "option_positions": [],
             "prices": [{"symbol": "VOO", "close": 500, "price_date": "2026-10-20"}],
         }
     )
@@ -142,3 +143,31 @@ def test_only_new_fetches_unpriced_tickers_and_skips_daily_values(monkeypatch):
     assert fetched == [["NEW"]]
     assert s.prices_saved == 1
     assert "portfolio_daily_values" not in db.writes
+
+
+def test_long_option_valued_at_mark_else_what_was_paid():
+    leaps = {"side": "long", "strike": 600, "contracts": 2, "open_price": 21.05, "mark": None}
+    assert option_value(leaps, underlying_close=550.0) == pytest.approx(21.05 * 200)  # not intrinsic (which is 0)
+    assert option_value({**leaps, "mark": 25.0}, underlying_close=550.0) == pytest.approx(5000.0)
+
+
+def test_covered_call_is_a_buyback_cost():
+    cc = {"side": "short", "strike": 100, "contracts": 1, "open_price": 2, "mark": None}
+    assert option_value(cc, underlying_close=105.0) == pytest.approx(-500.0)  # 5 in the money
+    assert option_value(cc, underlying_close=95.0) == 0.0
+    assert option_value({**cc, "mark": 1.2}, underlying_close=95.0) == pytest.approx(-120.0)
+
+
+def test_value_portfolio_includes_options():
+    values, _ = value_portfolio(
+        {"name": "Main", "cash": 1000},
+        [{"symbol": "SPY", "quantity": 100, "avg_cost": 500, "manual_price": None}],
+        [],
+        {"SPY": 550.0},
+        [
+            {"symbol": "SPY", "side": "long", "strike": 600, "contracts": 1, "open_price": 10, "mark": None},
+            {"symbol": "SPY", "side": "short", "strike": 540, "contracts": 1, "open_price": 15, "mark": None},
+        ],
+    )
+    assert values["options_value"] == pytest.approx(1000 - 1000)  # long 10x100, covered call 10 ITM x100
+    assert values["total_value"] == pytest.approx(55000 + 1000)

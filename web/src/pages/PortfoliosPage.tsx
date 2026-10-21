@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import type { CspPosition, Holding, Portfolio, PortfolioDailyValue, PortfolioKind } from '../lib/database.types'
+import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioDailyValue, PortfolioKind } from '../lib/database.types'
 import {
   createPortfolio,
   fetchCsps,
   fetchDailyValues,
   fetchHoldings,
   fetchLatestPrices,
+  fetchOptions,
   fetchPortfolios,
   fetchRealizedGains,
   updatePortfolio,
   type SymbolPrice,
 } from '../lib/wealthQueries'
-import { PORTFOLIO_KINDS, combineDailyValues, kindLabel, portfolioSnapshot, seriesFor, signedCurrency as signed, timeWeightedReturn, unpricedSymbols } from '../lib/portfolio'
+import { PORTFOLIO_KINDS, combineDailyValues, kindLabel, optionValue, portfolioSnapshot, seriesFor, signedCurrency as signed, timeWeightedReturn, unpricedSymbols } from '../lib/portfolio'
 import { currency, percentFmt } from '../lib/format'
 import { AllocationList, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
@@ -29,6 +30,7 @@ export function PortfoliosPage() {
   const [portfolios, setPortfolios] = useState<Portfolio[] | null>(null)
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [csps, setCsps] = useState<CspPosition[]>([])
+  const [options, setOptions] = useState<OptionPosition[]>([])
   const [values, setValues] = useState<PortfolioDailyValue[]>([])
   const [realized, setRealized] = useState<Map<string, number>>(new Map())
   const [prices, setPrices] = useState<Map<string, SymbolPrice>>(new Map())
@@ -38,15 +40,22 @@ export function PortfoliosPage() {
   const [showArchived, setShowArchived] = useState(false)
 
   const load = useCallback(() => {
-    Promise.all([fetchPortfolios(), fetchHoldings(), fetchCsps(), fetchDailyValues(), fetchRealizedGains()])
-      .then(async ([p, h, c, v, r]) => {
-        const symbols = [...new Set([...h.map((x) => x.symbol), ...c.filter((x) => x.status === 'open').map((x) => x.symbol)])]
+    Promise.all([fetchPortfolios(), fetchHoldings(), fetchCsps(), fetchDailyValues(), fetchRealizedGains(), fetchOptions()])
+      .then(async ([p, h, c, v, r, o]) => {
+        const symbols = [
+          ...new Set([
+            ...h.map((x) => x.symbol),
+            ...c.filter((x) => x.status === 'open').map((x) => x.symbol),
+            ...o.filter((x) => x.status === 'open').map((x) => x.symbol),
+          ]),
+        ]
         setPrices(await fetchLatestPrices(symbols))
         const byPortfolio = new Map<string, number>()
         for (const row of r) byPortfolio.set(row.portfolio_id, (byPortfolio.get(row.portfolio_id) ?? 0) + Number(row.realized_gain))
         setRealized(byPortfolio)
         setHoldings(h)
         setCsps(c)
+        setOptions(o)
         setValues(v)
         setPortfolios(p)
       })
@@ -57,10 +66,11 @@ export function PortfoliosPage() {
   const active = useMemo(() => (portfolios ?? []).filter((p) => !p.archived), [portfolios])
   const activeIds = useMemo(() => new Set(active.map((p) => p.id)), [active])
   const openCsps = useMemo(() => csps.filter((c) => c.status === 'open'), [csps])
+  const openOptions = useMemo(() => options.filter((o) => o.status === 'open' && activeIds.has(o.portfolio_id)), [options, activeIds])
   const activeHoldings = useMemo(() => holdings.filter((h) => activeIds.has(h.portfolio_id)), [holdings, activeIds])
   const pending = useMemo(
-    () => unpricedSymbols(activeHoldings, openCsps.filter((c) => activeIds.has(c.portfolio_id)), prices),
-    [activeHoldings, openCsps, activeIds, prices],
+    () => unpricedSymbols(activeHoldings, openCsps.filter((c) => activeIds.has(c.portfolio_id)), prices, openOptions),
+    [activeHoldings, openCsps, activeIds, prices, openOptions],
   )
 
   const perPortfolio = useMemo(
@@ -72,9 +82,10 @@ export function PortfoliosPage() {
           holdings.filter((h) => h.portfolio_id === p.id),
           openCsps.filter((c) => c.portfolio_id === p.id),
           prices,
+          openOptions.filter((o) => o.portfolio_id === p.id),
         ),
       })),
-    [active, holdings, openCsps, prices],
+    [active, holdings, openCsps, prices, openOptions],
   )
   const combined = useMemo(
     () =>
@@ -83,8 +94,9 @@ export function PortfoliosPage() {
         activeHoldings,
         openCsps.filter((c) => activeIds.has(c.portfolio_id)),
         prices,
+        openOptions,
       ),
-    [active, activeIds, activeHoldings, openCsps, prices],
+    [active, activeIds, activeHoldings, openCsps, prices, openOptions],
   )
   const series = useMemo(() => combineDailyValues(values.filter((v) => activeIds.has(v.portfolio_id))), [values, activeIds])
   const realizedTotal = active.reduce((s, p) => s + (realized.get(p.id) ?? 0), 0)
@@ -94,10 +106,12 @@ export function PortfoliosPage() {
     const bySymbol = new Map<string, number>()
     for (const v of combined.holdings) bySymbol.set(v.holding.symbol, (bySymbol.get(v.holding.symbol) ?? 0) + v.value)
     const rows = Array.from(bySymbol, ([symbol, value]) => ({ key: symbol, label: symbol, value }))
+    const longOptions = openOptions.filter((o) => o.side === 'long').reduce((s, o) => s + optionValue(o, prices), 0)
+    if (longOptions > 0) rows.push({ key: 'options', label: 'Options', value: longOptions })
     if (combined.cashAvailable > 0) rows.push({ key: 'cash', label: 'Cash', value: combined.cashAvailable })
     if (combined.collateral > 0) rows.push({ key: 'collateral', label: 'Put collateral', value: Math.min(combined.collateral, combined.cash) })
     return rows
-  }, [combined])
+  }, [combined, openOptions, prices])
 
   async function add() {
     if (!user || !name.trim()) return

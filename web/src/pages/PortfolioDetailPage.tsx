@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import type { CspPosition, Holding, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind } from '../lib/database.types'
+import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind } from '../lib/database.types'
 import {
   fetchActivity,
   fetchCsps,
   fetchDailyValues,
   fetchHoldings,
   fetchLatestPrices,
+  fetchOptions,
   fetchPortfolios,
   updateHolding,
   updatePortfolio,
   type SymbolPrice,
 } from '../lib/wealthQueries'
-import { PORTFOLIO_KINDS, kindLabel, portfolioSnapshot, seriesFor, signedCurrency as signed, unpricedSymbols, type HoldingView } from '../lib/portfolio'
+import { PORTFOLIO_KINDS, kindLabel, optionValue, portfolioSnapshot, seriesFor, signedCurrency as signed, unpricedSymbols, type HoldingView } from '../lib/portfolio'
 import { currency, dateFmt, percentFmt, priceFmt } from '../lib/format'
 import { AllocationList, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
@@ -20,6 +21,7 @@ import { PortfolioActions } from '../components/PortfolioActions'
 import { CspSection } from '../components/CspSection'
 import { DividendsCard } from '../components/DividendsCard'
 import { GetPricesButton } from '../components/GetPricesButton'
+import { OptionsSection } from '../components/OptionsSection'
 
 const CARD = 'rounded-xl border border-neutral-800 bg-neutral-900 p-4'
 const tone = (n: number | null) => (n === null ? 'text-neutral-500' : n > 0 ? 'text-(--status-good)' : n < 0 ? 'text-(--status-critical)' : 'text-neutral-300')
@@ -36,6 +38,13 @@ const ACTIVITY_LABEL: Record<PortfolioActivity['kind'], string> = {
   csp_close: 'Bought back put',
   csp_expire: 'Put expired',
   csp_assign: 'Put assigned',
+  option_buy: 'Bought option',
+  option_sell: 'Sold option',
+  option_write: 'Sold covered call',
+  option_buyback: 'Bought back call',
+  option_expire: 'Option expired',
+  option_exercise: 'Exercised call',
+  option_assign: 'Call assigned',
 }
 
 /** Correct a holding without any cash effect -- for a stock split, a typo, or setting a
@@ -118,6 +127,7 @@ export function PortfolioDetailPage() {
   const [portfolio, setPortfolio] = useState<Portfolio | null | undefined>(undefined)
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [csps, setCsps] = useState<CspPosition[]>([])
+  const [options, setOptions] = useState<OptionPosition[]>([])
   const [values, setValues] = useState<PortfolioDailyValue[]>([])
   const [activity, setActivity] = useState<PortfolioActivity[]>([])
   const [prices, setPrices] = useState<Map<string, SymbolPrice>>(new Map())
@@ -126,12 +136,19 @@ export function PortfolioDetailPage() {
 
   const load = useCallback(() => {
     if (!portfolioId) return
-    Promise.all([fetchPortfolios(), fetchHoldings(portfolioId), fetchCsps(portfolioId), fetchDailyValues(portfolioId), fetchActivity(portfolioId)])
-      .then(async ([ps, h, c, v, a]) => {
-        const symbols = [...new Set([...h.map((x) => x.symbol), ...c.filter((x) => x.status === 'open').map((x) => x.symbol)])]
+    Promise.all([fetchPortfolios(), fetchHoldings(portfolioId), fetchCsps(portfolioId), fetchDailyValues(portfolioId), fetchActivity(portfolioId), fetchOptions(portfolioId)])
+      .then(async ([ps, h, c, v, a, o]) => {
+        const symbols = [
+          ...new Set([
+            ...h.map((x) => x.symbol),
+            ...c.filter((x) => x.status === 'open').map((x) => x.symbol),
+            ...o.filter((x) => x.status === 'open').map((x) => x.symbol),
+          ]),
+        ]
         setPrices(await fetchLatestPrices(symbols))
         setHoldings(h)
         setCsps(c)
+        setOptions(o)
         setValues(v)
         setActivity(a)
         setPortfolio(ps.find((p) => p.id === portfolioId) ?? null)
@@ -141,18 +158,25 @@ export function PortfolioDetailPage() {
   useEffect(load, [load])
 
   const openCsps = useMemo(() => csps.filter((c) => c.status === 'open'), [csps])
-  const snap = useMemo(() => (portfolio ? portfolioSnapshot([portfolio], holdings, openCsps, prices) : null), [portfolio, holdings, openCsps, prices])
+  const openOptions = useMemo(() => options.filter((o) => o.status === 'open'), [options])
+  const snap = useMemo(
+    () => (portfolio ? portfolioSnapshot([portfolio], holdings, openCsps, prices, openOptions) : null),
+    [portfolio, holdings, openCsps, prices, openOptions],
+  )
   const series = useMemo(() => (portfolioId ? seriesFor(values, portfolioId) : []), [values, portfolioId])
-  const pending = useMemo(() => unpricedSymbols(holdings, openCsps, prices), [holdings, openCsps, prices])
+  const pending = useMemo(() => unpricedSymbols(holdings, openCsps, prices, openOptions), [holdings, openCsps, prices, openOptions])
   const realized = useMemo(() => activity.reduce((s, a) => s + (a.realized_gain !== null ? Number(a.realized_gain) : 0), 0), [activity])
 
   const allocation = useMemo(() => {
     if (!snap) return []
     const rows = snap.holdings.map((v) => ({ key: v.holding.id, label: v.holding.symbol, value: v.value }))
+    for (const o of openOptions)
+      if (o.side === 'long')
+        rows.push({ key: o.id, label: `${o.symbol} ${Number(o.strike)}${o.option_type === 'call' ? 'C' : 'P'}`, value: optionValue(o, prices) })
     if (snap.cashAvailable > 0) rows.push({ key: 'cash', label: 'Cash', value: snap.cashAvailable })
     if (snap.collateral > 0) rows.push({ key: 'collateral', label: 'Put collateral', value: Math.min(snap.collateral, Math.max(0, snap.cash)) })
     return rows
-  }, [snap])
+  }, [snap, openOptions, prices])
 
   if (error) return <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-red-300">{error}</div>
   if (portfolio === undefined || !snap) return <div className="text-neutral-500">Loading portfolio…</div>
@@ -212,7 +236,7 @@ export function PortfolioDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Kpi label={`Value · ${kindLabel(p.kind)}`} value={currency(snap.total)} sub={snap.cspLiability > 0 ? `after ${currency(snap.cspLiability)} to buy back puts` : undefined} />
+        <Kpi label={`Value · ${kindLabel(p.kind)}`} value={currency(snap.total)} sub={snap.optionsValue !== 0 ? `incl. ${currency(snap.optionsValue)} options` : snap.cspLiability > 0 ? `after ${currency(snap.cspLiability)} to buy back puts` : undefined} />
         <Kpi
           label="Today"
           value={signed(snap.dayChange)}
@@ -258,6 +282,8 @@ export function PortfolioDetailPage() {
           </div>
         </div>
       </div>
+
+      <OptionsSection portfolioId={p.id} options={options} holdings={holdings} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
 
       <CspSection portfolioId={p.id} csps={csps} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
 

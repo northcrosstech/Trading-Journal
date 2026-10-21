@@ -1,4 +1,4 @@
-import type { CspPosition, Holding, Portfolio, PortfolioDailyValue, PortfolioKind } from './database.types'
+import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioDailyValue, PortfolioKind } from './database.types'
 import type { SymbolPrice } from './wealthQueries'
 import { currency } from './format'
 
@@ -59,6 +59,25 @@ export function cspLiability(c: CspPosition, prices: Map<string, SymbolPrice>): 
   return perShare * OPTION_MULTIPLIER * c.contracts
 }
 
+/** Signed value of an open long option / covered call. Long: your entered price, else what
+ * you paid (no free option prices; intrinsic value would show an out-of-the-money LEAPS
+ * or hedge as worthless). Covered call: minus its buy-back cost -- your price, else
+ * max(0, stock - strike). Mirrors worker/prices.py option_value. */
+export function optionValue(o: OptionPosition, prices: Map<string, SymbolPrice>): number {
+  const n = OPTION_MULTIPLIER * o.contracts
+  if (o.side === 'long') return (o.mark !== null ? Number(o.mark) : Number(o.open_price)) * n
+  const close = prices.get(o.symbol)?.close
+  const perShare = o.mark !== null ? Number(o.mark) : close !== undefined ? Math.max(0, close - Number(o.strike)) : 0
+  return -perShare * n
+}
+
+/** Unrealized gain on an open option: today's value vs the premium paid (long) or received (short). */
+export function optionGain(o: OptionPosition, prices: Map<string, SymbolPrice>): number {
+  const premium = Number(o.open_price) * OPTION_MULTIPLIER * o.contracts
+  const value = optionValue(o, prices)
+  return o.side === 'long' ? value - premium : premium + value
+}
+
 export type PortfolioSnapshot = {
   holdings: HoldingView[]
   holdingsValue: number
@@ -66,6 +85,8 @@ export type PortfolioSnapshot = {
   collateral: number
   cashAvailable: number
   cspLiability: number
+  optionsValue: number // long options minus covered-call buy-back cost
+  optionsGain: number
   total: number
   cost: number
   unrealized: number
@@ -78,7 +99,10 @@ export function portfolioSnapshot(
   holdings: Holding[],
   openCsps: CspPosition[],
   prices: Map<string, SymbolPrice>,
+  openOptions: OptionPosition[] = [],
 ): PortfolioSnapshot {
+  const optionsValue = openOptions.reduce((s, o) => s + optionValue(o, prices), 0)
+  const optionsGain = openOptions.reduce((s, o) => s + optionGain(o, prices), 0)
   const views = holdings.map((h) => holdingView(h, prices)).sort((a, b) => b.value - a.value)
   const holdingsValue = views.reduce((s, v) => s + v.value, 0)
   const cost = views.reduce((s, v) => s + v.cost, 0)
@@ -92,9 +116,11 @@ export function portfolioSnapshot(
     collateral,
     cashAvailable: cash - collateral,
     cspLiability: liability,
-    total: holdingsValue + cash - liability,
+    optionsValue,
+    optionsGain,
+    total: holdingsValue + cash - liability + optionsValue,
     cost,
-    unrealized: views.reduce((s, v) => s + (v.gain ?? 0), 0),
+    unrealized: views.reduce((s, v) => s + (v.gain ?? 0), 0) + optionsGain,
     dayChange: views.reduce((s, v) => s + (v.dayChange ?? 0), 0),
     unpriced: views.filter((v) => v.priced === 'none').length,
   }
@@ -187,9 +213,15 @@ export function seriesFor(values: PortfolioDailyValue[], portfolioId: string) {
 
 /** Tickers with no price stored yet -- holdings without a manual price, plus the stocks
  * behind open puts. What "Get prices now" fetches. */
-export function unpricedSymbols(holdings: Holding[], openCsps: CspPosition[], prices: Map<string, SymbolPrice>): string[] {
+export function unpricedSymbols(
+  holdings: Holding[],
+  openCsps: CspPosition[],
+  prices: Map<string, SymbolPrice>,
+  openOptions: OptionPosition[] = [],
+): string[] {
   const out = new Set<string>()
   for (const h of holdings) if (h.manual_price === null && !prices.has(h.symbol)) out.add(h.symbol)
   for (const c of openCsps) if (!prices.has(c.symbol)) out.add(c.symbol)
+  for (const o of openOptions) if (!prices.has(o.symbol)) out.add(o.symbol)
   return [...out].sort()
 }

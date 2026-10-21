@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import type {
   CspPosition,
   DividendInfo,
+  OptionPosition,
   Holding,
   NetworthAccount,
   NetworthBalance,
@@ -277,4 +278,58 @@ export async function fetchDividendsReceived(since: string, portfolioId?: string
   const { data, error } = await q
   if (error) throw error
   return data ?? []
+}
+
+// ---------------------------------------------------------------------------
+// Options (long calls / puts, covered calls)
+// ---------------------------------------------------------------------------
+
+export async function fetchOptions(portfolioId?: string): Promise<OptionPosition[]> {
+  let q = supabase.from('option_positions').select('*').order('expiration')
+  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+  const { data, error } = await q
+  if (error) throw error
+  return data ?? []
+}
+
+export async function setOptionMark(id: string, mark: number | null) {
+  const { error } = await supabase.from('option_positions').update({ mark }).eq('id', id)
+  if (error) throw error
+}
+
+export async function optionOpen(p: {
+  portfolioId: string
+  symbol: string
+  optionType: 'call' | 'put'
+  side: 'long' | 'short'
+  strike: number
+  expiration: string
+  contracts: number
+  price: number
+  isHedge: boolean
+  on: string
+}) {
+  const { error } = await supabase.rpc('option_open', {
+    p_portfolio: p.portfolioId,
+    p_symbol: p.symbol,
+    p_option_type: p.optionType,
+    p_side: p.side,
+    p_strike: p.strike,
+    p_expiration: p.expiration,
+    p_contracts: p.contracts,
+    p_price: p.price,
+    p_is_hedge: p.isHedge,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
+export async function optionClose(p: { optionId: string; outcome: 'closed' | 'expired' | 'exercised' | 'assigned'; price?: number | null; on: string }) {
+  const { error } = await supabase.rpc('option_close', {
+    p_option: p.optionId,
+    p_outcome: p.outcome,
+    p_price: p.price ?? null,
+    p_on: p.on,
+  })
+  if (error) throw error
 }
