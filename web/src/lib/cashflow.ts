@@ -117,9 +117,17 @@ export type CloseStatus = {
 }
 
 /** The month-end checklist: last month's accounts still without a fresh balance, and
- * installments not marked paid. Null once everything is done. */
-export function closeStatus(today: string, accounts: NetworthAccount[], balances: NetworthBalance[], payments: InstallmentPayment[]): CloseStatus | null {
+ * installments not marked paid. Null once everything is done, or when last month is before
+ * `closeFrom` (the month closing starts from). */
+export function closeStatus(
+  today: string,
+  accounts: NetworthAccount[],
+  balances: NetworthBalance[],
+  payments: InstallmentPayment[],
+  closeFrom: string | null = null,
+): CloseStatus | null {
   const month = addMonths(monthOf(today), -1)
+  if (closeFrom !== null && month < closeFrom) return null
   const open = accounts.filter((a) => isOpenIn(a, month))
   const missing = open.filter((a) => !balances.some((b) => b.account_id === a.id && b.month === month))
   const unpaid = open.filter(

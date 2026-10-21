@@ -374,6 +374,23 @@ export async function unmarkInstallmentPaid(accountId: string, month: string) {
   if (error) throw error
 }
 
+/** First month the month-end close applies to (null = not set, or the table isn't there yet). */
+export async function fetchCloseFromMonth(): Promise<string | null> {
+  const { data, error } = await supabase.from('wealth_settings').select('close_from_month').maybeSingle()
+  if (error) {
+    if (error.code === '42P01' || /wealth_settings/.test(error.message)) return null
+    throw error
+  }
+  return data?.close_from_month ?? null
+}
+
+export async function setCloseFromMonth(userId: string, month: string) {
+  const { error } = await supabase
+    .from('wealth_settings')
+    .upsert({ user_id: userId, close_from_month: month, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+  if (error) throw error
+}
+
 /** Money in/out of every portfolio (activity rows that carry an external flow), for cash flow. */
 export async function fetchExternalFlows(): Promise<Pick<PortfolioActivity, 'portfolio_id' | 'kind' | 'external_flow' | 'occurred_on'>[]> {
   const { data, error } = await supabase

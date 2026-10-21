@@ -264,6 +264,12 @@ export type InstallmentPaymentRow = {
   created_at: string
 }
 
+export type WealthSettingsRow = {
+  user_id: string
+  close_from_month: string | null // yyyy-mm-01
+  updated_at: string
+}
+
 export type NetworthBalanceRow = {
   id: string
   user_id: string
@@ -437,6 +443,7 @@ export type Database = {
       networth_accounts: ReturnType<typeof table<NetworthAccountRow>>
       networth_balances: ReturnType<typeof table<NetworthBalanceRow>>
       installment_payments: ReturnType<typeof table<InstallmentPaymentRow>>
+      wealth_settings: ReturnType<typeof table<WealthSettingsRow>>
       portfolios: ReturnType<typeof table<PortfolioRow>>
       holdings: ReturnType<typeof table<HoldingRow>>
       csp_positions: ReturnType<typeof table<CspPositionRow>>
