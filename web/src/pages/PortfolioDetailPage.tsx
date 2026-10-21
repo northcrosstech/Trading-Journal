@@ -18,6 +18,7 @@ import { AllocationList, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { PortfolioActions } from '../components/PortfolioActions'
 import { CspSection } from '../components/CspSection'
+import { DividendsCard } from '../components/DividendsCard'
 
 const CARD = 'rounded-xl border border-neutral-800 bg-neutral-900 p-4'
 const tone = (n: number | null) => (n === null ? 'text-neutral-500' : n > 0 ? 'text-(--status-good)' : n < 0 ? 'text-(--status-critical)' : 'text-neutral-300')
@@ -233,6 +234,7 @@ export function PortfolioDetailPage() {
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Holdings</h2>
             <HoldingsTable views={snap.holdings} total={snap.total} onEdit={(h) => editHolding(h, load, setError)} />
           </div>
+          <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} />
           <div className={CARD}>
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Returns</h2>
             <ReturnsRow series={series} />

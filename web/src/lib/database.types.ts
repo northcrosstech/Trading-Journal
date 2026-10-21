@@ -350,6 +350,17 @@ export type PortfolioDailyValueRow = {
   computed_at: string
 }
 
+export type DividendFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual'
+
+export type DividendInfoRow = {
+  user_id: string
+  symbol: string
+  annual_per_share: number
+  frequency: DividendFrequency
+  pay_month: number | null // 1-12; null for monthly payers
+  updated_at: string
+}
+
 function table<Row extends Record<string, unknown>>() {
   return {} as { Row: Row; Insert: Partial<Row>; Update: Partial<Row>; Relationships: [] }
 }
@@ -384,6 +395,7 @@ export type Database = {
       portfolio_activity: ReturnType<typeof table<PortfolioActivityRow>>
       prices: ReturnType<typeof table<PriceRow>>
       portfolio_daily_values: ReturnType<typeof table<PortfolioDailyValueRow>>
+      dividend_info: ReturnType<typeof table<DividendInfoRow>>
     }
     Views: Record<string, never>
     Functions: {
@@ -442,6 +454,7 @@ export type Holding = HoldingRow
 export type CspPosition = CspPositionRow
 export type PortfolioActivity = PortfolioActivityRow
 export type PortfolioDailyValue = PortfolioDailyValueRow
+export type DividendInfo = DividendInfoRow
 
 export type TradeWithDetails = Trade & {
   options_detail: OptionsDetail | null

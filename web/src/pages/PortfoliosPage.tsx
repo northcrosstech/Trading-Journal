@@ -17,6 +17,7 @@ import { PORTFOLIO_KINDS, combineDailyValues, kindLabel, portfolioSnapshot, seri
 import { currency, percentFmt } from '../lib/format'
 import { AllocationList, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
+import { DividendsCard } from '../components/DividendsCard'
 
 const INPUT =
   'rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500'
@@ -55,6 +56,7 @@ export function PortfoliosPage() {
   const active = useMemo(() => (portfolios ?? []).filter((p) => !p.archived), [portfolios])
   const activeIds = useMemo(() => new Set(active.map((p) => p.id)), [active])
   const openCsps = useMemo(() => csps.filter((c) => c.status === 'open'), [csps])
+  const activeHoldings = useMemo(() => holdings.filter((h) => activeIds.has(h.portfolio_id)), [holdings, activeIds])
 
   const perPortfolio = useMemo(
     () =>
@@ -73,11 +75,11 @@ export function PortfoliosPage() {
     () =>
       portfolioSnapshot(
         active,
-        holdings.filter((h) => activeIds.has(h.portfolio_id)),
+        activeHoldings,
         openCsps.filter((c) => activeIds.has(c.portfolio_id)),
         prices,
       ),
-    [active, activeIds, holdings, openCsps, prices],
+    [active, activeIds, activeHoldings, openCsps, prices],
   )
   const series = useMemo(() => combineDailyValues(values.filter((v) => activeIds.has(v.portfolio_id))), [values, activeIds])
   const realizedTotal = active.reduce((s, p) => s + (realized.get(p.id) ?? 0), 0)
@@ -130,6 +132,13 @@ export function PortfoliosPage() {
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Returns · all portfolios</h2>
             <ReturnsRow series={series} />
           </div>
+
+          <DividendsCard
+            holdings={activeHoldings}
+            prices={prices}
+            holdingsValue={combined.holdingsValue}
+            portfolioIds={activeIds}
+          />
         </>
       )}
 

@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import type {
   CspPosition,
+  DividendInfo,
   Holding,
   NetworthAccount,
   NetworthBalance,
@@ -245,4 +246,35 @@ export async function cspResolve(p: { cspId: string; outcome: 'expired' | 'close
     p_on: p.on,
   })
   if (error) throw error
+}
+
+// ---------------------------------------------------------------------------
+// Dividends
+// ---------------------------------------------------------------------------
+
+export async function fetchDividendInfo(): Promise<DividendInfo[]> {
+  const { data, error } = await supabase.from('dividend_info').select('*')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function saveDividendInfo(userId: string, info: Pick<DividendInfo, 'symbol' | 'annual_per_share' | 'frequency' | 'pay_month'>) {
+  const { error } = await supabase
+    .from('dividend_info')
+    .upsert({ user_id: userId, ...info, updated_at: new Date().toISOString() }, { onConflict: 'user_id,symbol' })
+  if (error) throw error
+}
+
+export async function deleteDividendInfo(symbol: string) {
+  const { error } = await supabase.from('dividend_info').delete().eq('symbol', symbol)
+  if (error) throw error
+}
+
+/** Dividends actually received (recorded with the Dividend cash action) since a date. */
+export async function fetchDividendsReceived(since: string, portfolioId?: string): Promise<PortfolioActivity[]> {
+  let q = supabase.from('portfolio_activity').select('*').eq('kind', 'dividend').gte('occurred_on', since).order('occurred_on')
+  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+  const { data, error } = await q
+  if (error) throw error
+  return data ?? []
 }
