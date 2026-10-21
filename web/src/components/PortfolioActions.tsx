@@ -1,16 +1,17 @@
 import { useState } from 'react'
-import type { Holding } from '../lib/database.types'
-import { portfolioBuy, portfolioCash, portfolioSell, type SymbolPrice } from '../lib/wealthQueries'
+import type { Holding, Portfolio } from '../lib/database.types'
+import { portfolioBuy, portfolioCash, portfolioSell, portfolioTransfer, type SymbolPrice } from '../lib/wealthQueries'
 import { centralDateStr, currency } from '../lib/format'
 
 const INPUT =
   'w-full rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500'
 
-type Tab = 'buy' | 'sell' | 'existing' | 'cash'
+type Tab = 'buy' | 'sell' | 'existing' | 'transfer' | 'cash'
 const TABS: { value: Tab; label: string; hint: string }[] = [
   { value: 'buy', label: 'Buy', hint: 'Paid from this portfolio’s cash. The average cost updates for you.' },
   { value: 'sell', label: 'Sell', hint: 'Proceeds go to this portfolio’s cash; the gain or loss is recorded.' },
   { value: 'existing', label: 'Add existing', hint: 'Shares you already own (or moved in). Counts as money added, not a purchase.' },
+  { value: 'transfer', label: 'Transfer', hint: 'Move shares to another portfolio, or out of the app. Average cost carries over — not a sale.' },
   { value: 'cash', label: 'Cash', hint: 'Deposits and withdrawals are money in/out. Dividends are earnings.' },
 ]
 
@@ -32,12 +33,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  * database call that updates the holding, the cash and the activity log together. */
 export function PortfolioActions({
   portfolioId,
+  otherPortfolios,
   holdings,
   prices,
   cashAvailable,
   onDone,
 }: {
   portfolioId: string
+  otherPortfolios: Pick<Portfolio, 'id' | 'name'>[]
   holdings: Holding[]
   prices: Map<string, SymbolPrice>
   cashAvailable: number
@@ -50,6 +53,7 @@ export function PortfolioActions({
   const [cashKind, setCashKind] = useState<'deposit' | 'withdrawal' | 'dividend'>('deposit')
   const [amount, setAmount] = useState('')
   const [on, setOn] = useState(centralDateStr(new Date()))
+  const [destination, setDestination] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -68,7 +72,13 @@ export function PortfolioActions({
     setError(null)
     try {
       setBusy(true)
-      if (tab === 'cash') {
+      if (tab === 'transfer') {
+        const q = num(qty)
+        if (!sym) throw new Error('Choose a ticker.')
+        if (q === null || q <= 0) throw new Error('Enter a quantity above zero.')
+        if (!destination) throw new Error('Choose where the shares are going.')
+        await portfolioTransfer({ fromPortfolioId: portfolioId, symbol: sym, quantity: q, toPortfolioId: destination === 'out' ? null : destination, on })
+      } else if (tab === 'cash') {
         const a = num(amount)
         if (a === null || a <= 0) throw new Error('Enter an amount above zero.')
         await portfolioCash({ portfolioId, kind: cashKind, amount: a, symbol: cashKind === 'dividend' ? sym || null : null, on })
@@ -135,6 +145,43 @@ export function PortfolioActions({
             <input type="date" value={on} onChange={(e) => setOn(e.target.value)} className={INPUT} />
           </Field>
         </div>
+      ) : tab === 'transfer' ? (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Ticker">
+            <select value={sym} onChange={(e) => setSymbol(e.target.value)} className={INPUT}>
+              <option value="">Choose…</option>
+              {holdings.map((h) => (
+                <option key={h.id} value={h.symbol}>
+                  {h.symbol}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={held ? `Quantity (you hold ${Number(held.quantity)})` : 'Quantity'}>
+            <span className="flex gap-1">
+              <input inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} className={INPUT} />
+              {held && (
+                <button onClick={() => setQty(String(Number(held.quantity)))} className="shrink-0 rounded-md border border-neutral-700 px-2 text-[11px] text-neutral-400 hover:bg-neutral-800">
+                  All
+                </button>
+              )}
+            </span>
+          </Field>
+          <Field label="To">
+            <select value={destination} onChange={(e) => setDestination(e.target.value)} className={INPUT}>
+              <option value="">Choose…</option>
+              {otherPortfolios.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+              <option value="out">Leaves the app (another broker)</option>
+            </select>
+          </Field>
+          <Field label="Date">
+            <input type="date" value={on} onChange={(e) => setOn(e.target.value)} className={INPUT} />
+          </Field>
+        </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">
           <Field label="Ticker">
@@ -171,7 +218,8 @@ export function PortfolioActions({
 
       <div className="mt-3 flex items-center justify-between gap-3">
         <span className="text-xs text-neutral-500">
-          {tab !== 'cash' && total !== null && <>Total {currency(total)}</>}
+          {(tab === 'buy' || tab === 'sell' || tab === 'existing') && total !== null && <>Total {currency(total)}</>}
+          {tab === 'transfer' && held && <>Average cost {currency(Number(held.avg_cost))}/share carries over</>}
           {tab === 'buy' && total !== null && total > cashAvailable && (
             <span className="text-amber-400"> · more than the {currency(cashAvailable)} cash available</span>
           )}

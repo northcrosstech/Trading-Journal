@@ -125,6 +125,7 @@ function HoldingsTable({ views, total, onEdit }: { views: HoldingView[]; total: 
 export function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>()
   const [portfolio, setPortfolio] = useState<Portfolio | null | undefined>(undefined)
+  const [allPortfolios, setAllPortfolios] = useState<Portfolio[]>([])
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [csps, setCsps] = useState<CspPosition[]>([])
   const [options, setOptions] = useState<OptionPosition[]>([])
@@ -151,6 +152,7 @@ export function PortfolioDetailPage() {
         setOptions(o)
         setValues(v)
         setActivity(a)
+        setAllPortfolios(ps)
         setPortfolio(ps.find((p) => p.id === portfolioId) ?? null)
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -278,7 +280,10 @@ export function PortfolioDetailPage() {
         </div>
 
         <div className="flex flex-col gap-5 lg:col-span-2">
-          <PortfolioActions portfolioId={p.id} holdings={holdings} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
+          <PortfolioActions
+            portfolioId={p.id}
+            otherPortfolios={allPortfolios.filter((x) => x.id !== p.id && !x.archived)}
+            holdings={holdings} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
           <div className={CARD}>
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Allocation</h2>
             <AllocationList rows={allocation} total={allocationTotal} />

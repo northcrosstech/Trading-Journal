@@ -201,6 +201,19 @@ export async function portfolioSell(p: { portfolioId: string; symbol: string; qu
   if (error) throw error
 }
 
+/** Move shares to another of your portfolios (toPortfolioId) or out of the app (null).
+ * The average cost carries over; no gain or loss is realized. */
+export async function portfolioTransfer(p: { fromPortfolioId: string; symbol: string; quantity: number; toPortfolioId: string | null; on: string }) {
+  const { error } = await supabase.rpc('portfolio_transfer', {
+    p_from: p.fromPortfolioId,
+    p_symbol: p.symbol,
+    p_quantity: p.quantity,
+    p_to: p.toPortfolioId,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
 export async function portfolioCash(p: {
   portfolioId: string
   kind: 'deposit' | 'withdrawal' | 'dividend'

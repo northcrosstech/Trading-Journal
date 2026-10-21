@@ -440,6 +440,10 @@ export type Database = {
         Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_to_cash?: boolean; p_on?: string }
         Returns: undefined
       }
+      portfolio_transfer: {
+        Args: { p_from: string; p_symbol: string; p_quantity: number; p_to?: string | null; p_on?: string }
+        Returns: undefined
+      }
       portfolio_cash: {
         Args: { p_portfolio: string; p_kind: 'deposit' | 'withdrawal' | 'dividend'; p_amount: number; p_symbol?: string | null; p_on?: string }
         Returns: undefined
