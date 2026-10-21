@@ -17,6 +17,9 @@ import { ManualTradeEntryPage } from './pages/ManualTradeEntryPage'
 import { CsvImportPage } from './pages/CsvImportPage'
 import { RobinhoodImportPage } from './pages/RobinhoodImportPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { NetWorthPage } from './pages/NetWorthPage'
+import { PortfoliosPage } from './pages/PortfoliosPage'
+import { PortfolioDetailPage } from './pages/PortfolioDetailPage'
 
 function App() {
   return (
@@ -50,6 +53,9 @@ function App() {
             <Route path="/stats" element={<Navigate to="/insights" replace />} />
             <Route path="/playbooks/*" element={<Navigate to="/settings" replace />} />
             <Route path="/accounts" element={<AccountsPage />} />
+            <Route path="/networth" element={<NetWorthPage />} />
+            <Route path="/portfolios" element={<PortfoliosPage />} />
+            <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>

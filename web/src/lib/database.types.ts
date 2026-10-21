@@ -223,6 +223,133 @@ export type SyncLogRow = {
   warnings_count: number | null
 }
 
+export type NetworthCategory =
+  | 'home'
+  | 'cash'
+  | '401k'
+  | 'traditional_ira'
+  | 'roth_ira'
+  | 'brokerage'
+  | 'auto'
+  | 'misc_asset'
+  | 'mortgage'
+  | 'auto_loan'
+  | 'credit_card'
+  | 'debt'
+  | 'other_debt'
+
+export type NetworthAccountRow = {
+  id: string
+  user_id: string
+  name: string
+  category: NetworthCategory
+  opened_month: string // yyyy-mm-01
+  closed_month: string | null // yyyy-mm-01; the account is gone from this month on
+  sort_order: number
+  created_at: string
+}
+
+export type NetworthBalanceRow = {
+  id: string
+  user_id: string
+  account_id: string
+  month: string // yyyy-mm-01
+  balance: number // always positive; the category decides asset vs debt
+  updated_at: string
+}
+
+export type PortfolioKind = 'brokerage' | '401k' | 'traditional_ira' | 'roth_ira'
+
+export type PortfolioRow = {
+  id: string
+  user_id: string
+  name: string
+  kind: PortfolioKind
+  cash: number
+  archived: boolean
+  created_at: string
+}
+
+export type HoldingRow = {
+  id: string
+  user_id: string
+  portfolio_id: string
+  symbol: string
+  quantity: number
+  avg_cost: number
+  manual_price: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type CspStatus = 'open' | 'expired' | 'assigned' | 'closed'
+
+export type CspPositionRow = {
+  id: string
+  user_id: string
+  portfolio_id: string
+  symbol: string
+  strike: number
+  expiration: string
+  contracts: number
+  premium: number // per share
+  opened_on: string
+  status: CspStatus
+  closed_on: string | null
+  close_price: number | null // per share
+  mark: number | null // per share
+  created_at: string
+}
+
+export type PortfolioActivityKind =
+  | 'deposit'
+  | 'withdrawal'
+  | 'dividend'
+  | 'buy'
+  | 'sell'
+  | 'transfer_in'
+  | 'transfer_out'
+  | 'csp_open'
+  | 'csp_close'
+  | 'csp_expire'
+  | 'csp_assign'
+
+export type PortfolioActivityRow = {
+  id: string
+  user_id: string
+  portfolio_id: string
+  occurred_on: string
+  kind: PortfolioActivityKind
+  symbol: string | null
+  quantity: number | null
+  price: number | null
+  cash_change: number
+  external_flow: number
+  realized_gain: number | null
+  csp_id: string | null
+  created_at: string
+}
+
+export type PriceRow = {
+  symbol: string
+  price_date: string
+  close: number
+  fetched_at: string
+}
+
+export type PortfolioDailyValueRow = {
+  portfolio_id: string
+  user_id: string
+  value_date: string
+  holdings_value: number
+  cash: number
+  csp_liability: number
+  total_value: number
+  cost_basis: number
+  net_flow: number
+  computed_at: string
+}
+
 function table<Row extends Record<string, unknown>>() {
   return {} as { Row: Row; Insert: Partial<Row>; Update: Partial<Row>; Relationships: [] }
 }
@@ -249,9 +376,46 @@ export type Database = {
       target_settings: ReturnType<typeof table<TargetSettingsRow>>
       daily_plans: ReturnType<typeof table<DailyPlanRow>>
       daily_plan_playbooks: ReturnType<typeof table<DailyPlanPlaybookRow>>
+      networth_accounts: ReturnType<typeof table<NetworthAccountRow>>
+      networth_balances: ReturnType<typeof table<NetworthBalanceRow>>
+      portfolios: ReturnType<typeof table<PortfolioRow>>
+      holdings: ReturnType<typeof table<HoldingRow>>
+      csp_positions: ReturnType<typeof table<CspPositionRow>>
+      portfolio_activity: ReturnType<typeof table<PortfolioActivityRow>>
+      prices: ReturnType<typeof table<PriceRow>>
+      portfolio_daily_values: ReturnType<typeof table<PortfolioDailyValueRow>>
     }
     Views: Record<string, never>
-    Functions: Record<string, never>
+    Functions: {
+      portfolio_buy: {
+        Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_from_cash?: boolean; p_on?: string }
+        Returns: undefined
+      }
+      portfolio_sell: {
+        Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_to_cash?: boolean; p_on?: string }
+        Returns: undefined
+      }
+      portfolio_cash: {
+        Args: { p_portfolio: string; p_kind: 'deposit' | 'withdrawal' | 'dividend'; p_amount: number; p_symbol?: string | null; p_on?: string }
+        Returns: undefined
+      }
+      csp_open: {
+        Args: {
+          p_portfolio: string
+          p_symbol: string
+          p_strike: number
+          p_expiration: string
+          p_contracts: number
+          p_premium: number
+          p_on?: string
+        }
+        Returns: string
+      }
+      csp_resolve: {
+        Args: { p_csp: string; p_outcome: 'expired' | 'closed' | 'assigned'; p_price?: number | null; p_on?: string }
+        Returns: undefined
+      }
+    }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>
   }
@@ -271,6 +435,13 @@ export type DailyJournal = DailyJournalRow
 export type TargetSettings = TargetSettingsRow
 export type SyncLog = SyncLogRow
 export type DailyPlan = DailyPlanRow
+export type NetworthAccount = NetworthAccountRow
+export type NetworthBalance = NetworthBalanceRow
+export type Portfolio = PortfolioRow
+export type Holding = HoldingRow
+export type CspPosition = CspPositionRow
+export type PortfolioActivity = PortfolioActivityRow
+export type PortfolioDailyValue = PortfolioDailyValueRow
 
 export type TradeWithDetails = Trade & {
   options_detail: OptionsDetail | null

@@ -46,6 +46,7 @@ from market_calendar import is_trading_day
 from rate_limiter import RateLimiter
 from sync_trigger_server import start_http_server
 from transform import extract_orders, group_trades, normalize_orders, open_trade_warnings
+from prices import print_pricing_summary, run_pricing
 
 load_dotenv()
 
@@ -329,10 +330,31 @@ def _scheduled_job() -> None:
     _print_summary(run_sync())
 
 
+# Daily portfolio pricing runs once, after the close (prices.py).
+PRICING_HOUR = int(os.environ.get("PRICING_HOUR", "16"))
+PRICING_MINUTE = int(os.environ.get("PRICING_MINUTE", "45"))
+
+
+def _scheduled_pricing_job() -> None:
+    today = datetime.now(MARKET_TZ).date()
+    if not is_trading_day(today):
+        print(f"[{datetime.now().isoformat()}] skipping pricing -- {today} is not a trading day.")
+        return
+    print_pricing_summary(run_pricing(today))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Webull -> Supabase sync worker")
     parser.add_argument("--once", action="store_true", help="Run a single sync cycle and exit (for local testing)")
+    parser.add_argument(
+        "--prices-once", action="store_true", help="Fetch today's closing prices, value every portfolio, and exit"
+    )
     args = parser.parse_args()
+
+    if args.prices_once:
+        summary = run_pricing(datetime.now(MARKET_TZ).date())
+        print_pricing_summary(summary)
+        sys.exit(0 if summary.error is None else 1)
 
     if args.once:
         summary = run_sync()
@@ -360,6 +382,18 @@ def main() -> None:
         coalesce=True,  # missed fire times (e.g. after a hang) collapse into a single run, not a backlog
         next_run_time=datetime.now(),  # run once immediately on startup, then on the interval
     )
+    scheduler.add_job(
+        _scheduled_pricing_job,
+        "cron",
+        day_of_week="mon-fri",
+        hour=PRICING_HOUR,
+        minute=PRICING_MINUTE,
+        timezone=MARKET_TZ,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,  # a worker restart shortly after the fire time still prices that day
+    )
+    print(f"Daily portfolio pricing: {PRICING_HOUR:02d}:{PRICING_MINUTE:02d} America/New_York on trading days")
     scheduler.start()
 
 

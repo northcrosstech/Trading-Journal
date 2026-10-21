@@ -73,6 +73,21 @@ null with no real user session. This exact failure mode happened during
 local testing — worth an extra glance in Supabase Studio → Settings → API
 Keys before setting the secret.
 
+### Daily portfolio pricing
+
+The same worker prices every portfolio once per trading day after the close
+(`prices.py`, default 16:45 America/New_York; override with `PRICING_HOUR` /
+`PRICING_MINUTE`). It needs the Twelve Data key -- the same one Vercel uses for
+trade charts:
+```
+fly secrets set TWELVEDATA_API_KEY=<key>
+```
+Without it, pricing still runs but logs "TWELVEDATA_API_KEY is not set" and values
+holdings at their last stored price (or average cost). To run it once by hand:
+```
+fly ssh console -C "python sync.py --prices-once"
+```
+
 ## Deploy
 
 ```

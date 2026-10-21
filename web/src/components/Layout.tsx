@@ -9,6 +9,8 @@ const navItems = [
   { to: '/journal', label: 'Journal' },
   { to: '/trades', label: 'Trades' },
   { to: '/insights', label: 'Insights' },
+  { to: '/portfolios', label: 'Portfolios' },
+  { to: '/networth', label: 'Net worth' },
   { to: '/settings', label: 'Settings' },
 ]
 

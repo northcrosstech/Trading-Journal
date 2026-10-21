@@ -1,0 +1,248 @@
+import { supabase } from './supabase'
+import type {
+  CspPosition,
+  Holding,
+  NetworthAccount,
+  NetworthBalance,
+  NetworthCategory,
+  Portfolio,
+  PortfolioActivity,
+  PortfolioDailyValue,
+  PortfolioKind,
+} from './database.types'
+
+// ---------------------------------------------------------------------------
+// Net worth
+// ---------------------------------------------------------------------------
+
+export async function fetchNetworthAccounts(): Promise<NetworthAccount[]> {
+  const { data, error } = await supabase.from('networth_accounts').select('*').order('sort_order').order('created_at')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function createNetworthAccount(
+  userId: string,
+  fields: { name: string; category: NetworthCategory; opened_month: string },
+): Promise<NetworthAccount> {
+  const { data, error } = await supabase
+    .from('networth_accounts')
+    .insert({ user_id: userId, ...fields })
+    .select('*')
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateNetworthAccount(
+  id: string,
+  patch: Partial<Pick<NetworthAccount, 'name' | 'category' | 'opened_month' | 'closed_month' | 'sort_order'>>,
+) {
+  const { error } = await supabase.from('networth_accounts').update(patch).eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteNetworthAccount(id: string) {
+  const { error } = await supabase.from('networth_accounts').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function fetchNetworthBalances(): Promise<NetworthBalance[]> {
+  const { data, error } = await supabase.from('networth_balances').select('*').order('month')
+  if (error) throw error
+  return data ?? []
+}
+
+/** Saves one month's form: a number upserts that account's balance, null removes it. */
+export async function saveMonthBalances(userId: string, month: string, entries: { accountId: string; balance: number | null }[]) {
+  const upserts = entries
+    .filter((e) => e.balance !== null)
+    .map((e) => ({ user_id: userId, account_id: e.accountId, month, balance: e.balance!, updated_at: new Date().toISOString() }))
+  const removals = entries.filter((e) => e.balance === null).map((e) => e.accountId)
+  if (upserts.length) {
+    const { error } = await supabase.from('networth_balances').upsert(upserts, { onConflict: 'account_id,month' })
+    if (error) throw error
+  }
+  if (removals.length) {
+    const { error } = await supabase.from('networth_balances').delete().eq('month', month).in('account_id', removals)
+    if (error) throw error
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Portfolios
+// ---------------------------------------------------------------------------
+
+export async function fetchPortfolios(): Promise<Portfolio[]> {
+  const { data, error } = await supabase.from('portfolios').select('*').order('created_at')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function createPortfolio(userId: string, fields: { name: string; kind: PortfolioKind }): Promise<Portfolio> {
+  const { data, error } = await supabase
+    .from('portfolios')
+    .insert({ user_id: userId, ...fields })
+    .select('*')
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updatePortfolio(id: string, patch: Partial<Pick<Portfolio, 'name' | 'kind' | 'archived'>>) {
+  const { error } = await supabase.from('portfolios').update(patch).eq('id', id)
+  if (error) throw error
+}
+
+export async function fetchHoldings(portfolioId?: string): Promise<Holding[]> {
+  let q = supabase.from('holdings').select('*').order('symbol')
+  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+  const { data, error } = await q
+  if (error) throw error
+  return data ?? []
+}
+
+/** Direct correction (e.g. after a stock split, or setting a manual price) -- no cash or
+ * money-in/out effect. Buying and selling go through portfolioBuy / portfolioSell. */
+export async function updateHolding(id: string, patch: Partial<Pick<Holding, 'quantity' | 'avg_cost' | 'manual_price'>>) {
+  const { error } = await supabase
+    .from('holdings')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function fetchCsps(portfolioId?: string): Promise<CspPosition[]> {
+  let q = supabase.from('csp_positions').select('*').order('expiration')
+  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+  const { data, error } = await q
+  if (error) throw error
+  return data ?? []
+}
+
+export async function setCspMark(id: string, mark: number | null) {
+  const { error } = await supabase.from('csp_positions').update({ mark }).eq('id', id)
+  if (error) throw error
+}
+
+export async function fetchActivity(portfolioId: string): Promise<PortfolioActivity[]> {
+  const { data, error } = await supabase
+    .from('portfolio_activity')
+    .select('*')
+    .eq('portfolio_id', portfolioId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+/** Realized gains for every portfolio (activity rows that carry one). */
+export async function fetchRealizedGains(): Promise<Pick<PortfolioActivity, 'portfolio_id' | 'realized_gain'>[]> {
+  const { data, error } = await supabase.from('portfolio_activity').select('portfolio_id, realized_gain').not('realized_gain', 'is', null)
+  if (error) throw error
+  return data ?? []
+}
+
+export async function fetchDailyValues(portfolioId?: string): Promise<PortfolioDailyValue[]> {
+  let q = supabase.from('portfolio_daily_values').select('*').order('value_date')
+  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+  const { data, error } = await q
+  if (error) throw error
+  return data ?? []
+}
+
+export type SymbolPrice = { close: number; date: string; prevClose: number | null }
+
+/** Latest close (and the one before it, for today's change) for each symbol. */
+export async function fetchLatestPrices(symbols: string[]): Promise<Map<string, SymbolPrice>> {
+  const out = new Map<string, SymbolPrice>()
+  if (symbols.length === 0) return out
+  const { data, error } = await supabase
+    .from('prices')
+    .select('symbol, close, price_date')
+    .in('symbol', symbols)
+    .order('price_date', { ascending: false })
+    .limit(symbols.length * 10)
+  if (error) throw error
+  for (const row of data ?? []) {
+    const existing = out.get(row.symbol)
+    if (!existing) out.set(row.symbol, { close: Number(row.close), date: row.price_date, prevClose: null })
+    else if (existing.prevClose === null && row.price_date < existing.date) existing.prevClose = Number(row.close)
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Actions (database functions -- each saves completely or not at all)
+// ---------------------------------------------------------------------------
+
+export async function portfolioBuy(p: { portfolioId: string; symbol: string; quantity: number; price: number; fromCash: boolean; on: string }) {
+  const { error } = await supabase.rpc('portfolio_buy', {
+    p_portfolio: p.portfolioId,
+    p_symbol: p.symbol,
+    p_quantity: p.quantity,
+    p_price: p.price,
+    p_from_cash: p.fromCash,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
+export async function portfolioSell(p: { portfolioId: string; symbol: string; quantity: number; price: number; toCash: boolean; on: string }) {
+  const { error } = await supabase.rpc('portfolio_sell', {
+    p_portfolio: p.portfolioId,
+    p_symbol: p.symbol,
+    p_quantity: p.quantity,
+    p_price: p.price,
+    p_to_cash: p.toCash,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
+export async function portfolioCash(p: {
+  portfolioId: string
+  kind: 'deposit' | 'withdrawal' | 'dividend'
+  amount: number
+  symbol?: string | null
+  on: string
+}) {
+  const { error } = await supabase.rpc('portfolio_cash', {
+    p_portfolio: p.portfolioId,
+    p_kind: p.kind,
+    p_amount: p.amount,
+    p_symbol: p.symbol ?? null,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
+export async function cspOpen(p: {
+  portfolioId: string
+  symbol: string
+  strike: number
+  expiration: string
+  contracts: number
+  premium: number
+  on: string
+}) {
+  const { error } = await supabase.rpc('csp_open', {
+    p_portfolio: p.portfolioId,
+    p_symbol: p.symbol,
+    p_strike: p.strike,
+    p_expiration: p.expiration,
+    p_contracts: p.contracts,
+    p_premium: p.premium,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
+export async function cspResolve(p: { cspId: string; outcome: 'expired' | 'closed' | 'assigned'; price?: number | null; on: string }) {
+  const { error } = await supabase.rpc('csp_resolve', {
+    p_csp: p.cspId,
+    p_outcome: p.outcome,
+    p_price: p.price ?? null,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
