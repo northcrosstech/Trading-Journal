@@ -6,6 +6,9 @@ import { ResetPasswordPage } from './auth/ResetPasswordPage'
 import { AccountProvider } from './accounts/AccountContext'
 import { Layout } from './components/Layout'
 import { ReviewChecklistProvider } from './components/ReviewChecklistProvider'
+import { DialogProvider } from './components/ui/DialogProvider'
+import { ToastProvider } from './components/ui/ToastProvider'
+import { WealthOverviewPage } from './pages/WealthOverviewPage'
 import { TodayPage } from './pages/TodayPage'
 import { TradeLogPage } from './pages/TradeLogPage'
 import { TradeDetailPage } from './pages/TradeDetailPage'
@@ -33,7 +36,11 @@ function App() {
               <RequireAuth>
                 <AccountProvider>
                   <ReviewChecklistProvider>
-                    <Layout />
+                    <ToastProvider>
+                      <DialogProvider>
+                        <Layout />
+                      </DialogProvider>
+                    </ToastProvider>
                   </ReviewChecklistProvider>
                 </AccountProvider>
               </RequireAuth>
@@ -53,6 +60,7 @@ function App() {
             <Route path="/stats" element={<Navigate to="/insights" replace />} />
             <Route path="/playbooks/*" element={<Navigate to="/settings" replace />} />
             <Route path="/accounts" element={<AccountsPage />} />
+            <Route path="/wealth" element={<WealthOverviewPage />} />
             <Route path="/networth" element={<NetWorthPage />} />
             <Route path="/portfolios" element={<PortfoliosPage />} />
             <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />

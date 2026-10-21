@@ -1,257 +1,208 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Archive, ChevronRight, Plus, Wallet } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioDailyValue, PortfolioKind } from '../lib/database.types'
-import {
-  createPortfolio,
-  fetchCsps,
-  fetchDailyValues,
-  fetchHoldings,
-  fetchLatestPrices,
-  fetchOptions,
-  fetchPortfolios,
-  fetchRealizedGains,
-  updatePortfolio,
-  type SymbolPrice,
-} from '../lib/wealthQueries'
-import { PORTFOLIO_KINDS, combineDailyValues, kindLabel, optionValue, portfolioSnapshot, seriesFor, signedCurrency as signed, timeWeightedReturn, unpricedSymbols } from '../lib/portfolio'
+import type { PortfolioKind } from '../lib/database.types'
+import { createPortfolio, updatePortfolio } from '../lib/wealthQueries'
+import { KIND_TONE, PORTFOLIO_KINDS, kindLabel, seriesFor, signedCurrency as signed, timeWeightedReturn } from '../lib/portfolio'
 import { currency, percentFmt } from '../lib/format'
+import { toneClass } from '../lib/ui'
+import { useDialog } from '../lib/dialogContext'
+import { useToast } from '../lib/toastContext'
+import { useWealthPortfolios } from '../lib/useWealthPortfolios'
 import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
-import { allocationSlices } from '../lib/allocation'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { DividendsCard } from '../components/DividendsCard'
 import { GetPricesButton } from '../components/GetPricesButton'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Card } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
+import { Pill } from '../components/ui/Pill'
+import { EmptyState } from '../components/ui/EmptyState'
 
-const INPUT =
-  'rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500'
-const CARD = 'rounded-xl border border-neutral-800 bg-neutral-900 p-4'
+const pctChip = (n: number, base: number) => (base > 0 ? percentFmt(n / base) : undefined)
 
 export function PortfoliosPage() {
   const { user } = useAuth()
-  const [portfolios, setPortfolios] = useState<Portfolio[] | null>(null)
-  const [holdings, setHoldings] = useState<Holding[]>([])
-  const [csps, setCsps] = useState<CspPosition[]>([])
-  const [options, setOptions] = useState<OptionPosition[]>([])
-  const [values, setValues] = useState<PortfolioDailyValue[]>([])
-  const [realized, setRealized] = useState<Map<string, number>>(new Map())
-  const [prices, setPrices] = useState<Map<string, SymbolPrice>>(new Map())
-  const [error, setError] = useState<string | null>(null)
-  const [name, setName] = useState('')
-  const [kind, setKind] = useState<PortfolioKind>('brokerage')
+  const dialog = useDialog()
+  const toast = useToast()
+  const w = useWealthPortfolios()
   const [showArchived, setShowArchived] = useState(false)
 
-  const load = useCallback(() => {
-    Promise.all([fetchPortfolios(), fetchHoldings(), fetchCsps(), fetchDailyValues(), fetchRealizedGains(), fetchOptions()])
-      .then(async ([p, h, c, v, r, o]) => {
-        const symbols = [
-          ...new Set([
-            ...h.map((x) => x.symbol),
-            ...c.filter((x) => x.status === 'open').map((x) => x.symbol),
-            ...o.filter((x) => x.status === 'open').map((x) => x.symbol),
-          ]),
-        ]
-        setPrices(await fetchLatestPrices(symbols))
-        const byPortfolio = new Map<string, number>()
-        for (const row of r) byPortfolio.set(row.portfolio_id, (byPortfolio.get(row.portfolio_id) ?? 0) + Number(row.realized_gain))
-        setRealized(byPortfolio)
-        setHoldings(h)
-        setCsps(c)
-        setOptions(o)
-        setValues(v)
-        setPortfolios(p)
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }, [])
-  useEffect(load, [load])
-
-  const active = useMemo(() => (portfolios ?? []).filter((p) => !p.archived), [portfolios])
-  const activeIds = useMemo(() => new Set(active.map((p) => p.id)), [active])
-  const openCsps = useMemo(() => csps.filter((c) => c.status === 'open'), [csps])
-  const openOptions = useMemo(() => options.filter((o) => o.status === 'open' && activeIds.has(o.portfolio_id)), [options, activeIds])
-  const activeHoldings = useMemo(() => holdings.filter((h) => activeIds.has(h.portfolio_id)), [holdings, activeIds])
-  const pending = useMemo(
-    () => unpricedSymbols(activeHoldings, openCsps.filter((c) => activeIds.has(c.portfolio_id)), prices, openOptions),
-    [activeHoldings, openCsps, activeIds, prices, openOptions],
-  )
-
-  const perPortfolio = useMemo(
-    () =>
-      active.map((p) => ({
-        portfolio: p,
-        snap: portfolioSnapshot(
-          [p],
-          holdings.filter((h) => h.portfolio_id === p.id),
-          openCsps.filter((c) => c.portfolio_id === p.id),
-          prices,
-          openOptions.filter((o) => o.portfolio_id === p.id),
-        ),
-      })),
-    [active, holdings, openCsps, prices, openOptions],
-  )
-  const combined = useMemo(
-    () =>
-      portfolioSnapshot(
-        active,
-        activeHoldings,
-        openCsps.filter((c) => activeIds.has(c.portfolio_id)),
-        prices,
-        openOptions,
-      ),
-    [active, activeIds, activeHoldings, openCsps, prices, openOptions],
-  )
-  const series = useMemo(() => combineDailyValues(values.filter((v) => activeIds.has(v.portfolio_id))), [values, activeIds])
-  const realizedTotal = active.reduce((s, p) => s + (realized.get(p.id) ?? 0), 0)
-
-  // Allocation across everything: each ticker summed over portfolios, plus cash.
-  const allocation = useMemo(() => {
-    const bySymbol = new Map<string, number>()
-    for (const v of combined.holdings) bySymbol.set(v.holding.symbol, (bySymbol.get(v.holding.symbol) ?? 0) + v.value)
-    const positions = Array.from(bySymbol, ([symbol, value]) => ({ key: symbol, label: symbol, value }))
-    const longOptions = openOptions.filter((o) => o.side === 'long').reduce((s, o) => s + optionValue(o, prices), 0)
-    if (longOptions > 0) positions.push({ key: 'options', label: 'Options', value: longOptions })
-    const cashSub =
-      combined.collateral > 0 && combined.cash > 0 ? `incl. ${currency(Math.min(combined.collateral, combined.cash))} set aside for puts` : undefined
-    return allocationSlices(positions, combined.cash, cashSub)
-  }, [combined, openOptions, prices])
-
-  async function add() {
-    if (!user || !name.trim()) return
+  async function newPortfolio() {
+    if (!user) return
+    const v = await dialog.form({
+      title: 'New portfolio',
+      description: 'The type decides which Net worth line the portfolio’s value fills.',
+      submitLabel: 'Create portfolio',
+      fields: [
+        { name: 'name', label: 'Name', placeholder: 'e.g. Fidelity long-term' },
+        { name: 'kind', label: 'Type', type: 'select', defaultValue: 'brokerage', options: PORTFOLIO_KINDS.map((k) => ({ value: k.value, label: k.label })) },
+      ],
+    })
+    if (!v) return
     try {
-      await createPortfolio(user.id, { name: name.trim(), kind })
-      setName('')
-      load()
+      await createPortfolio(user.id, { name: v.name, kind: v.kind as PortfolioKind })
+      toast(`Created “${v.name}”`)
+      w.load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      toast(e instanceof Error ? e.message : String(e), 'error')
     }
   }
 
-  if (error) return <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load portfolios: {error}</div>
-  if (!portfolios) return <div className="text-neutral-500">Loading portfolios…</div>
+  if (w.error) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load portfolios: {w.error}</div>
+  if (!w.portfolios) return <div className="text-neutral-500">Loading portfolios…</div>
 
-  const archived = portfolios.filter((p) => p.archived)
+  const { combined, active } = w
+  const archived = w.portfolios.filter((p) => p.archived)
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
-      <h1 className="text-lg font-semibold text-neutral-100">Portfolios</h1>
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <PageHeader
+        title="Portfolios"
+        subtitle="Long-term investments, valued at each trading day’s close."
+        actions={
+          <Button variant="primary" icon={<Plus size={16} />} onClick={newPortfolio}>
+            New portfolio
+          </Button>
+        }
+      />
 
-      {pending.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
-          <span>Waiting for a first price: {pending.join(', ')}. Prices update once a day after the close.</span>
-          <GetPricesButton symbols={pending} onDone={load} />
+      {w.pending.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/8 px-4 py-3 text-sm text-amber-200">
+          <span>
+            Waiting for a first price: <span className="font-medium">{w.pending.join(', ')}</span>. Prices update once a day after the close.
+          </span>
+          <GetPricesButton symbols={w.pending} onDone={w.load} />
         </div>
       )}
 
-      {active.length > 0 && (
+      {active.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={<Wallet size={22} />}
+            title="No portfolios yet"
+            action={
+              <Button variant="primary" icon={<Plus size={16} />} onClick={newPortfolio}>
+                Create your first portfolio
+              </Button>
+            }
+          >
+            Add a brokerage, 401k or IRA, then bring in the shares and cash you already hold.
+          </EmptyState>
+        </Card>
+      ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="All portfolios" value={currency(combined.total)} sub={`${active.length} portfolio${active.length === 1 ? '' : 's'}`} />
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Kpi label="Total value" value={currency(combined.total)} sub={`${active.length} portfolio${active.length === 1 ? '' : 's'}`} accent />
             <Kpi
               label="Today"
               value={signed(combined.dayChange)}
-              sub={combined.total - combined.dayChange > 0 ? percentFmt(combined.dayChange / (combined.total - combined.dayChange)) : undefined}
               tone={combined.dayChange}
+              chip={pctChip(combined.dayChange, combined.total - combined.dayChange)}
+              chipTone={combined.dayChange}
             />
-            <Kpi label="Unrealized gain" value={signed(combined.unrealized)} sub={combined.cost > 0 ? percentFmt(combined.unrealized / combined.cost) : undefined} tone={combined.unrealized} />
-            <Kpi label="Realized gain" value={signed(realizedTotal)} sub="sales and puts" tone={realizedTotal} />
+            <Kpi
+              label="Unrealized gain"
+              value={signed(combined.unrealized)}
+              tone={combined.unrealized}
+              chip={pctChip(combined.unrealized, combined.cost)}
+              chipTone={combined.unrealized}
+            />
+            <Kpi label="Realized gain" value={signed(w.realizedTotal)} tone={w.realizedTotal} sub="sales, options and puts" />
           </div>
 
-          <div className={CARD}>
-            <h2 className="mb-2 text-sm font-medium text-neutral-200">Returns · all portfolios</h2>
-            <ReturnsRow series={series} />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {w.perPortfolio.map(({ portfolio: p, snap }) => {
+              const ret = timeWeightedReturn(seriesFor(w.values, p.id))
+              return (
+                <Link
+                  key={p.id}
+                  to={`/portfolios/${p.id}`}
+                  className="group flex flex-col gap-3 rounded-2xl border border-(--border) bg-(--card) p-5 transition hover:border-(--accent)/50 hover:bg-(--card-raised)"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-semibold text-white">{p.name}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <Pill tone={KIND_TONE[p.kind]}>{kindLabel(p.kind)}</Pill>
+                        <span className="text-xs text-neutral-500">
+                          {snap.holdings.length} holding{snap.holdings.length === 1 ? '' : 's'}
+                        </span>
+                        {snap.unpriced > 0 && <Pill tone="amber">{snap.unpriced} price pending</Pill>}
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="mt-1 shrink-0 text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300" />
+                  </div>
+                  <div className="text-2xl font-semibold tracking-tight tabular-nums text-white">{currency(snap.total)}</div>
+                  <div className="grid grid-cols-3 gap-2 border-t border-(--border) pt-3 text-xs">
+                    <div>
+                      <div className="text-neutral-500">Today</div>
+                      <div className={`mt-0.5 font-medium tabular-nums ${toneClass(snap.dayChange)}`}>{signed(snap.dayChange)}</div>
+                    </div>
+                    <div>
+                      <div className="text-neutral-500">Unrealized</div>
+                      <div className={`mt-0.5 font-medium tabular-nums ${toneClass(snap.unrealized)}`}>{signed(snap.unrealized)}</div>
+                    </div>
+                    <div>
+                      <div className="text-neutral-500">Since start</div>
+                      <div className={`mt-0.5 font-medium tabular-nums ${toneClass(ret?.cumulative)}`}>{ret ? percentFmt(ret.cumulative) : '—'}</div>
+                    </div>
+                  </div>
+                </Link>
+              )
+            })}
           </div>
 
-          <DividendsCard
-            holdings={activeHoldings}
-            prices={prices}
-            holdingsValue={combined.holdingsValue}
-            portfolioIds={activeIds}
-          />
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+            <Card title="Value" subtitle="All portfolios, at each trading day’s close" className="xl:col-span-3">
+              <ValueHistoryChart data={w.series.map((s) => ({ date: s.date, total: s.total }))} />
+            </Card>
+            <Card title="Allocation" subtitle="All portfolios combined" className="xl:col-span-2">
+              <AllocationDonut allocation={w.allocation} centerLabel="All portfolios" />
+            </Card>
+          </div>
+
+          <Card title="Returns" subtitle="All portfolios combined">
+            <ReturnsRow series={w.series} />
+          </Card>
+
+          <DividendsCard holdings={w.activeHoldings} prices={w.prices} holdingsValue={combined.holdingsValue} portfolioIds={w.activeIds} />
         </>
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
-        <div className="flex flex-col gap-3 lg:col-span-3">
-          {perPortfolio.map(({ portfolio: p, snap }) => {
-            const ret = timeWeightedReturn(seriesFor(values, p.id))
-            return (
-              <Link
-                key={p.id}
-                to={`/portfolios/${p.id}`}
-                className="flex flex-wrap items-center gap-4 rounded-xl border border-neutral-800 bg-neutral-900 p-4 transition hover:border-neutral-700"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-neutral-100">{p.name}</div>
-                  <div className="text-xs text-neutral-500">
-                    {kindLabel(p.kind)} · {snap.holdings.length} holding{snap.holdings.length === 1 ? '' : 's'}
-                    {snap.unpriced > 0 && <span className="text-amber-500/80"> · {snap.unpriced} price pending</span>}
-                  </div>
+      {archived.length > 0 && (
+        <div className="text-sm">
+          <button onClick={() => setShowArchived((v) => !v)} className="inline-flex items-center gap-1.5 text-neutral-500 transition hover:text-neutral-200">
+            <Archive size={15} />
+            {showArchived ? 'Hide' : 'Show'} {archived.length} archived portfolio{archived.length === 1 ? '' : 's'}
+          </button>
+          {showArchived && (
+            <div className="mt-3 flex flex-col gap-2">
+              {archived.map((p) => (
+                <div key={p.id} className="flex items-center justify-between rounded-xl border border-(--border) bg-(--card) px-4 py-3">
+                  <Link to={`/portfolios/${p.id}`} className="text-neutral-300 hover:text-white">
+                    {p.name}
+                  </Link>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      updatePortfolio(p.id, { archived: false })
+                        .then(() => {
+                          toast(`Restored “${p.name}”`)
+                          w.load()
+                        })
+                        .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
+                    }
+                  >
+                    Unarchive
+                  </Button>
                 </div>
-                <div className="text-right">
-                  <div className="text-base font-semibold tabular-nums text-neutral-100">{currency(snap.total)}</div>
-                  <div className={`text-xs tabular-nums ${snap.dayChange > 0 ? 'text-(--status-good)' : snap.dayChange < 0 ? 'text-(--status-critical)' : 'text-neutral-500'}`}>
-                    {signed(snap.dayChange)} today
-                  </div>
-                </div>
-                <div className="w-24 text-right text-xs text-neutral-500">
-                  <div className={`tabular-nums ${snap.unrealized >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}`}>{signed(snap.unrealized)}</div>
-                  {ret && <div className="tabular-nums">{percentFmt(ret.cumulative)} since start</div>}
-                </div>
-              </Link>
-            )
-          })}
-
-          <div className={CARD}>
-            <h2 className="mb-2 text-sm font-medium text-neutral-200">New portfolio</h2>
-            <div className="flex flex-wrap items-center gap-2">
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Fidelity long-term" className={`${INPUT} min-w-0 flex-1`} />
-              <select value={kind} onChange={(e) => setKind(e.target.value as PortfolioKind)} className={INPUT}>
-                {PORTFOLIO_KINDS.map((k) => (
-                  <option key={k.value} value={k.value}>
-                    {k.label}
-                  </option>
-                ))}
-              </select>
-              <button onClick={add} disabled={!name.trim()} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500 disabled:opacity-40">
-                Create
-              </button>
-            </div>
-            <p className="mt-2 text-[11px] text-neutral-600">The type decides which Net worth line the portfolio's value fills.</p>
-          </div>
-
-          {archived.length > 0 && (
-            <div className="text-xs text-neutral-500">
-              <button onClick={() => setShowArchived((v) => !v)} className="hover:text-neutral-300">
-                {showArchived ? 'Hide' : 'Show'} {archived.length} archived portfolio{archived.length === 1 ? '' : 's'}
-              </button>
-              {showArchived && (
-                <div className="mt-2 flex flex-col gap-1">
-                  {archived.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between rounded-lg border border-neutral-800 px-3 py-2">
-                      <Link to={`/portfolios/${p.id}`} className="text-neutral-400 hover:text-neutral-200">
-                        {p.name}
-                      </Link>
-                      <button onClick={() => updatePortfolio(p.id, { archived: false }).then(load)} className="text-blue-400 hover:text-blue-300">
-                        Unarchive
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              ))}
             </div>
           )}
         </div>
-
-        <div className="flex flex-col gap-5 lg:col-span-2">
-          <div className={CARD}>
-            <h2 className="mb-2 text-sm font-medium text-neutral-200">Allocation · all portfolios</h2>
-            <AllocationDonut allocation={allocation} centerLabel="All portfolios" />
-          </div>
-          <div className={CARD}>
-            <h2 className="mb-2 text-sm font-medium text-neutral-200">Value · all portfolios</h2>
-            <ValueHistoryChart data={series.map((s) => ({ date: s.date, total: s.total }))} />
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   )
 }

@@ -12,8 +12,12 @@ import {
 } from '../lib/wealthQueries'
 import { FREQUENCIES, MONTHS, cycleLabel, dividendCalendar, dividendRows, receivedSince, type CalendarMonth, type DividendRow } from '../lib/dividends'
 import { centralDateStr, currency, percentFmt } from '../lib/format'
-
-const INPUT = 'rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-blue-500'
+import { INPUT_SM as INPUT } from '../lib/ui'
+import { parseAmount, useDialog, validators } from '../lib/dialogContext'
+import { useToast } from '../lib/toastContext'
+import { Card } from './ui/Card'
+import { Button } from './ui/Button'
+import { Plus } from 'lucide-react'
 const pct = (n: number | null) => (n === null ? '—' : percentFmt(n).replace('+', ''))
 
 function CalendarTooltip({ active, payload }: { active?: boolean; payload?: { payload: CalendarMonth }[] }) {
@@ -85,15 +89,15 @@ function EditRow({ row, onSave, onRemove, onCancel }: { row: DividendRow; onSave
   }
 
   return (
-    <tr className="border-b border-neutral-800/60 bg-neutral-950/40">
-      <td className="py-2 pr-2 font-medium text-neutral-100">{row.symbol}</td>
-      <td colSpan={8} className="py-2">
+    <tr className="border-b border-(--border) bg-(--accent-soft)/40">
+      <td className="px-5 py-3 font-semibold text-white">{row.symbol}</td>
+      <td colSpan={8} className="px-3 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="relative">
-            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm text-neutral-500">$</span>
-            <input autoFocus inputMode="decimal" value={annual} onChange={(e) => setAnnual(e.target.value)} placeholder="per share / yr" className={`${INPUT} w-32 pl-5`} />
+          <span className="relative w-36">
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-neutral-500">$</span>
+            <input autoFocus inputMode="decimal" value={annual} onChange={(e) => setAnnual(e.target.value)} placeholder="per share / yr" className={`${INPUT} pl-6`} />
           </span>
-          <select value={frequency} onChange={(e) => setFrequency(e.target.value as DividendFrequency)} className={INPUT}>
+          <select value={frequency} onChange={(e) => setFrequency(e.target.value as DividendFrequency)} className={`${INPUT} w-auto`}>
             {FREQUENCIES.map((f) => (
               <option key={f.value} value={f.value}>
                 {f.label}
@@ -101,7 +105,7 @@ function EditRow({ row, onSave, onRemove, onCancel }: { row: DividendRow; onSave
             ))}
           </select>
           {frequency !== 'monthly' && (
-            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className={INPUT} title="A month it pays in">
+            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className={`${INPUT} w-auto`} title="A month it pays in">
               {MONTHS.map((_, i) => (
                 <option key={i} value={i + 1}>
                   {cycleLabel(frequency, i + 1)}
@@ -109,18 +113,18 @@ function EditRow({ row, onSave, onRemove, onCancel }: { row: DividendRow; onSave
               ))}
             </select>
           )}
-          <button onClick={save} className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-500">
+          <Button size="sm" variant="primary" onClick={save}>
             Save
-          </button>
-          <button onClick={onCancel} className="text-xs text-neutral-500 hover:text-neutral-300">
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
           {row.info && (
-            <button onClick={onRemove} className="text-xs text-neutral-600 hover:text-red-400">
+            <Button size="sm" variant="ghost" onClick={onRemove} className="text-neutral-500 hover:text-red-300">
               Doesn't pay
-            </button>
+            </Button>
           )}
-          {error && <span className="text-xs text-(--status-critical)">{error}</span>}
+          {error && <span className="text-xs text-red-400">{error}</span>}
         </div>
       </td>
     </tr>
@@ -149,6 +153,8 @@ export function DividendsCard({
   onRecorded?: () => void
 }) {
   const { user } = useAuth()
+  const dialog = useDialog()
+  const toast = useToast()
   const today = centralDateStr(new Date())
   const year = Number(today.slice(0, 4))
   const currentMonth = Number(today.slice(5, 7))
@@ -177,64 +183,84 @@ export function DividendsCard({
   const received12m = receivedSince(received, yearAgo)
   const singlePortfolio = !!portfolioId
 
-  const run = (p: Promise<unknown>, after?: () => void) =>
+  const run = (p: Promise<unknown>, after?: () => void, message?: string) =>
     p
       .then(() => {
         after?.()
+        if (message) toast(message)
         load()
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
 
-  function record(r: DividendRow) {
+  async function record(r: DividendRow) {
     if (!portfolioId) return
-    const raw = window.prompt(`${r.symbol} dividend received — amount`, r.perPayment.toFixed(2))
-    if (raw === null) return
-    const amount = Number(raw.replace(/[$,\s]/g, ''))
-    if (!Number.isFinite(amount) || amount <= 0) return setError('Enter the amount received.')
-    run(portfolioCash({ portfolioId, kind: 'dividend', amount, symbol: r.symbol, on: today }), onRecorded)
+    const v = await dialog.form({
+      title: `Record ${r.symbol} dividend`,
+      description: 'Adds it to this portfolio’s cash as earnings.',
+      submitLabel: 'Record dividend',
+      fields: [
+        { name: 'amount', label: 'Amount received', type: 'number', prefix: '$', defaultValue: r.perPayment.toFixed(2), validate: validators.positive },
+        { name: 'on', label: 'Date', type: 'date', defaultValue: today },
+      ],
+    })
+    if (!v) return
+    const amount = parseAmount(v.amount)!
+    run(portfolioCash({ portfolioId, kind: 'dividend', amount, symbol: r.symbol, on: v.on }), onRecorded, `Recorded ${r.symbol} dividend of ${currency(amount)}`)
   }
 
   if (holdings.length === 0) return null
 
+  const configured = rows.filter((r) => r.info).length
+  const stat = (label: string, value: string, sub?: string) => (
+    <div className="rounded-xl bg-(--card-raised) px-3.5 py-3">
+      <div className="text-xs text-neutral-500">{label}</div>
+      <div className="mt-1 text-lg font-semibold tabular-nums text-white">{value}</div>
+      {sub && <div className="text-xs text-neutral-500">{sub}</div>}
+    </div>
+  )
+
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-medium text-neutral-200">Dividends{!singlePortfolio && ' · all portfolios'}</h2>
-        <span className="text-xs text-neutral-500">
-          Projected <span className="tabular-nums text-neutral-200">{currency(projected)}</span>/yr ·{' '}
-          <span className="tabular-nums text-neutral-200">{currency(projected / 12)}</span>/mo
-          {holdingsValue > 0 && projected > 0 && <> · {pct(projected / holdingsValue)} yield</>}
-        </span>
-      </div>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-500">
-        <span>
-          Received {currency(receivedThisYear)} this year · {currency(received12m)} last 12 months
-        </span>
-        <span className="flex items-center gap-3">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: 'var(--series-1)' }} /> received
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: 'var(--series-1)', opacity: 0.4 }} /> expected
-          </span>
-        </span>
+    <Card
+      title={singlePortfolio ? 'Dividends' : 'Dividends · all portfolios'}
+      subtitle={
+        singlePortfolio
+          ? 'Each ticker’s dividend is set once and applies to every portfolio holding it.'
+          : 'Set up each ticker’s dividend here once — every portfolio holding it uses it. Record payments on each portfolio’s page.'
+      }
+      flush
+    >
+      <div className="grid grid-cols-2 gap-3 px-5 pb-4 sm:grid-cols-4">
+        {stat('Projected', `${currency(projected)}/yr`, `${configured} of ${rows.length} tickers set up`)}
+        {stat('Per month', currency(projected / 12), 'on average')}
+        {stat('Yield', holdingsValue > 0 && projected > 0 ? pct(projected / holdingsValue) : '—', 'on today’s value')}
+        {stat('Received', currency(receivedThisYear), `${currency(received12m)} last 12 months`)}
       </div>
 
-      <DividendCalendarChart data={calendar} />
+      <div className="px-5">
+        <div className="mb-1 flex items-center justify-end gap-3 text-xs text-neutral-500">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: 'var(--series-1)' }} /> received
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: 'var(--series-1)', opacity: 0.4 }} /> expected
+          </span>
+        </div>
+        <DividendCalendarChart data={calendar} />
+      </div>
 
-      <div className="mt-3 overflow-x-auto">
+      <div className="mt-4 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-neutral-800 text-left text-[11px] uppercase tracking-wide text-neutral-500">
-              <th className="py-1.5 pr-2">Ticker</th>
-              <th className="py-1.5 pr-2 text-right">$/share/yr</th>
-              <th className="py-1.5 pr-2">Pays</th>
-              <th className="py-1.5 pr-2 text-right" title="Yearly dividend ÷ today's price">Yield</th>
-              <th className="py-1.5 pr-2 text-right" title="Yearly dividend ÷ your average cost">On cost</th>
-              <th className="py-1.5 pr-2 text-right">Shares</th>
-              <th className="py-1.5 pr-2 text-right">Per year</th>
-              <th className="py-1.5 pr-2 text-right">Next</th>
-              <th className="py-1.5" />
+            <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+              <th className="px-5 py-2.5">Ticker</th>
+              <th className="px-3 py-2.5 text-right">$/share/yr</th>
+              <th className="px-3 py-2.5">Pays</th>
+              <th className="px-3 py-2.5 text-right" title="Yearly dividend ÷ today's price">Yield</th>
+              <th className="px-3 py-2.5 text-right" title="Yearly dividend ÷ your average cost">On cost</th>
+              <th className="px-3 py-2.5 text-right">Shares</th>
+              <th className="px-3 py-2.5 text-right">Per year</th>
+              <th className="px-3 py-2.5 text-right">Next</th>
+              <th className="px-5 py-2.5" />
             </tr>
           </thead>
           <tbody>
@@ -244,58 +270,61 @@ export function DividendsCard({
                   key={r.symbol}
                   row={r}
                   onCancel={() => setEditing(null)}
-                  onSave={(d) => user && run(saveDividendInfo(user.id, { symbol: r.symbol, ...d }), () => setEditing(null))}
-                  onRemove={() => run(deleteDividendInfo(r.symbol), () => setEditing(null))}
+                  onSave={(d) => user && run(saveDividendInfo(user.id, { symbol: r.symbol, ...d }), () => setEditing(null), `${r.symbol} dividend saved`)}
+                  onRemove={() => run(deleteDividendInfo(r.symbol), () => setEditing(null), `${r.symbol} marked as not paying`)}
                 />
               ) : r.info ? (
-                <tr key={r.symbol} className="border-b border-neutral-800/60 last:border-0">
-                  <td className="py-2 pr-2 font-medium text-neutral-100">{r.symbol}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">${Number(r.info.annual_per_share).toFixed(2)}</td>
-                  <td className="py-2 pr-2 text-xs text-neutral-400" title={cycleLabel(r.info.frequency, r.info.pay_month)}>
+                <tr key={r.symbol} className="border-b border-(--border) last:border-0 hover:bg-white/2">
+                  <td className="px-5 py-3 font-semibold text-white">{r.symbol}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-neutral-200">${Number(r.info.annual_per_share).toFixed(2)}</td>
+                  <td className="px-3 py-3 text-neutral-300">
                     {FREQUENCIES.find((f) => f.value === r.info!.frequency)?.label}
+                    <div className="text-xs text-neutral-500">{cycleLabel(r.info.frequency, r.info.pay_month)}</div>
                   </td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">{pct(r.yield)}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{pct(r.yieldOnCost)}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{r.shares}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-100">{currency(r.perYear)}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">
+                  <td className="px-3 py-3 text-right tabular-nums text-neutral-200">{pct(r.yield)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{pct(r.yieldOnCost)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{Number(r.shares.toFixed(6))}</td>
+                  <td className="px-3 py-3 text-right font-medium tabular-nums text-white">{currency(r.perYear)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-neutral-200">
                     {r.nextMonth !== null && (
                       <>
-                        <span className="text-neutral-500">{MONTHS[r.nextMonth - 1]}</span> {currency(r.perPayment)}
+                        {currency(r.perPayment)}
+                        <div className="text-xs text-neutral-500">{MONTHS[r.nextMonth - 1]}</div>
                       </>
                     )}
                   </td>
-                  <td className="py-2 text-right">
-                    <span className="flex justify-end gap-2 text-xs">
+                  <td className="px-5 py-3 text-right">
+                    <span className="flex justify-end gap-1">
                       {singlePortfolio && (
-                        <button onClick={() => record(r)} className="text-blue-400 hover:text-blue-300">
+                        <Button size="sm" variant="ghost" onClick={() => record(r)} className="text-(--accent-text)">
                           Record
-                        </button>
+                        </Button>
                       )}
-                      <button onClick={() => setEditing(r.symbol)} className="text-neutral-600 hover:text-neutral-300">
+                      <Button size="sm" variant="ghost" onClick={() => setEditing(r.symbol)}>
                         Edit
-                      </button>
+                      </Button>
                     </span>
                   </td>
                 </tr>
               ) : (
-                <tr key={r.symbol} className="border-b border-neutral-800/60 last:border-0">
-                  <td className="py-2 pr-2 font-medium text-neutral-500">{r.symbol}</td>
-                  <td colSpan={8} className="py-2">
-                    <button onClick={() => setEditing(r.symbol)} className="text-xs text-neutral-500 hover:text-neutral-300">
-                      + add dividend <span className="text-neutral-600">(leave it if {r.symbol} doesn't pay)</span>
-                    </button>
+                <tr key={r.symbol} className="border-b border-(--border) last:border-0">
+                  <td className="px-5 py-3 font-semibold text-neutral-400">{r.symbol}</td>
+                  <td colSpan={8} className="px-3 py-3">
+                    <Button size="sm" variant="ghost" icon={<Plus size={14} />} onClick={() => setEditing(r.symbol)}>
+                      Add dividend
+                    </Button>
+                    <span className="ml-1 text-xs text-neutral-600">— skip it if {r.symbol} doesn't pay one</span>
                   </td>
                 </tr>
               ),
             )}
           </tbody>
         </table>
-        <p className="mt-2 text-[11px] text-neutral-600">
-          {singlePortfolio ? 'Enter each ticker’s dividend once — it applies to every portfolio holding it.' : 'Set up each ticker here once — every portfolio holding it uses it. Record payments on the portfolio’s own page.'} Monthly bars split the yearly amount evenly across its pay months; past months show what you recorded.
-        </p>
       </div>
-      {error && <p className="mt-2 text-xs text-(--status-critical)">{error}</p>}
-    </div>
+      <p className="border-t border-(--border) px-5 py-3 text-xs text-neutral-500">
+        Monthly bars split each ticker’s yearly amount evenly across its pay months; past months show what you recorded.
+      </p>
+      {error && <p className="px-5 pb-4 text-sm text-red-400">{error}</p>}
+    </Card>
   )
 }

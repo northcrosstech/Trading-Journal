@@ -120,7 +120,7 @@ export function SyncStatus() {
   const statusColor = log?.status === 'error' ? 'bg-(--status-critical)' : log?.status === 'success' ? 'bg-(--status-good)' : 'bg-neutral-600'
 
   return (
-    <div className="mx-2 mb-2 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-2">
+    <div className="mx-3 mb-2 rounded-lg border border-(--border) bg-(--card) px-2.5 py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusColor}`} />
@@ -132,7 +132,7 @@ export function SyncStatus() {
           onClick={handleSyncNow}
           disabled={busy || cooldownSeconds > 0}
           title={cooldownSeconds > 0 ? `Wait ${cooldownSeconds}s` : 'Sync now'}
-          className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-blue-400 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:text-neutral-600 disabled:hover:bg-transparent"
+          className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-(--accent-text) transition hover:bg-(--accent-soft) disabled:cursor-not-allowed disabled:text-neutral-600 disabled:hover:bg-transparent"
         >
           {cooldownSeconds > 0 ? `${cooldownSeconds}s` : 'Sync now'}
         </button>

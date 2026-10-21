@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { Archive, ArchiveRestore, Pencil, Plus, Wallet } from 'lucide-react'
 import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind } from '../lib/database.types'
 import {
   fetchActivity,
@@ -13,19 +14,35 @@ import {
   updatePortfolio,
   type SymbolPrice,
 } from '../lib/wealthQueries'
-import { PORTFOLIO_KINDS, kindLabel, optionValue, portfolioSnapshot, seriesFor, signedCurrency as signed, unpricedSymbols, type HoldingView } from '../lib/portfolio'
+import {
+  KIND_TONE,
+  PORTFOLIO_KINDS,
+  kindLabel,
+  optionValue,
+  portfolioSnapshot,
+  seriesFor,
+  signedCurrency as signed,
+  unpricedSymbols,
+  type HoldingView,
+} from '../lib/portfolio'
 import { currency, dateFmt, percentFmt, priceFmt } from '../lib/format'
-import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
+import { INPUT_SM, toneClass } from '../lib/ui'
 import { allocationSlices } from '../lib/allocation'
+import { useDialog } from '../lib/dialogContext'
+import { useToast } from '../lib/toastContext'
+import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
-import { PortfolioActions } from '../components/PortfolioActions'
-import { CspSection } from '../components/CspSection'
+import { PortfolioActions, type TradeTab } from '../components/PortfolioActions'
 import { DividendsCard } from '../components/DividendsCard'
 import { GetPricesButton } from '../components/GetPricesButton'
-import { OptionsSection } from '../components/OptionsSection'
-
-const CARD = 'rounded-xl border border-neutral-800 bg-neutral-900 p-4'
-const tone = (n: number | null) => (n === null ? 'text-neutral-500' : n > 0 ? 'text-(--status-good)' : n < 0 ? 'text-(--status-critical)' : 'text-neutral-300')
+import { OptionsCard } from '../components/OptionsCard'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Card } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
+import { Pill } from '../components/ui/Pill'
+import { Tabs } from '../components/ui/Tabs'
+import { Drawer } from '../components/ui/Drawer'
+import { EmptyState } from '../components/ui/EmptyState'
 
 const ACTIVITY_LABEL: Record<PortfolioActivity['kind'], string> = {
   deposit: 'Deposit',
@@ -33,7 +50,7 @@ const ACTIVITY_LABEL: Record<PortfolioActivity['kind'], string> = {
   dividend: 'Dividend',
   buy: 'Buy',
   sell: 'Sell',
-  transfer_in: 'Added existing',
+  transfer_in: 'Added / moved in',
   transfer_out: 'Moved out',
   csp_open: 'Sold put',
   csp_close: 'Bought back put',
@@ -48,8 +65,7 @@ const ACTIVITY_LABEL: Record<PortfolioActivity['kind'], string> = {
   option_assign: 'Call assigned',
 }
 
-const EDIT_INPUT =
-  'w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-right text-sm tabular-nums text-neutral-100 outline-none focus:border-blue-500'
+type View = 'positions' | 'performance' | 'dividends' | 'activity'
 
 /** Inline correction of a holding -- no cash or money-in/out effect. For a stock split, a
  * typo, or a manual price for a fund with no public ticker. Enter saves, Esc cancels. */
@@ -84,36 +100,36 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
   }
 
   return (
-    <tr className="border-b border-neutral-800/60 bg-neutral-950/50 last:border-0">
-      <td className="py-2 pr-2 align-top font-medium text-neutral-100">{h.symbol}</td>
-      <td colSpan={8} className="py-2">
-        <div className="flex flex-wrap items-end gap-2" onKeyDown={onKeyDown}>
-          <label className="flex w-28 flex-col gap-0.5">
-            <span className="text-[11px] text-neutral-500">Quantity</span>
-            <input autoFocus inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} className={EDIT_INPUT} />
+    <tr className="border-b border-(--border) bg-(--accent-soft)/40 last:border-0">
+      <td className="px-5 py-3 align-top font-semibold text-white">{h.symbol}</td>
+      <td colSpan={8} className="px-3 py-3">
+        <div className="flex flex-wrap items-end gap-3" onKeyDown={onKeyDown}>
+          <label className="flex w-32 flex-col gap-1">
+            <span className="text-xs text-neutral-400">Quantity</span>
+            <input autoFocus inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} className={`${INPUT_SM} text-right tabular-nums`} />
           </label>
-          <label className="flex w-28 flex-col gap-0.5">
-            <span className="text-[11px] text-neutral-500">Avg cost / share</span>
-            <input inputMode="decimal" value={avg} onChange={(e) => setAvg(e.target.value)} className={EDIT_INPUT} />
+          <label className="flex w-32 flex-col gap-1">
+            <span className="text-xs text-neutral-400">Avg cost / share</span>
+            <input inputMode="decimal" value={avg} onChange={(e) => setAvg(e.target.value)} className={`${INPUT_SM} text-right tabular-nums`} />
           </label>
-          <label className="flex w-32 flex-col gap-0.5">
-            <span className="text-[11px] text-neutral-500" title="Only for funds with no public ticker, like many 401k funds">
+          <label className="flex w-40 flex-col gap-1">
+            <span className="text-xs text-neutral-400" title="Only for funds with no public ticker, like many 401k funds">
               Manual price <span className="text-neutral-600">(optional)</span>
             </span>
-            <input inputMode="decimal" value={manual} onChange={(e) => setManual(e.target.value)} placeholder="daily close" className={EDIT_INPUT} />
+            <input inputMode="decimal" value={manual} onChange={(e) => setManual(e.target.value)} placeholder="daily close" className={`${INPUT_SM} text-right tabular-nums`} />
           </label>
-          <span className="flex items-center gap-2 pb-1">
-            <button onClick={save} disabled={saving} className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40">
+          <span className="flex items-center gap-2 pb-0.5">
+            <Button size="sm" variant="primary" onClick={save} disabled={saving}>
               {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button onClick={onCancel} className="text-xs text-neutral-500 hover:text-neutral-300">
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onCancel}>
               Cancel
-            </button>
+            </Button>
           </span>
         </div>
-        <p className="mt-1.5 text-[11px] text-neutral-600">
+        <p className="mt-2 text-xs text-neutral-500">
           {error ? (
-            <span className="text-(--status-critical)">{error}</span>
+            <span className="text-red-400">{error}</span>
           ) : (
             'Corrections only (splits, typos) — no cash moves. Use Buy / Sell for trades. Manual price is for funds without a public ticker; leave it blank to use the daily close.'
           )}
@@ -125,21 +141,20 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
 
 function HoldingsTable({ views, total, onSaved }: { views: HoldingView[]; total: number; onSaved: () => void }) {
   const [editingId, setEditingId] = useState<string | null>(null)
-  if (views.length === 0) return <p className="text-sm text-neutral-500">No holdings yet — buy or add existing shares on the right.</p>
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-neutral-800 text-left text-[11px] uppercase tracking-wide text-neutral-500">
-            <th className="py-1.5 pr-2">Ticker</th>
-            <th className="py-1.5 pr-2 text-right">Qty</th>
-            <th className="py-1.5 pr-2 text-right">Avg cost</th>
-            <th className="py-1.5 pr-2 text-right">Price</th>
-            <th className="py-1.5 pr-2 text-right">Value</th>
-            <th className="py-1.5 pr-2 text-right">Today</th>
-            <th className="py-1.5 pr-2 text-right">Gain</th>
-            <th className="py-1.5 pr-2 text-right">Weight</th>
-            <th className="py-1.5" />
+          <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+            <th className="px-5 py-2.5">Ticker</th>
+            <th className="px-3 py-2.5 text-right">Qty</th>
+            <th className="px-3 py-2.5 text-right">Avg cost</th>
+            <th className="px-3 py-2.5 text-right">Price</th>
+            <th className="px-3 py-2.5 text-right">Value</th>
+            <th className="px-3 py-2.5 text-right">Today</th>
+            <th className="px-3 py-2.5 text-right">Gain</th>
+            <th className="px-3 py-2.5 text-right">Weight</th>
+            <th className="w-16 px-3 py-2.5" />
           </tr>
         </thead>
         <tbody>
@@ -155,36 +170,46 @@ function HoldingsTable({ views, total, onSaved }: { views: HoldingView[]; total:
                 }}
               />
             ) : (
-            <tr key={v.holding.id} className="border-b border-neutral-800/60 last:border-0">
-              <td className="py-2 pr-2 font-medium text-neutral-100">{v.holding.symbol}</td>
-              <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">{Number(v.holding.quantity)}</td>
-              <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{priceFmt(Number(v.holding.avg_cost))}</td>
-              <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">
-                {v.priced === 'none' ? (
-                  <span className="text-amber-500/80" title="Prices update once a day after the close">pending</span>
-                ) : (
-                  <>
-                    {priceFmt(v.price)}
-                    {v.priced === 'manual' && <span className="text-neutral-600" title="Manual price"> m</span>}
-                  </>
-                )}
-              </td>
-              <td className="py-2 pr-2 text-right tabular-nums text-neutral-200">{currency(v.value)}</td>
-              <td className={`py-2 pr-2 text-right tabular-nums ${tone(v.dayChange)}`}>
-                {v.dayChange === null ? '—' : signed(v.dayChange)}
-                {v.dayChangePct !== null && <div className="text-[11px]">{percentFmt(v.dayChangePct)}</div>}
-              </td>
-              <td className={`py-2 pr-2 text-right tabular-nums ${tone(v.gain)}`}>
-                {v.gain === null ? '—' : signed(v.gain)}
-                {v.gainPct !== null && <div className="text-[11px]">{percentFmt(v.gainPct)}</div>}
-              </td>
-              <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{total > 0 ? percentFmt(v.value / total).replace('+', '') : '—'}</td>
-              <td className="py-2 text-right">
-                <button onClick={() => setEditingId(v.holding.id)} className="text-xs text-neutral-600 hover:text-neutral-300">
-                  Edit
-                </button>
-              </td>
-            </tr>
+              <tr key={v.holding.id} className="group border-b border-(--border) transition last:border-0 hover:bg-white/2">
+                <td className="px-5 py-3 font-semibold text-white">{v.holding.symbol}</td>
+                <td className="px-3 py-3 text-right tabular-nums text-neutral-300">{Number(Number(v.holding.quantity).toFixed(6))}</td>
+                <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{priceFmt(Number(v.holding.avg_cost))}</td>
+                <td className="px-3 py-3 text-right tabular-nums text-neutral-200">
+                  {v.priced === 'none' ? (
+                    <Pill tone="amber" title="Prices update once a day after the close">
+                      pending
+                    </Pill>
+                  ) : (
+                    <>
+                      {priceFmt(v.price)}
+                      {v.priced === 'manual' && (
+                        <span className="ml-1 text-[10px] font-medium text-neutral-500" title="Manual price">
+                          MANUAL
+                        </span>
+                      )}
+                    </>
+                  )}
+                </td>
+                <td className="px-3 py-3 text-right font-medium tabular-nums text-white">{currency(v.value)}</td>
+                <td className={`px-3 py-3 text-right tabular-nums ${v.dayChange === null ? 'text-neutral-600' : toneClass(v.dayChange)}`}>
+                  {v.dayChange === null ? '—' : signed(v.dayChange)}
+                  {v.dayChangePct !== null && <div className="text-xs">{percentFmt(v.dayChangePct)}</div>}
+                </td>
+                <td className={`px-3 py-3 text-right font-medium tabular-nums ${v.gain === null ? 'text-neutral-600' : toneClass(v.gain)}`}>
+                  {v.gain === null ? '—' : signed(v.gain)}
+                  {v.gainPct !== null && <div className="text-xs font-normal">{percentFmt(v.gainPct)}</div>}
+                </td>
+                <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{total > 0 ? percentFmt(v.value / total).replace('+', '') : '—'}</td>
+                <td className="px-3 py-3 text-right">
+                  <button
+                    onClick={() => setEditingId(v.holding.id)}
+                    title={`Edit ${v.holding.symbol}`}
+                    className="rounded-md p-1.5 text-neutral-600 transition hover:bg-(--card-raised) hover:text-white group-hover:text-neutral-300"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </td>
+              </tr>
             ),
           )}
         </tbody>
@@ -195,6 +220,8 @@ function HoldingsTable({ views, total, onSaved }: { views: HoldingView[]; total:
 
 export function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>()
+  const dialog = useDialog()
+  const toast = useToast()
   const [portfolio, setPortfolio] = useState<Portfolio | null | undefined>(undefined)
   const [allPortfolios, setAllPortfolios] = useState<Portfolio[]>([])
   const [holdings, setHoldings] = useState<Holding[]>([])
@@ -204,7 +231,8 @@ export function PortfolioDetailPage() {
   const [activity, setActivity] = useState<PortfolioActivity[]>([])
   const [prices, setPrices] = useState<Map<string, SymbolPrice>>(new Map())
   const [error, setError] = useState<string | null>(null)
-  const [showAllActivity, setShowAllActivity] = useState(false)
+  const [view, setView] = useState<View>('positions')
+  const [trade, setTrade] = useState<TradeTab | null>(null)
 
   const load = useCallback(() => {
     if (!portfolioId) return
@@ -253,145 +281,263 @@ export function PortfolioDetailPage() {
   // positive cash) -- so a negative cash balance can't inflate them past 100%.
   const allocationTotal = allocation.total
 
-  if (error) return <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-red-300">{error}</div>
+  if (error) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">{error}</div>
   if (portfolio === undefined || !snap) return <div className="text-neutral-500">Loading portfolio…</div>
   if (portfolio === null)
     return (
       <div className="text-neutral-400">
-        Portfolio not found. <Link to="/portfolios" className="text-blue-400">Back to portfolios</Link>
+        Portfolio not found.{' '}
+        <Link to="/portfolios" className="text-(--accent-text)">
+          Back to portfolios
+        </Link>
       </div>
     )
 
   const p = portfolio
-  const shownActivity = showAllActivity ? activity : activity.slice(0, 10)
+  const margin = snap.cash < 0
+  const grossPositions = snap.holdingsValue + Math.max(0, snap.optionsValue)
+  const leverage = margin && snap.total > 0 ? grossPositions / snap.total : null
+
+  async function editPortfolio() {
+    const v = await dialog.form({
+      title: 'Edit portfolio',
+      submitLabel: 'Save',
+      fields: [
+        { name: 'name', label: 'Name', defaultValue: p.name },
+        {
+          name: 'kind',
+          label: 'Type',
+          type: 'select',
+          defaultValue: p.kind,
+          options: PORTFOLIO_KINDS.map((k) => ({ value: k.value, label: k.label })),
+          hint: 'Decides which Net worth line this portfolio fills.',
+        },
+      ],
+    })
+    if (!v) return
+    try {
+      await updatePortfolio(p.id, { name: v.name, kind: v.kind as PortfolioKind })
+      toast('Portfolio updated')
+      load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), 'error')
+    }
+  }
+
+  async function toggleArchive() {
+    if (
+      !p.archived &&
+      !(await dialog.confirm({
+        title: `Archive “${p.name}”?`,
+        message: 'It stops being priced and leaves Net worth. You can unarchive it any time.',
+        confirmLabel: 'Archive',
+        tone: 'warning',
+      }))
+    )
+      return
+    try {
+      await updatePortfolio(p.id, { archived: !p.archived })
+      toast(p.archived ? 'Portfolio restored' : 'Portfolio archived')
+      load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), 'error')
+    }
+  }
+
+  const tradeDone = (message: string) => {
+    setTrade(null)
+    toast(message)
+    load()
+  }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <Link to="/portfolios" className="text-sm text-neutral-500 hover:text-neutral-300">
-            ← Portfolios
-          </Link>
-          <h1 className="text-lg font-semibold text-neutral-100">
-            {p.name} {p.archived && <span className="text-sm font-normal text-neutral-500">(archived)</span>}
-          </h1>
-        </div>
-        <div className="flex items-center gap-3 text-xs">
-          <select
-            value={p.kind}
-            onChange={(e) => updatePortfolio(p.id, { kind: e.target.value as PortfolioKind }).then(load)}
-            className="rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-neutral-300"
-            title="Which Net worth line this portfolio fills"
-          >
-            {PORTFOLIO_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>
-                {k.label}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => {
-              const next = window.prompt('Rename portfolio', p.name)?.trim()
-              if (next && next !== p.name) updatePortfolio(p.id, { name: next }).then(load)
-            }}
-            className="text-neutral-500 hover:text-neutral-300"
-          >
-            Rename
-          </button>
-          <button
-            onClick={() => {
-              if (p.archived || window.confirm(`Archive "${p.name}"? It stops being priced and leaves Net worth; you can unarchive it later.`))
-                updatePortfolio(p.id, { archived: !p.archived }).then(load)
-            }}
-            className="text-neutral-500 hover:text-neutral-300"
-          >
-            {p.archived ? 'Unarchive' : 'Archive'}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Kpi label={`Value · ${kindLabel(p.kind)}`} value={currency(snap.total)} sub={snap.optionsValue !== 0 ? `incl. ${currency(snap.optionsValue)} options` : snap.cspLiability > 0 ? `after ${currency(snap.cspLiability)} to buy back puts` : undefined} />
-        <Kpi
-          label="Today"
-          value={signed(snap.dayChange)}
-          sub={snap.total - snap.dayChange > 0 ? percentFmt(snap.dayChange / (snap.total - snap.dayChange)) : undefined}
-          tone={snap.dayChange}
-        />
-        <Kpi label="Unrealized gain" value={signed(snap.unrealized)} sub={snap.cost > 0 ? percentFmt(snap.unrealized / snap.cost) : undefined} tone={snap.unrealized} />
-        <Kpi label="Realized gain" value={signed(realized)} sub="sales and puts" tone={realized} />
-        <Kpi label="Cash" value={currency(snap.cash)} sub={snap.collateral > 0 ? `${currency(snap.cashAvailable)} available after puts` : 'available'} tone={snap.cashAvailable < 0 ? -1 : null} />
-      </div>
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <PageHeader
+        back={{ to: '/portfolios', label: 'Portfolios' }}
+        title={p.name}
+        badge={
+          <>
+            <Pill tone={KIND_TONE[p.kind]}>{kindLabel(p.kind)}</Pill>
+            {p.archived && <Pill>Archived</Pill>}
+          </>
+        }
+        actions={
+          <>
+            <Button variant="ghost" icon={<Pencil size={15} />} onClick={editPortfolio}>
+              Edit
+            </Button>
+            <Button variant="ghost" icon={p.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />} onClick={toggleArchive}>
+              {p.archived ? 'Unarchive' : 'Archive'}
+            </Button>
+            <Button variant="primary" icon={<Plus size={16} />} onClick={() => setTrade('buy')}>
+              Trade
+            </Button>
+          </>
+        }
+      />
 
       {pending.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/8 px-4 py-3 text-sm text-amber-200">
           <span>
-            Waiting for a first price: {pending.join(', ')}. Prices update once a day after the close — until then holdings are valued at average cost.
+            Waiting for a first price: <span className="font-medium">{pending.join(', ')}</span>. Until then they’re valued at average cost.
           </span>
           <GetPricesButton symbols={pending} onDone={load} />
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
-        <div className="flex flex-col gap-5 lg:col-span-3">
-          <div className={CARD}>
-            <h2 className="mb-2 text-sm font-medium text-neutral-200">Holdings</h2>
-            <HoldingsTable views={snap.holdings} total={allocationTotal} onSaved={load} />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <Kpi
+          label="Value"
+          value={currency(snap.total)}
+          sub={snap.optionsValue !== 0 ? `incl. ${currency(snap.optionsValue)} options` : snap.cspLiability > 0 ? `after ${currency(snap.cspLiability)} to buy back puts` : undefined}
+          accent
+        />
+        <Kpi
+          label="Today"
+          value={signed(snap.dayChange)}
+          tone={snap.dayChange}
+          chip={snap.total - snap.dayChange > 0 ? percentFmt(snap.dayChange / (snap.total - snap.dayChange)) : undefined}
+          chipTone={snap.dayChange}
+        />
+        <Kpi
+          label="Unrealized gain"
+          value={signed(snap.unrealized)}
+          tone={snap.unrealized}
+          chip={snap.cost > 0 ? percentFmt(snap.unrealized / snap.cost) : undefined}
+          chipTone={snap.unrealized}
+        />
+        <Kpi label="Realized gain" value={signed(realized)} tone={realized} sub="sales, options and puts" />
+        {margin ? (
+          <div className="col-span-2 lg:col-span-1">
+            <StatCardMargin used={-snap.cash} leverage={leverage} />
           </div>
-          <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} />
-          <div className={CARD}>
-            <h2 className="mb-2 text-sm font-medium text-neutral-200">Returns</h2>
-            <ReturnsRow series={series} />
-          </div>
-          <div className={CARD}>
-            <h2 className="mb-2 text-sm font-medium text-neutral-200">Value</h2>
-            <ValueHistoryChart data={series.map((s) => ({ date: s.date, total: s.total }))} />
-          </div>
-        </div>
+        ) : (
+          <Kpi label="Cash" value={currency(snap.cash)} sub={snap.collateral > 0 ? `${currency(snap.cashAvailable)} free after puts` : 'available to invest'} />
+        )}
+      </div>
 
-        <div className="flex flex-col gap-5 lg:col-span-2">
+      <Tabs<View>
+        tabs={[
+          { value: 'positions', label: 'Positions', count: snap.holdings.length + openOptions.length + openCsps.length },
+          { value: 'performance', label: 'Performance' },
+          { value: 'dividends', label: 'Dividends' },
+          { value: 'activity', label: 'Activity', count: activity.length },
+        ]}
+        value={view}
+        onChange={setView}
+      />
+
+      {view === 'positions' && (
+        <div className="flex flex-col gap-6">
+          <Card
+            title="Stocks & funds"
+            subtitle={snap.holdings.length > 0 ? `${snap.holdings.length} holding${snap.holdings.length === 1 ? '' : 's'} · ${currency(snap.holdingsValue)}` : undefined}
+            flush
+            actions={
+              <Button size="sm" icon={<Plus size={14} />} onClick={() => setTrade(snap.holdings.length > 0 ? 'buy' : 'existing')}>
+                Add shares
+              </Button>
+            }
+          >
+            {snap.holdings.length === 0 ? (
+              <EmptyState
+                icon={<Wallet size={20} />}
+                title="No holdings yet"
+                action={
+                  <Button variant="primary" size="sm" onClick={() => setTrade('existing')}>
+                    Add shares you own
+                  </Button>
+                }
+              >
+                Use “Add existing” for shares you already hold, or “Buy” for new purchases from this portfolio’s cash.
+              </EmptyState>
+            ) : (
+              <HoldingsTable views={snap.holdings} total={allocationTotal} onSaved={load} />
+            )}
+          </Card>
+          <OptionsCard options={options} csps={csps} prices={prices} onChanged={load} onAdd={() => setTrade('option')} />
+        </div>
+      )}
+
+      {view === 'performance' && (
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+            <Card title="Value" subtitle="At each trading day’s close" className="xl:col-span-3">
+              <ValueHistoryChart data={series.map((s) => ({ date: s.date, total: s.total }))} />
+            </Card>
+            <Card title="Allocation" className="xl:col-span-2">
+              <AllocationDonut allocation={allocation} centerLabel="Value" />
+            </Card>
+          </div>
+          <Card title="Returns">
+            <ReturnsRow series={series} />
+          </Card>
+        </div>
+      )}
+
+      {view === 'dividends' && <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} />}
+
+      {view === 'activity' && (
+        <Card flush title="Activity" subtitle="Every trade, cash move and option event in this portfolio">
+          {activity.length === 0 ? (
+            <EmptyState title="Nothing yet">Trades and cash moves you record show up here.</EmptyState>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                    <th className="px-5 py-2.5">Date</th>
+                    <th className="px-3 py-2.5">Event</th>
+                    <th className="px-3 py-2.5">Details</th>
+                    <th className="px-3 py-2.5 text-right">Cash</th>
+                    <th className="px-5 py-2.5 text-right">Realized</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activity.map((a) => (
+                    <tr key={a.id} className="border-b border-(--border) last:border-0 hover:bg-white/2">
+                      <td className="whitespace-nowrap px-5 py-2.5 tabular-nums text-neutral-400">{dateFmt(a.occurred_on)}</td>
+                      <td className="px-3 py-2.5 text-neutral-200">{ACTIVITY_LABEL[a.kind]}</td>
+                      <td className="px-3 py-2.5 text-neutral-400">
+                        {a.symbol}
+                        {a.quantity !== null && ` × ${Number(Number(a.quantity).toFixed(6))}`}
+                        {a.price !== null && ` @ ${priceFmt(Number(a.price))}`}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right tabular-nums ${Number(a.cash_change) === 0 ? 'text-neutral-600' : toneClass(Number(a.cash_change))}`}>
+                        {Number(a.cash_change) === 0 ? '—' : signed(Number(a.cash_change))}
+                      </td>
+                      <td className={`px-5 py-2.5 text-right tabular-nums ${a.realized_gain === null ? 'text-neutral-600' : toneClass(Number(a.realized_gain))}`}>
+                        {a.realized_gain === null ? '—' : signed(Number(a.realized_gain))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
+      <Drawer open={trade !== null} onClose={() => setTrade(null)} title={`Trade · ${p.name}`} subtitle={`Cash available ${currency(snap.cashAvailable)}`}>
+        {trade !== null && (
           <PortfolioActions
+            key={trade}
             portfolioId={p.id}
             otherPortfolios={allPortfolios.filter((x) => x.id !== p.id && !x.archived)}
-            holdings={holdings} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
-          <div className={CARD}>
-            <h2 className="mb-2 text-sm font-medium text-neutral-200">Allocation</h2>
-            <AllocationDonut allocation={allocation} centerLabel="Value" />
-          </div>
-        </div>
-      </div>
-
-      <OptionsSection portfolioId={p.id} options={options} holdings={holdings} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
-
-      <CspSection portfolioId={p.id} csps={csps} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
-
-      <div className={CARD}>
-        <h2 className="mb-2 text-sm font-medium text-neutral-200">Activity</h2>
-        {activity.length === 0 ? (
-          <p className="text-sm text-neutral-500">Nothing yet.</p>
-        ) : (
-          <div className="flex flex-col divide-y divide-neutral-800/60 text-sm">
-            {shownActivity.map((a) => (
-              <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-1.5">
-                <span className="w-24 text-xs tabular-nums text-neutral-500">{dateFmt(a.occurred_on)}</span>
-                <span className="w-32 text-neutral-300">{ACTIVITY_LABEL[a.kind]}</span>
-                <span className="min-w-0 flex-1 text-neutral-400">
-                  {a.symbol}
-                  {a.quantity !== null && ` × ${Number(a.quantity)}`}
-                  {a.price !== null && ` @ ${priceFmt(Number(a.price))}`}
-                </span>
-                {Number(a.cash_change) !== 0 && <span className="text-xs tabular-nums text-neutral-500">cash {signed(Number(a.cash_change))}</span>}
-                {a.realized_gain !== null && <span className={`text-xs tabular-nums ${tone(Number(a.realized_gain))}`}>{signed(Number(a.realized_gain))}</span>}
-              </div>
-            ))}
-          </div>
+            holdings={holdings}
+            options={options}
+            prices={prices}
+            cashAvailable={snap.cashAvailable}
+            initialTab={trade}
+            onDone={tradeDone}
+          />
         )}
-        {activity.length > 10 && (
-          <button onClick={() => setShowAllActivity((v) => !v)} className="mt-2 text-xs text-neutral-500 hover:text-neutral-300">
-            {showAllActivity ? 'Show less' : `Show all ${activity.length}`}
-          </button>
-        )}
-      </div>
+      </Drawer>
     </div>
   )
+}
+
+/** Cash card when the portfolio is on margin (negative cash): amber, with leverage. */
+function StatCardMargin({ used, leverage }: { used: number; leverage: number | null }) {
+  return <Kpi label="Margin used" value={currency(used)} sub={leverage !== null ? `${leverage.toFixed(2)}× leverage` : 'borrowed from your broker'} warning />
 }

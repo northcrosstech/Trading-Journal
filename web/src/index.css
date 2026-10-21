@@ -3,6 +3,18 @@
 :root {
   color-scheme: dark;
 
+  /* App surfaces */
+  --bg: #0a0a0b; /* page background */
+  --card: #141416; /* cards, panels */
+  --card-raised: #1b1b1f; /* hover rows, inputs inside cards, menus */
+  --border: #26262b;
+  --border-strong: #34343a;
+
+  /* Workspace accent -- set per area by the layout (Trading blue, Wealth teal). */
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.14);
+  --accent-text: #93c5fd;
+
   /* dataviz skill palette tokens -- see supabase project docs / dataviz skill for source */
   --surface-1: #1a1a19;
   --surface-2: #0d0d0d;
@@ -16,13 +28,71 @@
   --status-critical: #d03b3b;
 }
 
+[data-workspace='wealth'] {
+  --accent: #14b8a6;
+  --accent-soft: rgba(20, 184, 166, 0.14);
+  --accent-text: #5eead4;
+}
+
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: var(--surface-2);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
   color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/* Thin, dark scrollbars so panels and tables don't show bright OS scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #34343a transparent;
+}
+
+@keyframes ui-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes ui-pop-in {
+  from {
+    transform: translateY(6px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.ui-slide-in {
+  animation: ui-slide-in 0.18s ease-out;
+}
+.ui-pop-in {
+  animation: ui-pop-in 0.16s ease-out;
+}
+.ui-fade-in {
+  animation: ui-fade-in 0.15s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-slide-in,
+  .ui-pop-in,
+  .ui-fade-in {
+    animation: none;
+  }
 }

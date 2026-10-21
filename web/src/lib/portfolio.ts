@@ -1,6 +1,7 @@
 import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioDailyValue, PortfolioKind } from './database.types'
 import type { SymbolPrice } from './wealthQueries'
 import { currency } from './format'
+import type { PillTone } from '../components/ui/Pill'
 
 /** $ amount with an explicit + for gains. */
 export const signedCurrency = (n: number) => `${n > 0 ? '+' : ''}${currency(n)}`
@@ -14,6 +15,9 @@ export const PORTFOLIO_KINDS: { value: PortfolioKind; label: string }[] = [
   { value: 'roth_ira', label: 'Roth IRA' },
 ]
 export const kindLabel = (k: PortfolioKind) => PORTFOLIO_KINDS.find((x) => x.value === k)?.label ?? k
+
+/** Pill color per portfolio type, so each type is recognizable at a glance. */
+export const KIND_TONE: Record<PortfolioKind, PillTone> = { brokerage: 'teal', '401k': 'violet', traditional_ira: 'sky', roth_ira: 'amber' }
 
 export type HoldingView = {
   holding: Holding

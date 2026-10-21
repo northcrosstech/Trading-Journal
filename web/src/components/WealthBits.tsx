@@ -1,24 +1,36 @@
 import { centralDateStr, percentFmt } from '../lib/format'
 import { timeWeightedReturn } from '../lib/portfolio'
+import { StatCard } from './ui/StatCard'
 
-/** Summary card used across Net worth and Portfolios. `tone` colors the value by sign. */
-export function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: number | null }) {
-  const color = tone == null ? 'text-neutral-100' : tone > 0 ? 'text-(--status-good)' : tone < 0 ? 'text-(--status-critical)' : 'text-neutral-100'
-  return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-      <div className="text-xs text-neutral-500">{label}</div>
-      <div className={`mt-1 text-xl font-semibold tabular-nums ${color}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-neutral-500">{sub}</div>}
-    </div>
-  )
+/** Summary card used across Net worth and Portfolios -- the shared StatCard. */
+export function Kpi({
+  label,
+  value,
+  sub,
+  tone,
+  chip,
+  chipTone,
+  accent,
+  warning,
+}: {
+  label: string
+  value: string
+  sub?: string
+  tone?: number | null
+  chip?: string
+  chipTone?: number | null
+  accent?: boolean
+  warning?: boolean
+}) {
+  return <StatCard label={label} value={value} sub={sub} tone={tone} chip={chip} chipTone={chipTone} accent={accent} warning={warning} />
 }
 
 function ReturnCell({ label, value, note }: { label: string; value: number | null; note?: string }) {
   return (
-    <div>
-      <div className="text-[11px] text-neutral-500">{label}</div>
+    <div className="rounded-xl bg-(--card-raised) px-3.5 py-3">
+      <div className="text-xs text-neutral-500">{label}</div>
       <div
-        className={`text-base font-semibold tabular-nums ${
+        className={`mt-1 text-lg font-semibold tabular-nums ${
           value === null ? 'text-neutral-600' : value > 0 ? 'text-(--status-good)' : value < 0 ? 'text-(--status-critical)' : 'text-neutral-200'
         }`}
       >
@@ -41,7 +53,7 @@ export function ReturnsRow({ series }: { series: { date: string; total: number; 
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <ReturnCell label="Year to date" value={ytd?.cumulative ?? null} />
         <ReturnCell label="Last 12 months" value={fullYear ? (oneYear?.cumulative ?? null) : null} note={fullYear ? undefined : 'needs a year of history'} />
         <ReturnCell label="Since start" value={all?.cumulative ?? null} note={all ? `${Math.round(all.days)} days` : undefined} />
