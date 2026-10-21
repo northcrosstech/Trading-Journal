@@ -14,6 +14,11 @@ BlockingScheduler blocks the main thread, so the HTTP server has to live on its 
 thread regardless). A triggered sync also runs in its own thread so the HTTP request
 returns immediately (a full cycle can take longer than an HTTP client wants to wait)
 -- the frontend polls the sync_log table it already reads to see the result land.
+
+POST /prices/trigger works the same way for portfolio pricing (prices.py, only
+tickers that have never been priced), with its own lock and cooldown so it never
+blocks or is blocked by a trade sync. The frontend polls the prices table for the
+new tickers.
 """
 from __future__ import annotations
 
@@ -25,10 +30,13 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 SYNC_TRIGGER_SECRET = os.environ.get("SYNC_TRIGGER_SECRET")
 DEBOUNCE_SECONDS = int(os.environ.get("SYNC_TRIGGER_DEBOUNCE_SECONDS", "60"))
+PRICES_DEBOUNCE_SECONDS = int(os.environ.get("PRICES_TRIGGER_DEBOUNCE_SECONDS", "120"))
 
 _state_lock = threading.Lock()
 _last_trigger_at = 0.0
 _sync_in_progress = False
+_last_prices_at = 0.0
+_prices_in_progress = False
 
 
 def _run_sync_in_background(run_sync_fn, print_summary_fn) -> None:
@@ -41,7 +49,16 @@ def _run_sync_in_background(run_sync_fn, print_summary_fn) -> None:
             _sync_in_progress = False
 
 
-def make_handler(run_sync_fn, print_summary_fn):
+def _run_prices_in_background(run_prices_fn, print_prices_fn) -> None:
+    global _prices_in_progress
+    try:
+        print_prices_fn(run_prices_fn())
+    finally:
+        with _state_lock:
+            _prices_in_progress = False
+
+
+def make_handler(run_sync_fn, print_summary_fn, run_prices_fn=None, print_prices_fn=None):
     class SyncTriggerHandler(BaseHTTPRequestHandler):
         def _respond(self, status: int, payload: dict) -> None:
             body = json.dumps(payload).encode("utf-8")
@@ -58,7 +75,8 @@ def make_handler(run_sync_fn, print_summary_fn):
             self._respond(404, {"error": "not found"})
 
         def do_POST(self) -> None:
-            if self.path != "/sync/trigger":
+            is_prices = self.path == "/prices/trigger" and run_prices_fn is not None
+            if self.path != "/sync/trigger" and not is_prices:
                 self._respond(404, {"error": "not found"})
                 return
 
@@ -69,6 +87,10 @@ def make_handler(run_sync_fn, print_summary_fn):
             provided = self.headers.get("X-Sync-Secret")
             if provided != SYNC_TRIGGER_SECRET:
                 self._respond(401, {"error": "unauthorized"})
+                return
+
+            if is_prices:
+                self._trigger_prices()
                 return
 
             global _last_trigger_at, _sync_in_progress
@@ -87,15 +109,32 @@ def make_handler(run_sync_fn, print_summary_fn):
             threading.Thread(target=_run_sync_in_background, args=(run_sync_fn, print_summary_fn), daemon=True).start()
             self._respond(202, {"status": "triggered"})
 
+        def _trigger_prices(self) -> None:
+            global _last_prices_at, _prices_in_progress
+            with _state_lock:
+                if _prices_in_progress:
+                    self._respond(409, {"error": "a price update is already running"})
+                    return
+                now = time.time()
+                remaining = PRICES_DEBOUNCE_SECONDS - (now - _last_prices_at)
+                if remaining > 0:
+                    self._respond(429, {"error": "rate limited", "retry_after_seconds": round(remaining)})
+                    return
+                _last_prices_at = now
+                _prices_in_progress = True
+
+            threading.Thread(target=_run_prices_in_background, args=(run_prices_fn, print_prices_fn), daemon=True).start()
+            self._respond(202, {"status": "triggered"})
+
         def log_message(self, format: str, *args) -> None:  # noqa: A002 -- matches base class signature
             pass  # run_sync already logs its own progress; keep the HTTP access log quiet
 
     return SyncTriggerHandler
 
 
-def start_http_server(run_sync_fn, print_summary_fn, port: int = 8080) -> HTTPServer:
-    server = HTTPServer(("0.0.0.0", port), make_handler(run_sync_fn, print_summary_fn))
+def start_http_server(run_sync_fn, print_summary_fn, port: int = 8080, run_prices_fn=None, print_prices_fn=None) -> HTTPServer:
+    server = HTTPServer(("0.0.0.0", port), make_handler(run_sync_fn, print_summary_fn, run_prices_fn, print_prices_fn))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    print(f"Sync-trigger HTTP endpoint listening on :{port} (POST /sync/trigger, secret-protected)")
+    print(f"Sync-trigger HTTP endpoint listening on :{port} (POST /sync/trigger, /prices/trigger; secret-protected)")
     return server

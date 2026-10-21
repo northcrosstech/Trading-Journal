@@ -27,7 +27,10 @@ export class TriggerSyncError extends Error {
  * lives only here (server-side env), never in the browser -- this function is the
  * one place that proves "a real logged-in user asked for this" before spending it.
  */
-export async function triggerSync(authHeader: string | string[] | undefined): Promise<{ status: number; body: unknown }> {
+export async function triggerSync(
+  authHeader: string | string[] | undefined,
+  job: 'sync' | 'prices' = 'sync',
+): Promise<{ status: number; body: unknown }> {
   const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader
   const token = headerValue?.startsWith('Bearer ') ? headerValue.slice(7) : null
   if (!token) throw new TriggerSyncError('missing authorization', 401)
@@ -45,7 +48,8 @@ export async function triggerSync(authHeader: string | string[] | undefined): Pr
   const { data, error } = await supabase.auth.getUser(token)
   if (error || !data.user) throw new TriggerSyncError('invalid session', 401)
 
-  const workerRes = await fetch(`${workerUrl}/sync/trigger`, {
+  // job=prices fetches prices for tickers that have none yet (worker/prices.py).
+  const workerRes = await fetch(`${workerUrl}/${job === 'prices' ? 'prices' : 'sync'}/trigger`, {
     method: 'POST',
     headers: { 'X-Sync-Secret': triggerSecret },
   })

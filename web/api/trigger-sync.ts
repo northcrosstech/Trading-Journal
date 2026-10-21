@@ -20,7 +20,10 @@ class TriggerSyncError extends Error {
   }
 }
 
-async function triggerSync(authHeader: string | string[] | undefined): Promise<{ status: number; body: unknown }> {
+async function triggerSync(
+  authHeader: string | string[] | undefined,
+  job: 'sync' | 'prices' = 'sync',
+): Promise<{ status: number; body: unknown }> {
   const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader
   const token = headerValue?.startsWith('Bearer ') ? headerValue.slice(7) : null
   if (!token) throw new TriggerSyncError('missing authorization', 401)
@@ -38,7 +41,8 @@ async function triggerSync(authHeader: string | string[] | undefined): Promise<{
   const { data, error } = await supabase.auth.getUser(token)
   if (error || !data.user) throw new TriggerSyncError('invalid session', 401)
 
-  const workerRes = await fetch(`${workerUrl}/sync/trigger`, {
+  // job=prices fetches prices for tickers that have none yet (worker/prices.py).
+  const workerRes = await fetch(`${workerUrl}/${job === 'prices' ? 'prices' : 'sync'}/trigger`, {
     method: 'POST',
     headers: { 'X-Sync-Secret': triggerSecret },
   })
@@ -53,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { status, body } = await triggerSync(req.headers.authorization)
+    const { status, body } = await triggerSync(req.headers.authorization, req.query.job === 'prices' ? 'prices' : 'sync')
     res.status(status).json(body)
   } catch (err) {
     if (err instanceof TriggerSyncError) {

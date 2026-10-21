@@ -184,3 +184,12 @@ export function seriesFor(values: PortfolioDailyValue[], portfolioId: string) {
     .sort((a, b) => a.value_date.localeCompare(b.value_date))
     .map((v) => ({ date: v.value_date, total: Number(v.total_value), netFlow: Number(v.net_flow) }))
 }
+
+/** Tickers with no price stored yet -- holdings without a manual price, plus the stocks
+ * behind open puts. What "Get prices now" fetches. */
+export function unpricedSymbols(holdings: Holding[], openCsps: CspPosition[], prices: Map<string, SymbolPrice>): string[] {
+  const out = new Set<string>()
+  for (const h of holdings) if (h.manual_price === null && !prices.has(h.symbol)) out.add(h.symbol)
+  for (const c of openCsps) if (!prices.has(c.symbol)) out.add(c.symbol)
+  return [...out].sort()
+}

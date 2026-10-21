@@ -53,7 +53,8 @@ function triggerSyncApiDevMiddleware(): Plugin {
         }
 
         try {
-          const { status, body } = await triggerSync(req.headers.authorization)
+          const job = new URL(req.url ?? '', 'http://localhost').searchParams.get('job') === 'prices' ? 'prices' : 'sync'
+          const { status, body } = await triggerSync(req.headers.authorization, job)
           res.statusCode = status
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify(body))

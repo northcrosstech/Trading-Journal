@@ -65,3 +65,80 @@ def test_value_portfolio_unpriced_holding_uses_avg_cost_and_warns():
     )
     assert values["holdings_value"] == pytest.approx(30.0)
     assert "NEW" in warnings[0]
+
+
+class _FakeQuery:
+    """Just enough of the supabase query builder for run_pricing's reads/writes."""
+
+    def __init__(self, db, table):
+        self.db, self.table, self.filters, self.op = db, table, [], "select"
+
+    def select(self, *_a, **_k):
+        return self
+
+    def eq(self, col, val):
+        self.filters.append(lambda r: r.get(col) == val)
+        return self
+
+    def in_(self, col, vals):
+        self.filters.append(lambda r: r.get(col) in vals)
+        return self
+
+    def lt(self, col, val):
+        self.filters.append(lambda r: r.get(col) < val)
+        return self
+
+    lte = gt = lt
+
+    def order(self, *_a, **_k):
+        return self
+
+    def limit(self, *_a):
+        return self
+
+    def range(self, *_a):
+        return self
+
+    def upsert(self, rows, **_k):
+        self.op, self.rows = "upsert", rows if isinstance(rows, list) else [rows]
+        return self
+
+    def execute(self):
+        if self.op == "upsert":
+            self.db.writes.setdefault(self.table, []).extend(self.rows)
+            return type("R", (), {"data": self.rows})
+        rows = [r for r in self.db.data.get(self.table, []) if all(f(r) for f in self.filters)]
+        return type("R", (), {"data": rows})
+
+
+class _FakeDb:
+    def __init__(self, data):
+        self.data, self.writes = data, {}
+
+    def table(self, name):
+        return _FakeQuery(self, name)
+
+
+def test_only_new_fetches_unpriced_tickers_and_skips_daily_values(monkeypatch):
+    import prices
+
+    db = _FakeDb(
+        {
+            "portfolios": [{"id": "p", "user_id": "u", "name": "Main", "cash": 0, "archived": False}],
+            "holdings": [
+                {"portfolio_id": "p", "symbol": "VOO", "quantity": 1, "avg_cost": 1, "manual_price": None},
+                {"portfolio_id": "p", "symbol": "NEW", "quantity": 1, "avg_cost": 1, "manual_price": None},
+            ],
+            "csp_positions": [],
+            "prices": [{"symbol": "VOO", "close": 500, "price_date": "2026-10-20"}],
+        }
+    )
+    fetched = []
+    monkeypatch.setattr(prices, "fetch_eod", lambda syms, key: fetched.append(syms) or {"symbol": "NEW", "datetime": "2026-10-20", "close": "12.5"})
+    from datetime import date
+
+    s = prices.run_pricing(date(2026, 10, 21), client=db, api_key="k", only_new=True)
+    assert s.error is None
+    assert fetched == [["NEW"]]
+    assert s.prices_saved == 1
+    assert "portfolio_daily_values" not in db.writes

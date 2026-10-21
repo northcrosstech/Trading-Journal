@@ -371,7 +371,13 @@ def main() -> None:
             else ""
         )
     )
-    start_http_server(run_sync, _print_summary, port=int(os.environ.get("PORT", "8080")))
+    start_http_server(
+        run_sync,
+        _print_summary,
+        port=int(os.environ.get("PORT", "8080")),
+        run_prices_fn=lambda: run_pricing(datetime.now(MARKET_TZ).date(), only_new=True),
+        print_prices_fn=print_pricing_summary,
+    )
 
     scheduler = BlockingScheduler()
     scheduler.add_job(

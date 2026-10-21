@@ -13,11 +13,12 @@ import {
   updatePortfolio,
   type SymbolPrice,
 } from '../lib/wealthQueries'
-import { PORTFOLIO_KINDS, combineDailyValues, kindLabel, portfolioSnapshot, seriesFor, signedCurrency as signed, timeWeightedReturn } from '../lib/portfolio'
+import { PORTFOLIO_KINDS, combineDailyValues, kindLabel, portfolioSnapshot, seriesFor, signedCurrency as signed, timeWeightedReturn, unpricedSymbols } from '../lib/portfolio'
 import { currency, percentFmt } from '../lib/format'
 import { AllocationList, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { DividendsCard } from '../components/DividendsCard'
+import { GetPricesButton } from '../components/GetPricesButton'
 
 const INPUT =
   'rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500'
@@ -57,6 +58,10 @@ export function PortfoliosPage() {
   const activeIds = useMemo(() => new Set(active.map((p) => p.id)), [active])
   const openCsps = useMemo(() => csps.filter((c) => c.status === 'open'), [csps])
   const activeHoldings = useMemo(() => holdings.filter((h) => activeIds.has(h.portfolio_id)), [holdings, activeIds])
+  const pending = useMemo(
+    () => unpricedSymbols(activeHoldings, openCsps.filter((c) => activeIds.has(c.portfolio_id)), prices),
+    [activeHoldings, openCsps, activeIds, prices],
+  )
 
   const perPortfolio = useMemo(
     () =>
@@ -113,6 +118,13 @@ export function PortfoliosPage() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
       <h1 className="text-lg font-semibold text-neutral-100">Portfolios</h1>
+
+      {pending.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+          <span>Waiting for a first price: {pending.join(', ')}. Prices update once a day after the close.</span>
+          <GetPricesButton symbols={pending} onDone={load} />
+        </div>
+      )}
 
       {active.length > 0 && (
         <>

@@ -141,8 +141,14 @@ def _all_rows(query) -> list[dict]:
         start += 1000
 
 
-def run_pricing(value_date: date, client=None, api_key: Optional[str] = TWELVEDATA_API_KEY) -> PricingSummary:
-    """Never raises -- failures land in summary.error so the scheduler keeps running."""
+def run_pricing(
+    value_date: date, client=None, api_key: Optional[str] = TWELVEDATA_API_KEY, only_new: bool = False
+) -> PricingSummary:
+    """Never raises -- failures land in summary.error so the scheduler keeps running.
+
+    only_new=True is the website's "Get prices now": fetch only tickers that have never
+    been priced (seconds, one lookup each) and skip writing daily values -- the page
+    values holdings live from `prices`, and the after-close run still records the day."""
     summary = PricingSummary(value_date=value_date.isoformat())
     try:
         if client is None:
@@ -161,6 +167,12 @@ def run_pricing(value_date: date, client=None, api_key: Optional[str] = TWELVEDA
         symbols = sorted(
             {h["symbol"] for h in holdings if h.get("manual_price") is None} | {c["symbol"] for c in open_csps}
         )
+        if only_new and symbols:
+            already = {
+                row["symbol"]
+                for row in _all_rows(client.table("prices").select("symbol").in_("symbol", symbols))
+            }
+            symbols = [s for s in symbols if s not in already]
         summary.symbols_requested = len(symbols)
 
         # Previous stored closes, for the split check.
@@ -196,6 +208,9 @@ def run_pricing(value_date: date, client=None, api_key: Optional[str] = TWELVEDA
                         summary.warnings.append(
                             f"{s}: closed at {c:.2f}, down from {prev:.2f} -- possible stock split; update the quantity"
                         )
+
+        if only_new:
+            return summary
 
         # Latest close on or before the value date, per symbol.
         latest: dict[str, float] = {}

@@ -12,13 +12,14 @@ import {
   updatePortfolio,
   type SymbolPrice,
 } from '../lib/wealthQueries'
-import { PORTFOLIO_KINDS, kindLabel, portfolioSnapshot, seriesFor, signedCurrency as signed, type HoldingView } from '../lib/portfolio'
+import { PORTFOLIO_KINDS, kindLabel, portfolioSnapshot, seriesFor, signedCurrency as signed, unpricedSymbols, type HoldingView } from '../lib/portfolio'
 import { currency, dateFmt, percentFmt, priceFmt } from '../lib/format'
 import { AllocationList, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { PortfolioActions } from '../components/PortfolioActions'
 import { CspSection } from '../components/CspSection'
 import { DividendsCard } from '../components/DividendsCard'
+import { GetPricesButton } from '../components/GetPricesButton'
 
 const CARD = 'rounded-xl border border-neutral-800 bg-neutral-900 p-4'
 const tone = (n: number | null) => (n === null ? 'text-neutral-500' : n > 0 ? 'text-(--status-good)' : n < 0 ? 'text-(--status-critical)' : 'text-neutral-300')
@@ -142,6 +143,7 @@ export function PortfolioDetailPage() {
   const openCsps = useMemo(() => csps.filter((c) => c.status === 'open'), [csps])
   const snap = useMemo(() => (portfolio ? portfolioSnapshot([portfolio], holdings, openCsps, prices) : null), [portfolio, holdings, openCsps, prices])
   const series = useMemo(() => (portfolioId ? seriesFor(values, portfolioId) : []), [values, portfolioId])
+  const pending = useMemo(() => unpricedSymbols(holdings, openCsps, prices), [holdings, openCsps, prices])
   const realized = useMemo(() => activity.reduce((s, a) => s + (a.realized_gain !== null ? Number(a.realized_gain) : 0), 0), [activity])
 
   const allocation = useMemo(() => {
@@ -222,9 +224,12 @@ export function PortfolioDetailPage() {
         <Kpi label="Cash" value={currency(snap.cash)} sub={snap.collateral > 0 ? `${currency(snap.cashAvailable)} available after puts` : 'available'} tone={snap.cashAvailable < 0 ? -1 : null} />
       </div>
 
-      {snap.unpriced > 0 && (
-        <div className="rounded-lg border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
-          {snap.unpriced} holding{snap.unpriced === 1 ? ' is' : 's are'} waiting for a first price — prices update once a day after the close. Until then they're valued at average cost.
+      {pending.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+          <span>
+            Waiting for a first price: {pending.join(', ')}. Prices update once a day after the close — until then holdings are valued at average cost.
+          </span>
+          <GetPricesButton symbols={pending} onDone={load} />
         </div>
       )}
 
