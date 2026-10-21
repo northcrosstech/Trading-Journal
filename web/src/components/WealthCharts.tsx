@@ -126,7 +126,7 @@ function Swatch({ color, small = false }: { color: string; small?: boolean }) {
  * lists every holding -- including each one inside Other -- with weight and value, so no
  * position is ever hidden and identity never rests on color alone. Hovering a legend row
  * highlights its slice and vice versa. */
-export function AllocationDonut({ allocation, centerLabel = 'Total' }: { allocation: Allocation; centerLabel?: string }) {
+export function AllocationDonut({ allocation, centerLabel = 'Total', noun = 'Positions' }: { allocation: Allocation; centerLabel?: string; noun?: string }) {
   const [hover, setHover] = useState<string | null>(null)
   const { total, slices } = allocation
   if (slices.length === 0) return <p className="text-sm text-neutral-500">Nothing to allocate yet.</p>
@@ -189,7 +189,9 @@ export function AllocationDonut({ allocation, centerLabel = 'Total' }: { allocat
             {s.role === 'cash' && s.members[0] && <div className="pb-1 pl-4.5 text-[11px] text-neutral-500">{s.members[0].label}</div>}
           </div>
         ))}
-        <p className="mt-2 px-2 text-[11px] text-neutral-600">Positions under {Math.round(SLICE_THRESHOLD * 100)}% are grouped as Other.</p>
+        {slices.some((s) => s.role === 'other' && s.members.length > 1) && (
+          <p className="mt-2 px-2 text-[11px] text-neutral-600">{noun} under {Math.round(SLICE_THRESHOLD * 100)}% are grouped as Other.</p>
+        )}
       </div>
     </div>
     </div>

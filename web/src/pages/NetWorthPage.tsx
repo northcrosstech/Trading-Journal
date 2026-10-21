@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Landmark, Plus, Settings2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
@@ -13,13 +13,14 @@ import {
   saveMonthBalances,
   updateNetworthAccount,
 } from '../lib/wealthQueries'
-import { CATEGORIES, addMonths, categoryLabel, isDebt, isOpenIn, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
+import { CATEGORIES, addMonths, categoryLabel, categoryOrder, isDebt, isOpenIn, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
 import { centralDateStr, currency, percentFmt } from '../lib/format'
 import { INPUT, INPUT_SM, LABEL } from '../lib/ui'
 import { useDialog } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
 import { signedCurrency as signed } from '../lib/portfolio'
 import { NetWorthChart } from '../components/WealthCharts'
+import { NetWorthComposition } from '../components/NetWorthComposition'
 import { Kpi } from '../components/WealthBits'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
@@ -113,11 +114,24 @@ function BalancesTable({
   }
 
   const amountOf = (a: NetworthAccount) => parseBalance(draft.get(a.id) ?? '') ?? 0
+  type Item =
+    | { kind: 'account'; key: string; category: NetworthCategory; name: string; account: NetworthAccount; amount: number }
+    | { kind: 'portfolio'; key: string; category: NetworthCategory; name: string; amount: number }
+  // Accounts and portfolio lines together, sorted by category, so each category's lines sit
+  // side by side and can carry a subtotal.
   const groups = ([false, true] as const).map((debt) => {
-    const list = open.filter((a) => isDebt(a.category) === debt)
-    const linked = portfolioLines.filter((l) => isDebt(l.category) === debt)
-    const subtotal = list.reduce((s, a) => s + amountOf(a), 0) + linked.reduce((s, l) => s + Math.abs(l.amount), 0)
-    return { debt, list, linked, subtotal }
+    const items: Item[] = [
+      ...open
+        .filter((a) => isDebt(a.category) === debt)
+        .map((a): Item => ({ kind: 'account', key: a.id, category: a.category, name: a.name, account: a, amount: amountOf(a) })),
+      ...portfolioLines
+        .filter((l) => isDebt(l.category) === debt)
+        .map((l): Item => ({ kind: 'portfolio', key: l.key, category: l.category, name: l.name, amount: Math.abs(l.amount) })),
+    ].sort((x, y) => categoryOrder(x.category) - categoryOrder(y.category) || x.name.localeCompare(y.name))
+    const counts = new Map<NetworthCategory, number>()
+    for (const it of items) counts.set(it.category, (counts.get(it.category) ?? 0) + 1)
+    const subtotal = items.reduce((s, it) => s + it.amount, 0)
+    return { debt, items, counts, subtotal }
   })
   const assets = groups[0].subtotal
   const debts = groups[1].subtotal
@@ -156,50 +170,62 @@ function BalancesTable({
         <table className="w-full text-sm">
           <tbody>
             {groups.map((g) =>
-              g.list.length === 0 && g.linked.length === 0 ? null : (
+              g.items.length === 0 ? null : (
                 <GroupRows key={String(g.debt)} title={g.debt ? 'Debts' : 'Assets'} debt={g.debt} subtotal={g.subtotal}>
-                  {g.list.map((a) => {
-                    const p = prefill.get(a.id)
+                  {g.items.map((it, i) => {
+                    const lastOfCategory = g.items[i + 1]?.category !== it.category
+                    const catCount = g.counts.get(it.category) ?? 0
+                    const catTotal = g.items.filter((x) => x.category === it.category).reduce((s2, x) => s2 + x.amount, 0)
+                    const p = it.kind === 'account' ? prefill.get(it.account.id) : undefined
                     return (
-                      <tr key={a.id} className="border-b border-(--border) hover:bg-white/2">
-                        <td className="px-5 py-2.5">
-                          <div className="font-medium text-neutral-100">{a.name}</div>
-                          {p?.from && <div className="text-xs text-amber-400/90">carried from {monthLabel(p.from)}</div>}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <Pill tone={g.debt ? 'red' : 'teal'}>{categoryLabel(a.category)}</Pill>
-                        </td>
-                        <td className="w-48 px-5 py-2">
-                          <span className="relative block">
-                            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-neutral-500">$</span>
-                            <input
-                              inputMode="decimal"
-                              aria-label={`${a.name} balance`}
-                              value={draft.get(a.id) ?? ''}
-                              onChange={(e) => setDraft((d) => new Map(d).set(a.id, e.target.value))}
-                              onBlur={(e) => {
-                                const n = parseBalance(e.target.value)
-                                if (n !== null && n !== undefined) setDraft((d) => new Map(d).set(a.id, fmtBalance(n)))
-                              }}
-                              className={`${INPUT_SM} pl-6 text-right tabular-nums ${p?.from ? 'border-amber-500/40' : ''}`}
-                            />
-                          </span>
-                        </td>
-                      </tr>
+                      <Fragment key={it.key}>
+                        <tr className="border-b border-(--border) hover:bg-white/2">
+                          <td className="px-5 py-2.5">
+                            <div className="font-medium text-neutral-100">{it.name}</div>
+                            {it.kind === 'portfolio' ? (
+                              <div className="text-xs text-neutral-500">from Portfolios · last close</div>
+                            ) : (
+                              p?.from && <div className="text-xs text-amber-400/90">carried from {monthLabel(p.from)}</div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Pill tone={g.debt ? 'red' : 'teal'}>{categoryLabel(it.category)}</Pill>
+                          </td>
+                          {it.kind === 'account' ? (
+                            <td className="w-48 px-5 py-2">
+                              <span className="relative block">
+                                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-neutral-500">$</span>
+                                <input
+                                  inputMode="decimal"
+                                  aria-label={`${it.name} balance`}
+                                  value={draft.get(it.account.id) ?? ''}
+                                  onChange={(e) => setDraft((d) => new Map(d).set(it.account.id, e.target.value))}
+                                  onBlur={(e) => {
+                                    const n = parseBalance(e.target.value)
+                                    if (n !== null && n !== undefined) setDraft((d) => new Map(d).set(it.account.id, fmtBalance(n)))
+                                  }}
+                                  className={`${INPUT_SM} pl-6 text-right tabular-nums ${p?.from ? 'border-amber-500/40' : ''}`}
+                                />
+                              </span>
+                            </td>
+                          ) : (
+                            <td className="w-48 px-5 py-2.5 text-right tabular-nums text-neutral-300">{currency(it.amount)}</td>
+                          )}
+                        </tr>
+                        {lastOfCategory && catCount >= 2 && (
+                          <tr className="border-b border-(--border) bg-white/2">
+                            <td colSpan={2} className="px-5 py-2 text-xs text-neutral-400">
+                              {categoryLabel(it.category)} · {catCount} accounts
+                            </td>
+                            <td className={`px-5 py-2 text-right text-sm font-semibold tabular-nums ${g.debt ? 'text-red-300' : 'text-neutral-100'}`}>
+                              {g.debt ? '−' : ''}
+                              {currency(catTotal)}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     )
                   })}
-                  {g.linked.map((l) => (
-                    <tr key={l.key} className="border-b border-(--border)">
-                      <td className="px-5 py-2.5">
-                        <div className="font-medium text-neutral-100">{l.name}</div>
-                        <div className="text-xs text-neutral-500">from Portfolios · last close</div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <Pill tone="teal">{categoryLabel(l.category)}</Pill>
-                      </td>
-                      <td className="w-48 px-5 py-2.5 text-right tabular-nums text-neutral-300">{currency(Math.abs(l.amount))}</td>
-                    </tr>
-                  ))}
                 </GroupRows>
               ),
             )}
@@ -530,6 +556,8 @@ export function NetWorthPage() {
       >
         <NetWorthChart data={bars} />
       </Card>
+
+      <NetWorthComposition lines={totals.lines} monthName={monthLabel(month)} />
 
       <BalancesTable
         month={month}

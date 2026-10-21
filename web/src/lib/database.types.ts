@@ -226,6 +226,7 @@ export type SyncLogRow = {
 export type NetworthCategory =
   | 'home'
   | 'cash'
+  | 'emergency_fund'
   | '401k'
   | 'traditional_ira'
   | 'roth_ira'

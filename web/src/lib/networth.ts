@@ -3,6 +3,7 @@ import type { NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, Por
 export const CATEGORIES: { value: NetworthCategory; label: string; debt: boolean }[] = [
   { value: 'home', label: 'Home', debt: false },
   { value: 'cash', label: 'Cash', debt: false },
+  { value: 'emergency_fund', label: 'Emergency fund', debt: false },
   { value: '401k', label: '401k', debt: false },
   { value: 'traditional_ira', label: 'Traditional IRA', debt: false },
   { value: 'roth_ira', label: 'Roth IRA', debt: false },
@@ -128,3 +129,27 @@ export function yearTotals(
   }
   return out
 }
+
+export type CategoryTotal = { category: NetworthCategory; label: string; debt: boolean; total: number; count: number }
+
+/** A month's lines summed per category (debts as positive amounts), in the category
+ * list's order -- "all credit cards", "all 401k" and so on. */
+export function categoryTotals(lines: NetworthLine[]): CategoryTotal[] {
+  const byCat = new Map<NetworthCategory, { total: number; count: number }>()
+  for (const l of lines) {
+    const e = byCat.get(l.category) ?? { total: 0, count: 0 }
+    e.total += Math.abs(l.amount)
+    e.count += 1
+    byCat.set(l.category, e)
+  }
+  return CATEGORIES.filter((c) => byCat.has(c.value)).map((c) => ({
+    category: c.value,
+    label: c.label,
+    debt: c.debt,
+    total: byCat.get(c.value)!.total,
+    count: byCat.get(c.value)!.count,
+  }))
+}
+
+/** Position of a category in CATEGORIES, for sorting accounts by category. */
+export const categoryOrder = (c: NetworthCategory) => CATEGORIES.findIndex((x) => x.value === c)

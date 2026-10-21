@@ -31,14 +31,14 @@ const level = (w: number) => Math.round(w * 1000)
  * kept together. With more than SLICE_COLORS qualifying, the line moves up to the next
  * weight level -- never between two equal weights -- so every slice keeps a distinct color.
  * Cash is its own neutral slice. */
-export function allocationSlices(positions: AllocItem[], cash: number, cashSub?: string): Allocation {
+export function allocationSlices(positions: AllocItem[], cash: number, cashSub?: string, threshold = SLICE_THRESHOLD): Allocation {
   const cashValue = Math.max(0, cash)
   const pos = positions.filter((p) => p.value > 0)
   const total = pos.reduce((s, p) => s + p.value, 0) + cashValue
   if (total <= 0) return { total: 0, slices: [] }
 
   const ranked = pos.map((p) => ({ ...p, weight: p.value / total })).sort((a, b) => b.value - a.value)
-  let sliced = ranked.filter((p) => level(p.weight) >= level(SLICE_THRESHOLD))
+  let sliced = ranked.filter((p) => level(p.weight) >= level(threshold))
   if (sliced.length > SLICE_COLORS.length) {
     const cut = level(sliced[SLICE_COLORS.length].weight)
     sliced = sliced.filter((p) => level(p.weight) > cut)
