@@ -48,25 +48,83 @@ const ACTIVITY_LABEL: Record<PortfolioActivity['kind'], string> = {
   option_assign: 'Call assigned',
 }
 
-/** Correct a holding without any cash effect -- for a stock split, a typo, or setting a
- * manual price for a fund with no public ticker. */
-function editHolding(h: Holding, onDone: () => void, onError: (m: string) => void) {
-  const q = window.prompt(`${h.symbol}: quantity (correction only — use Buy/Sell for trades)`, String(Number(h.quantity)))
-  if (q === null) return
-  const a = window.prompt(`${h.symbol}: average cost per share`, String(Number(h.avg_cost)))
-  if (a === null) return
-  const m = window.prompt(`${h.symbol}: manual price per share — only for funds with no public ticker. Leave blank to use the daily close.`, h.manual_price !== null ? String(h.manual_price) : '')
-  if (m === null) return
-  const quantity = Number(q)
-  const avg = Number(a)
-  const manual = m.trim() === '' ? null : Number(m)
-  if (!(quantity > 0) || !(avg >= 0) || (manual !== null && !(manual >= 0))) return onError('Quantity must be above zero; cost and price can’t be negative.')
-  updateHolding(h.id, { quantity, avg_cost: avg, manual_price: manual })
-    .then(onDone)
-    .catch((e) => onError(e instanceof Error ? e.message : String(e)))
+const EDIT_INPUT =
+  'w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-right text-sm tabular-nums text-neutral-100 outline-none focus:border-blue-500'
+
+/** Inline correction of a holding -- no cash or money-in/out effect. For a stock split, a
+ * typo, or a manual price for a fund with no public ticker. Enter saves, Esc cancels. */
+function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; onSaved: () => void; onCancel: () => void }) {
+  const [qty, setQty] = useState(String(Number(h.quantity)))
+  const [avg, setAvg] = useState(String(Number(h.avg_cost)))
+  const [manual, setManual] = useState(h.manual_price !== null ? String(Number(h.manual_price)) : '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function save() {
+    const quantity = Number(qty.replace(/[$,\s]/g, ''))
+    const avgCost = Number(avg.replace(/[$,\s]/g, ''))
+    const manualPrice = manual.trim() === '' ? null : Number(manual.replace(/[$,\s]/g, ''))
+    if (!(quantity > 0)) return setError('Quantity must be above zero.')
+    if (!(avgCost >= 0)) return setError('Average cost can’t be negative.')
+    if (manualPrice !== null && !(manualPrice >= 0)) return setError('Manual price can’t be negative.')
+    setSaving(true)
+    setError(null)
+    try {
+      await updateHolding(h.id, { quantity, avg_cost: avgCost, manual_price: manualPrice })
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setSaving(false)
+    }
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') save()
+    else if (e.key === 'Escape') onCancel()
+  }
+
+  return (
+    <tr className="border-b border-neutral-800/60 bg-neutral-950/50 last:border-0">
+      <td className="py-2 pr-2 align-top font-medium text-neutral-100">{h.symbol}</td>
+      <td colSpan={8} className="py-2">
+        <div className="flex flex-wrap items-end gap-2" onKeyDown={onKeyDown}>
+          <label className="flex w-28 flex-col gap-0.5">
+            <span className="text-[11px] text-neutral-500">Quantity</span>
+            <input autoFocus inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} className={EDIT_INPUT} />
+          </label>
+          <label className="flex w-28 flex-col gap-0.5">
+            <span className="text-[11px] text-neutral-500">Avg cost / share</span>
+            <input inputMode="decimal" value={avg} onChange={(e) => setAvg(e.target.value)} className={EDIT_INPUT} />
+          </label>
+          <label className="flex w-32 flex-col gap-0.5">
+            <span className="text-[11px] text-neutral-500" title="Only for funds with no public ticker, like many 401k funds">
+              Manual price <span className="text-neutral-600">(optional)</span>
+            </span>
+            <input inputMode="decimal" value={manual} onChange={(e) => setManual(e.target.value)} placeholder="daily close" className={EDIT_INPUT} />
+          </label>
+          <span className="flex items-center gap-2 pb-1">
+            <button onClick={save} disabled={saving} className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={onCancel} className="text-xs text-neutral-500 hover:text-neutral-300">
+              Cancel
+            </button>
+          </span>
+        </div>
+        <p className="mt-1.5 text-[11px] text-neutral-600">
+          {error ? (
+            <span className="text-(--status-critical)">{error}</span>
+          ) : (
+            'Corrections only (splits, typos) — no cash moves. Use Buy / Sell for trades. Manual price is for funds without a public ticker; leave it blank to use the daily close.'
+          )}
+        </p>
+      </td>
+    </tr>
+  )
 }
 
-function HoldingsTable({ views, total, onEdit }: { views: HoldingView[]; total: number; onEdit: (h: Holding) => void }) {
+function HoldingsTable({ views, total, onSaved }: { views: HoldingView[]; total: number; onSaved: () => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null)
   if (views.length === 0) return <p className="text-sm text-neutral-500">No holdings yet — buy or add existing shares on the right.</p>
   return (
     <div className="overflow-x-auto">
@@ -85,7 +143,18 @@ function HoldingsTable({ views, total, onEdit }: { views: HoldingView[]; total: 
           </tr>
         </thead>
         <tbody>
-          {views.map((v) => (
+          {views.map((v) =>
+            editingId === v.holding.id ? (
+              <HoldingEditRow
+                key={v.holding.id}
+                holding={v.holding}
+                onCancel={() => setEditingId(null)}
+                onSaved={() => {
+                  setEditingId(null)
+                  onSaved()
+                }}
+              />
+            ) : (
             <tr key={v.holding.id} className="border-b border-neutral-800/60 last:border-0">
               <td className="py-2 pr-2 font-medium text-neutral-100">{v.holding.symbol}</td>
               <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">{Number(v.holding.quantity)}</td>
@@ -111,12 +180,13 @@ function HoldingsTable({ views, total, onEdit }: { views: HoldingView[]; total: 
               </td>
               <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{total > 0 ? percentFmt(v.value / total).replace('+', '') : '—'}</td>
               <td className="py-2 text-right">
-                <button onClick={() => onEdit(v.holding)} className="text-xs text-neutral-600 hover:text-neutral-300">
+                <button onClick={() => setEditingId(v.holding.id)} className="text-xs text-neutral-600 hover:text-neutral-300">
                   Edit
                 </button>
               </td>
             </tr>
-          ))}
+            ),
+          )}
         </tbody>
       </table>
     </div>
@@ -266,7 +336,7 @@ export function PortfolioDetailPage() {
         <div className="flex flex-col gap-5 lg:col-span-3">
           <div className={CARD}>
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Holdings</h2>
-            <HoldingsTable views={snap.holdings} total={allocationTotal} onEdit={(h) => editHolding(h, load, setError)} />
+            <HoldingsTable views={snap.holdings} total={allocationTotal} onSaved={load} />
           </div>
           <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} />
           <div className={CARD}>
