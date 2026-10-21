@@ -50,7 +50,7 @@ export function TradeChart({ trade }: { trade: TradeWithDetails }) {
   )
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-medium text-neutral-300">
           {trade.symbol} <span className="font-normal text-neutral-500">underlying</span>
@@ -67,7 +67,7 @@ export function TradeChart({ trade }: { trade: TradeWithDetails }) {
                 key={iv}
                 onClick={() => setCandleInterval(iv)}
                 className={`px-2.5 py-1 transition ${
-                  interval === iv ? 'bg-neutral-700 text-neutral-50' : 'bg-neutral-950 text-neutral-400 hover:bg-neutral-800'
+                  interval === iv ? 'bg-neutral-700 text-neutral-50' : 'bg-(--card-raised) text-neutral-400 hover:text-neutral-200'
                 }`}
               >
                 {iv === '1min' ? '1m' : '5m'}

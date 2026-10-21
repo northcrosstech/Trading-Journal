@@ -8,7 +8,7 @@ type Props = {
 /** Date-range preset bar for Insights. `null` means Reset / all-time. */
 export function DateRangePresetBar({ value, onChange }: Props) {
   return (
-    <div className="flex flex-wrap items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 p-1">
+    <div className="flex flex-wrap items-center gap-1 rounded-xl border border-(--border) bg-(--card) p-1">
       {DATE_RANGE_PRESETS.map((p) => (
         <button
           key={p.value}

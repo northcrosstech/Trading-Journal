@@ -47,7 +47,7 @@ function FillRow({
       <select
         value={row.action}
         onChange={(e) => onChange({ action: e.target.value as FillAction })}
-        className="w-24 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-blue-500"
+        className="w-24 rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-(--accent)"
       >
         {(Object.keys(ACTION_LABEL) as FillAction[]).map((a) => (
           <option key={a} value={a}>
@@ -59,7 +59,7 @@ function FillRow({
         type="datetime-local"
         value={row.time}
         onChange={(e) => onChange({ time: e.target.value })}
-        className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-blue-500"
+        className="flex-1 rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-(--accent)"
       />
       <input
         type="number"
@@ -67,7 +67,7 @@ function FillRow({
         placeholder="Price"
         value={row.price}
         onChange={(e) => onChange({ price: e.target.value })}
-        className="w-24 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-blue-500"
+        className="w-24 rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-(--accent)"
       />
       <input
         type="number"
@@ -76,7 +76,7 @@ function FillRow({
         placeholder="Qty"
         value={row.quantity}
         onChange={(e) => onChange({ quantity: e.target.value })}
-        className="w-16 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-blue-500"
+        className="w-16 rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-(--accent)"
       />
       <button
         type="button"
@@ -308,8 +308,8 @@ export function ManualTradeEntryPage() {
   if (manualAccounts.length === 0) {
     return (
       <div className="mx-auto flex max-w-lg flex-col gap-3">
-        <h1 className="text-lg font-semibold text-neutral-100">{isEdit ? 'Edit Trade' : 'Add Manual Trade'}</h1>
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-6 text-center text-sm text-neutral-400">
+        <h1 className="text-2xl font-semibold tracking-tight text-white">{isEdit ? 'Edit Trade' : 'Add Manual Trade'}</h1>
+        <div className="rounded-2xl border border-(--border) bg-(--card) p-6 text-center text-sm text-neutral-400">
           No manual-entry accounts yet.{' '}
           <Link to="/accounts" className="text-blue-400 hover:underline">
             Create one on the Accounts page
@@ -326,17 +326,17 @@ export function ManualTradeEntryPage() {
         <Link to={isEdit ? `/trades/${tradeId}` : '/trades'} className="text-sm text-neutral-500 hover:text-neutral-300">
           {isEdit ? '← Back to Trade' : '← Trades'}
         </Link>
-        <h1 className="mt-1 text-lg font-semibold text-neutral-100">{isEdit ? 'Edit Trade' : 'Add Manual Trade'}</h1>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">{isEdit ? 'Edit Trade' : 'Add Manual Trade'}</h1>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-2xl border border-(--border) bg-(--card) p-4">
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs text-neutral-500">Account</label>
             <select
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
-              className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+              className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
             >
               {manualAccounts.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -352,7 +352,7 @@ export function ManualTradeEntryPage() {
               onChange={(e) => setSymbol(e.target.value.toUpperCase())}
               placeholder="SPY"
               autoFocus
-              className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+              className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
             />
           </div>
         </div>
@@ -365,7 +365,7 @@ export function ManualTradeEntryPage() {
                 type="button"
                 onClick={() => setSide(s)}
                 className={`px-4 py-1.5 text-sm capitalize transition ${
-                  side === s ? 'bg-neutral-700 text-neutral-50' : 'bg-neutral-950 text-neutral-400 hover:bg-neutral-800'
+                  side === s ? 'bg-neutral-700 text-neutral-50' : 'bg-(--card-raised) text-neutral-400 hover:text-neutral-200'
                 }`}
               >
                 {s}
@@ -385,7 +385,7 @@ export function ManualTradeEntryPage() {
               <select
                 value={optionType}
                 onChange={(e) => setOptionType(e.target.value as 'call' | 'put')}
-                className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
               >
                 <option value="call">Call</option>
                 <option value="put">Put</option>
@@ -398,7 +398,7 @@ export function ManualTradeEntryPage() {
                 step="0.5"
                 value={strike}
                 onChange={(e) => setStrike(e.target.value)}
-                className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
               />
             </div>
             <div>
@@ -407,7 +407,7 @@ export function ManualTradeEntryPage() {
                 type="date"
                 value={expiration}
                 onChange={(e) => setExpiration(e.target.value)}
-                className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
               />
             </div>
           </div>
@@ -433,7 +433,7 @@ export function ManualTradeEntryPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-400">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-(--border) bg-(--card-raised) px-3 py-2 text-xs text-neutral-400">
           <span>
             Avg Entry <span className="font-medium text-neutral-200">{priceFmt(fillSummary.avgEntry)}</span>
           </span>
@@ -464,7 +464,7 @@ export function ManualTradeEntryPage() {
                 feesTouchedRef.current = true
                 setFees(e.target.value)
               }}
-              className="w-32 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+              className="w-32 rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
             />
             {activeAccount !== undefined && activeAccount.per_contract_fee > 0 && feesTouchedRef.current && (
               <button
@@ -492,7 +492,7 @@ export function ManualTradeEntryPage() {
         </button>
 
         {showMore && (
-          <div className="flex flex-col gap-4 border-t border-neutral-800 pt-3">
+          <div className="flex flex-col gap-4 border-t border-(--border) pt-3">
             <div>
               <label className="mb-1.5 block text-xs text-neutral-500">Setup</label>
               <div className="flex flex-wrap items-center gap-1.5">
@@ -523,7 +523,7 @@ export function ManualTradeEntryPage() {
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Anything else worth remembering about this trade…"
                 rows={2}
-                className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-950 p-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+                className="w-full resize-none rounded-lg border border-(--border-strong) bg-(--card-raised) p-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
               />
             </div>
 
@@ -535,7 +535,7 @@ export function ManualTradeEntryPage() {
         <button
           type="submit"
           disabled={submitting || !canSubmit}
-          className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
+          className="rounded-md bg-(--accent) px-3 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-40"
         >
           {submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Save Trade'}
         </button>

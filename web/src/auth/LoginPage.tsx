@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { LineChart } from 'lucide-react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 
@@ -41,9 +42,12 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4">
-      <div className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-8 shadow-xl">
-        <h1 className="mb-1 text-xl font-semibold text-neutral-50">Trading Journal</h1>
+    <div className="flex min-h-screen items-center justify-center bg-(--bg) px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-(--border) bg-(--card) p-8 shadow-2xl">
+        <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-2xl bg-(--accent) text-white shadow-lg">
+          <LineChart size={22} />
+        </div>
+        <h1 className="mb-1 text-2xl font-semibold tracking-tight text-white">Trading Journal</h1>
         <p className="mb-6 text-sm text-neutral-400">
           {mode === 'signin' ? 'Sign in to your journal' : mode === 'signup' ? 'Create your account' : 'Reset your password'}
         </p>
@@ -64,7 +68,7 @@ export function LoginPage() {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-neutral-100 outline-none focus:border-blue-500"
+                className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-neutral-100 outline-none focus:border-(--accent)"
               />
             </label>
             {mode !== 'reset' && (
@@ -77,7 +81,7 @@ export function LoginPage() {
                 autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-neutral-100 outline-none focus:border-blue-500"
+                className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-neutral-100 outline-none focus:border-(--accent)"
               />
             </label>
             )}
@@ -87,7 +91,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="mt-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+              className="mt-2 rounded-md bg-(--accent) px-3 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-50"
             >
               {submitting ? 'Please wait…' : mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Sign up' : 'Send reset link'}
             </button>

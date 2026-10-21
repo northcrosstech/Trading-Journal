@@ -4,7 +4,7 @@ import { upsertDailyPlan } from '../lib/queries'
 import { currency } from '../lib/format'
 
 const inputClass =
-  'w-full rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500'
+  'w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-(--accent)'
 
 function numOrNull(v: string): number | null {
   return v.trim() === '' ? null : Number(v)
@@ -68,7 +68,7 @@ export function PlanCard({
 
   if (!editing && plan) {
     return (
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-medium text-neutral-300">Today's Plan</h2>
           <button onClick={() => setEditing(true)} className="text-xs text-blue-400 hover:underline">
@@ -98,7 +98,7 @@ export function PlanCard({
   }
 
   return (
-    <form onSubmit={handleSave} className="flex flex-col gap-3 rounded-xl border border-blue-900/60 bg-neutral-900 p-4">
+    <form onSubmit={handleSave} className="flex flex-col gap-3 rounded-2xl border border-(--accent)/40 bg-(--card) p-5">
       <div>
         <h2 className="text-sm font-medium text-neutral-200">Plan your day</h2>
         <p className="text-xs text-neutral-500">Two minutes before the open. Only trade what's on this list.</p>
@@ -150,7 +150,7 @@ export function PlanCard({
         <button
           type="submit"
           disabled={saving}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+          className="rounded-md bg-(--accent) px-3 py-1.5 text-xs font-medium text-white transition hover:brightness-110 disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save plan'}
         </button>

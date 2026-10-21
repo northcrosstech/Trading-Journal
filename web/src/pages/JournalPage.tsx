@@ -11,6 +11,12 @@ import { tradeDay, longDayLabel } from '../lib/tradingDay'
 import { currency } from '../lib/format'
 import { PnlCalendarHeatmap } from '../components/PnlCalendarHeatmap'
 import { TradeRow } from '../components/TradeRow'
+import { BookOpen, CheckCircle2, ClipboardCheck } from 'lucide-react'
+import { PageHeader } from '../components/ui/PageHeader'
+import { ButtonLink, Button } from '../components/ui/Button'
+import { Pill } from '../components/ui/Pill'
+import { Card } from '../components/ui/Card'
+import { EmptyState } from '../components/ui/EmptyState'
 
 const PAGE_SIZE = 15
 
@@ -49,46 +55,45 @@ const DayCard = forwardRef<
   return (
     <div
       ref={ref}
-      className={`scroll-mt-6 rounded-xl border bg-neutral-900 ${highlighted ? 'border-blue-700' : 'border-neutral-800'}`}
+      className={`scroll-mt-6 overflow-hidden rounded-2xl border bg-(--card) ${highlighted ? 'border-(--accent) ring-2 ring-(--accent-soft)' : 'border-(--border)'}`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 px-4 py-3">
-        <div>
-          <div className="text-sm font-medium text-neutral-100">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-(--border) px-5 py-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-base font-semibold text-white">
             {longDayLabel(day.date)} {mood && <span title={mood.label}>{mood.emoji}</span>}
           </div>
-          <div className="text-xs text-neutral-500">
-            {wins}W · {losses}L
-            {(planned > 0 || unplanned > 0 || followed > 0) && (
-              <>
-                {' '}· <span className="text-emerald-400">{planned} planned</span> · <span className="text-amber-400">{unplanned} unplanned</span>
-                {followed > 0 && <> · <span className="text-sky-400">{followed} followed</span></>}
-              </>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <Pill tone="green">{wins}W</Pill>
+            <Pill tone="red">{losses}L</Pill>
+            {planned > 0 && <Pill tone="green">{planned} planned</Pill>}
+            {unplanned > 0 && <Pill tone="amber">{unplanned} unplanned</Pill>}
+            {followed > 0 && <Pill tone="sky">{followed} followed</Pill>}
+            {doneRight > 0 && <Pill tone="teal">✓ {doneRight} done right</Pill>}
+            {mistakes > 0 && (
+              <Pill tone="red">
+                ✗ {mistakes} mistake{mistakes === 1 ? '' : 's'}
+              </Pill>
             )}
-            {doneRight > 0 && <span className="text-emerald-400"> · {doneRight} done right</span>}
-            {mistakes > 0 && <span className="text-red-400"> · {mistakes} mistake{mistakes === 1 ? '' : 's'}</span>}
           </div>
         </div>
         <div className="flex items-center gap-3">
           {toReview > 0 ? (
-            <Link
-              to={`/review?date=${day.date}`}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500"
-            >
-              Review {toReview} →
-            </Link>
+            <ButtonLink to={`/review?date=${day.date}`} variant="primary" size="sm" icon={<ClipboardCheck size={14} />}>
+              Review {toReview}
+            </ButtonLink>
           ) : (
             closed.length > 0 && (
-              <Link to={`/review?date=${day.date}`} className="text-xs text-neutral-500 hover:text-neutral-300">
-                Reviewed ✓
+              <Link to={`/review?date=${day.date}`} className="inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-200">
+                <CheckCircle2 size={13} className="text-emerald-400" /> Reviewed
               </Link>
             )
           )}
-          <span className={`text-lg font-semibold tabular-nums ${pnlClass(net)}`}>{currency(net)}</span>
+          <span className={`text-xl font-semibold tracking-tight tabular-nums ${pnlClass(net)}`}>{currency(net)}</span>
         </div>
       </div>
 
       {(plan?.focus || plan?.plan_notes) && (
-        <div className="border-b border-neutral-800 px-4 py-2 text-xs text-neutral-400">
+        <div className="border-b border-(--border) bg-violet-500/5 px-5 py-2.5 text-sm text-neutral-300">
           {plan.focus && (
             <span>
               <span className="font-medium text-violet-400">Focus:</span> {plan.focus}
@@ -98,7 +103,7 @@ const DayCard = forwardRef<
         </div>
       )}
 
-      <div className="border-b border-neutral-800 px-4 py-2.5">
+      <div className="border-b border-(--border) px-5 py-3">
         {editing ? (
           <div className="flex flex-col gap-2">
             <textarea
@@ -106,7 +111,7 @@ const DayCard = forwardRef<
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               rows={3}
-              className="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-2.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+              className="w-full resize-y rounded-lg border border-(--border-strong) bg-(--card-raised) p-2.5 text-sm text-neutral-100 outline-none focus:border-(--accent)"
             />
             <div className="flex justify-end gap-2">
               <button onClick={() => setEditing(false)} className="text-xs text-neutral-500 hover:text-neutral-300">
@@ -117,7 +122,7 @@ const DayCard = forwardRef<
                   onSaveNote(day.date, { notes: draft.trim() || null })
                   setEditing(false)
                 }}
-                className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-500"
+                className="rounded-md bg-(--accent) px-2.5 py-1 text-xs font-medium text-white hover:brightness-110"
               >
                 Save
               </button>
@@ -146,7 +151,7 @@ const DayCard = forwardRef<
         )}
       </div>
 
-      <div className="divide-y divide-neutral-800/60">
+      <div className="divide-y divide-(--border)">
         {day.trades.map((t) => (
           <TradeRow key={t.id} trade={t} usualSize={usualSize} />
         ))}
@@ -237,8 +242,8 @@ export function JournalPage() {
   const targetsByDate = computeDailyTargetStats(trades, settings)
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-5">
-      <h1 className="text-lg font-semibold text-neutral-100">Journal</h1>
+    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+      <PageHeader title="Journal" subtitle="Your trading calendar, and one card per day with its trades, notes and review." />
 
       <PnlCalendarHeatmap
         daysByDate={calendarDays}
@@ -249,11 +254,13 @@ export function JournalPage() {
       />
 
       {days.length === 0 ? (
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-8 text-center text-neutral-400">
-          No trading days yet. Once trades sync in, each day shows up here.
-        </div>
+        <Card>
+          <EmptyState icon={<BookOpen size={20} />} title="No trading days yet">
+            Once trades sync in, each day shows up here.
+          </EmptyState>
+        </Card>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-4">
           {days.slice(0, shown).map((day) => (
             <DayCard
               key={day.date}
@@ -270,12 +277,9 @@ export function JournalPage() {
             />
           ))}
           {shown < days.length && (
-            <button
-              onClick={() => setShown((n) => n + PAGE_SIZE)}
-              className="rounded-lg border border-neutral-800 py-2 text-sm text-neutral-400 transition hover:bg-neutral-900"
-            >
+            <Button onClick={() => setShown((n) => n + PAGE_SIZE)} className="w-full">
               Show older days
-            </button>
+            </Button>
           )}
         </div>
       )}

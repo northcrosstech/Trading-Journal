@@ -41,16 +41,16 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-3 flex flex-wrap items-center gap-2 border-t border-neutral-800 pt-3">
+    <form onSubmit={handleSubmit} className="mt-3 flex flex-wrap items-center gap-2 border-t border-(--border) pt-3">
       <input
         value={label}
         onChange={(e) => setLabel(e.target.value)}
-        className="w-40 rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+        className="w-40 rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-(--accent)"
       />
       <select
         value={accountType}
         onChange={(e) => setAccountType(e.target.value as Account['account_type'])}
-        className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+        className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-(--accent)"
       >
         <option value="live">Live</option>
         <option value="paper">Paper</option>
@@ -59,7 +59,7 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
         value={forcesManualSync(account.broker) ? 'manual' : syncMode}
         onChange={(e) => setSyncMode(e.target.value as Account['sync_mode'])}
         disabled={forcesManualSync(account.broker)}
-        className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500 disabled:opacity-40"
+        className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-(--accent) disabled:opacity-40"
       >
         <option value="auto">Auto-sync</option>
         <option value="manual">Manual entry</option>
@@ -68,7 +68,7 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
         value={defaultAssetType}
         onChange={(e) => setDefaultAssetType(e.target.value as Account['default_asset_type'])}
         title="Default asset type for new manual trades on this account"
-        className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+        className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-(--accent)"
       >
         <option value="stock">Default: Stock</option>
         <option value="option">Default: Option</option>
@@ -82,10 +82,10 @@ function EditAccountForm({ account, onSave, onCancel }: { account: Account; onSa
           value={perContractFee}
           onChange={(e) => setPerContractFee(e.target.value)}
           title="Auto-fills the fees field on new manual trades: this rate x total quantity across all fills. 0 = no auto-calc."
-          className="w-20 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className="w-20 rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-(--accent)"
         />
       </label>
-      <button type="submit" className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500">
+      <button type="submit" className="rounded-md bg-(--accent) px-3 py-1.5 text-xs font-medium text-white transition hover:brightness-110">
         Save
       </button>
       <button type="button" onClick={onCancel} className="text-xs text-neutral-500 hover:text-neutral-300">
@@ -146,19 +146,19 @@ export function AccountsPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       <div>
-        <h1 className="text-lg font-semibold text-neutral-100">Accounts</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-white">Accounts</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Every broker/paper account your trades can be attributed to. The account switcher (next up) will let you
           filter every view by one of these, or see them combined.
         </p>
       </div>
 
-      <form onSubmit={handleCreate} className="flex flex-col gap-2 rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+      <form onSubmit={handleCreate} className="flex flex-col gap-2 rounded-2xl border border-(--border) bg-(--card) p-3">
         <div className="flex flex-wrap gap-2">
           <select
             value={broker}
             onChange={(e) => setBroker(e.target.value as Account['broker'])}
-            className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
           >
             <option value="manual">Manual</option>
             <option value="webull">Webull</option>
@@ -169,12 +169,12 @@ export function AccountsPage() {
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Label, e.g. ThinkorSwim Paper"
-            className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            className="flex-1 rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
           />
           <select
             value={accountType}
             onChange={(e) => setAccountType(e.target.value as Account['account_type'])}
-            className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
           >
             <option value="live">Live</option>
             <option value="paper">Paper</option>
@@ -183,7 +183,7 @@ export function AccountsPage() {
             value={forcesManualSync(broker) ? 'manual' : syncMode}
             onChange={(e) => setSyncMode(e.target.value as Account['sync_mode'])}
             disabled={forcesManualSync(broker)}
-            className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500 disabled:opacity-40"
+            className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent) disabled:opacity-40"
           >
             <option value="auto">Auto-sync</option>
             <option value="manual">Manual entry</option>
@@ -192,7 +192,7 @@ export function AccountsPage() {
             value={defaultAssetType}
             onChange={(e) => setDefaultAssetType(e.target.value as Account['default_asset_type'])}
             title="Default asset type for new manual trades on this account"
-            className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
           >
             <option value="stock">Default: Stock</option>
             <option value="option">Default: Option</option>
@@ -206,13 +206,13 @@ export function AccountsPage() {
               value={perContractFee}
               onChange={(e) => setPerContractFee(e.target.value)}
               title="Auto-fills the fees field on new manual trades: this rate x total quantity across all fills. 0 = no auto-calc."
-              className="w-20 rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+              className="w-20 rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
             />
           </label>
           <button
             type="submit"
             disabled={!label.trim()}
-            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
+            className="rounded-md bg-(--accent) px-3 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-40"
           >
             Add
           </button>
@@ -235,12 +235,12 @@ export function AccountsPage() {
 
       <div className="flex flex-col gap-2">
         {visible.length === 0 && (
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-6 text-center text-sm text-neutral-500">
+          <div className="rounded-2xl border border-(--border) bg-(--card) p-6 text-center text-sm text-neutral-500">
             No accounts yet -- add one above.
           </div>
         )}
         {visible.map((a) => (
-          <div key={a.id} className={`rounded-xl border border-neutral-800 bg-neutral-900 p-4 ${a.archived ? 'opacity-50' : ''}`}>
+          <div key={a.id} className={`rounded-2xl border border-(--border) bg-(--card) p-4 ${a.archived ? 'opacity-50' : ''}`}>
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">

@@ -52,7 +52,7 @@ function PriceInput({
         onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
         }}
-        className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm tabular-nums text-neutral-100 outline-none focus:border-blue-500"
+        className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1.5 text-sm tabular-nums text-neutral-100 outline-none focus:border-(--accent)"
       />
     </label>
   )
@@ -104,7 +104,7 @@ function WhatIf({ trade, journal }: { trade: TradeWithDetails; journal: TradeJou
             Option premium. Alt exit = where the whole position could have closed instead (held to target, honored the stop…).
           </p>
           {(o.risk !== null || o.kind) && (
-            <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-lg bg-neutral-950 px-3 py-2 text-xs text-neutral-400">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-lg bg-(--card-raised) px-3 py-2 text-xs text-neutral-400">
               {o.risk !== null && (
                 <>
                   <span>
@@ -299,7 +299,7 @@ export function TradeJournalPanel({
           onChange={(e) => journal.setNote(e.target.value)}
           placeholder="What did you see? What would you do differently?"
           rows={4}
-          className="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className="w-full resize-y rounded-lg border border-(--border-strong) bg-(--card-raised) p-3 text-sm text-neutral-100 outline-none focus:border-(--accent)"
         />
       </section>
 
@@ -307,7 +307,7 @@ export function TradeJournalPanel({
         <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-500">Screenshot</h3>
         {journal.screenshotUrl ? (
           <div className="relative">
-            <img src={journal.screenshotUrl} alt="Trade screenshot" className="w-full rounded-lg border border-neutral-800" />
+            <img src={journal.screenshotUrl} alt="Trade screenshot" className="w-full rounded-lg border border-(--border)" />
             <button
               onClick={journal.removeScreenshot}
               className="absolute right-2 top-2 rounded-md bg-neutral-950/80 px-2 py-1 text-xs text-neutral-300 hover:text-red-400"

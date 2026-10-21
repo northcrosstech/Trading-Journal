@@ -24,6 +24,9 @@ import { currency } from '../lib/format'
 import { DateRangePresetBar } from '../components/DateRangePresetBar'
 import { EquityCurveChart } from '../components/EquityCurveChart'
 import { MagnitudeBar } from '../components/MagnitudeBar'
+import { Lightbulb, TrendingDown, TrendingUp } from 'lucide-react'
+import { PageHeader } from '../components/ui/PageHeader'
+import { StatCard } from '../components/ui/StatCard'
 
 function pnlClass(v: number | null) {
   if (v === null) return 'text-neutral-100'
@@ -33,14 +36,8 @@ function pnlClass(v: number | null) {
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
 const ratio = (v: number | null) => (v === null ? '—' : v === Infinity ? '∞' : v.toFixed(2))
 
-function Kpi({ label, value, sub, tone = null }: { label: string; value: string; sub?: string; tone?: number | null }) {
-  return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-3">
-      <div className="text-[11px] uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className={`mt-1 text-xl font-semibold tabular-nums ${pnlClass(tone)}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-neutral-500">{sub}</div>}
-    </div>
-  )
+function Kpi({ label, value, sub, tone = null, accent = false }: { label: string; value: string; sub?: string; tone?: number | null; accent?: boolean }) {
+  return <StatCard label={label} value={value} sub={sub} tone={tone} accent={accent} />
 }
 
 function GroupTable({ title, hint, rows, footer }: { title: string; hint?: string; rows: GroupRow[]; footer?: GroupRow | null }) {
@@ -48,9 +45,9 @@ function GroupTable({ title, hint, rows, footer }: { title: string; hint?: strin
   const maxAbs = Math.max(1, ...all.map((r) => Math.abs(r.netPnl)))
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
       <div className="mb-2">
-        <h2 className="text-sm font-medium text-neutral-200">{title}</h2>
+        <h2 className="text-sm font-semibold text-neutral-100">{title}</h2>
         {hint && <p className="text-xs text-neutral-500">{hint}</p>}
       </div>
       {rows.length === 0 ? (
@@ -69,7 +66,7 @@ function GroupTable({ title, hint, rows, footer }: { title: string; hint?: strin
           </thead>
           <tbody>
             {all.map((r) => (
-              <tr key={r.key} className={`border-t border-neutral-800/60 ${r === footer ? 'text-neutral-400' : ''}`}>
+              <tr key={r.key} className={`border-t border-(--border) ${r === footer ? 'text-neutral-400' : ''}`}>
                 <td className="py-1.5 pr-2 text-neutral-200">{r.label}</td>
                 <td className="py-1.5 text-right tabular-nums text-neutral-400">{r.count}</td>
                 <td className="py-1.5 text-right tabular-nums text-neutral-400">{pct(r.winRate)}</td>
@@ -133,19 +130,29 @@ function Takeaways({
 
   if (lines.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-neutral-800 px-4 py-3 text-sm text-neutral-500">
+      <div className="flex items-center gap-3 rounded-2xl border border-dashed border-(--border-strong) px-5 py-4 text-sm text-neutral-400">
+        <Lightbulb size={18} className="shrink-0 text-(--accent-text)" />
+        <span>
         Review your trades (whose idea? done right? mistakes?) and this is where the lessons show up.{' '}
-        <Link to="/journal" className="text-blue-400 hover:underline">
+        <Link to="/journal" className="text-(--accent-text) hover:underline">
           Go to Journal
         </Link>
+        </span>
       </div>
     )
   }
   return (
-    <div className="flex flex-col gap-1.5 rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-3">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {lines.map((l) => (
-        <div key={l.text} className="flex gap-2 text-sm">
-          <span className={l.tone === 'bad' ? 'text-red-400' : 'text-emerald-400'}>{l.tone === 'bad' ? '▼' : '▲'}</span>
+        <div
+          key={l.text}
+          className={`flex items-start gap-3 rounded-2xl border px-4 py-3.5 text-sm ${
+            l.tone === 'bad' ? 'border-red-500/20 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5'
+          }`}
+        >
+          <span className={`mt-0.5 shrink-0 rounded-lg p-1.5 ${l.tone === 'bad' ? 'bg-red-500/12 text-red-300' : 'bg-emerald-500/12 text-emerald-300'}`}>
+            {l.tone === 'bad' ? <TrendingDown size={15} /> : <TrendingUp size={15} />}
+          </span>
           <span className="text-neutral-200">{l.text}</span>
         </div>
       ))}
@@ -163,9 +170,9 @@ function ExecutionCard({ e }: { e: ExecutionSummary }) {
     </div>
   )
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
       <div className="mb-3">
-        <h2 className="text-sm font-medium text-neutral-200">Execution</h2>
+        <h2 className="text-sm font-semibold text-neutral-100">Execution</h2>
         <p className="text-xs text-neutral-500">From the stop / target / alt-exit prices you log in review. Cost of discipline is the price of good process, not a mistake.</p>
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
@@ -222,14 +229,11 @@ export function InsightsPage() {
   if (trades === null) return <div className="text-neutral-500">Loading insights…</div>
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-neutral-100">Insights</h1>
-        <DateRangePresetBar value={preset} onChange={setPreset} />
-      </div>
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <PageHeader title="Insights" subtitle="What’s working, what’s costing you, and where your edge is." actions={<DateRangePresetBar value={preset} onChange={setPreset} />} />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Kpi label="Net P&L" value={currency(s.netPnl)} sub={`${s.count} trades`} tone={s.netPnl} />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <Kpi label="Net P&L" value={currency(s.netPnl)} sub={`${s.count} trades`} tone={s.netPnl} accent />
         <Kpi label="Win rate" value={pct(s.winRate)} />
         <Kpi label="Profit factor" value={ratio(s.profitFactor)} sub="gross win ÷ gross loss" />
         <Kpi
@@ -245,8 +249,8 @@ export function InsightsPage() {
 
       <ExecutionCard e={execution} />
 
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-        <h2 className="mb-2 text-sm font-medium text-neutral-200">Equity curve</h2>
+      <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
+        <h2 className="mb-3 text-sm font-semibold text-neutral-100">Equity curve</h2>
         <EquityCurveChart data={equity} />
       </div>
 

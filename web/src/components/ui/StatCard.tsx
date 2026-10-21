@@ -42,9 +42,9 @@ export function StatCard({
         {icon && <span className="text-neutral-500">{icon}</span>}
         {label}
       </div>
-      <div className={`mt-1.5 flex items-center gap-1.5 text-2xl font-semibold tracking-tight tabular-nums ${valueColor}`}>
-        {tone != null && tone !== 0 && (tone > 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />)}
-        <span className="truncate">{value}</span>
+      <div className={`mt-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight tabular-nums sm:text-2xl ${valueColor}`}>
+        {tone != null && tone !== 0 && (tone > 0 ? <TrendingUp size={18} className="shrink-0" /> : <TrendingDown size={18} className="shrink-0" />)}
+        <span className="min-w-0 break-words">{value}</span>
       </div>
       {(chip || sub) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-neutral-500">

@@ -18,7 +18,7 @@ function NetWorthTooltip({ active, payload }: { active?: boolean; payload?: { pa
   if (!active || !payload?.length) return null
   const p = payload[0].payload
   return (
-    <div className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-xs shadow-lg">
       <div className="text-neutral-400">{p.label}</div>
       <div className="mt-1 font-medium text-neutral-100">
         Net worth: <span className="tabular-nums">{currency(p.net)}</span>
@@ -57,7 +57,7 @@ function ValueTooltip({ active, payload }: { active?: boolean; payload?: { paylo
   if (!active || !payload?.length) return null
   const p = payload[0].payload
   return (
-    <div className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-xs shadow-lg">
       <div className="text-neutral-400">{new Date(`${p.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
       <div className="mt-1 font-medium tabular-nums text-neutral-100">{currency(p.total)}</div>
     </div>
@@ -105,7 +105,7 @@ function SliceTooltip({ active, payload }: { active?: boolean; payload?: { paylo
   if (!active || !payload?.length) return null
   const s = payload[0].payload
   return (
-    <div className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-xs shadow-lg">
       <div className="font-medium text-neutral-100">
         {s.label} · {pctOf(s.weight)}
       </div>

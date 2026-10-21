@@ -23,6 +23,10 @@ import { tradeDay, longDayLabel, nextTradingDay, watchlistSymbols } from '../lib
 import { currency, priceFmt, holdTimeFmt, optionLabel, dteLabel, timeOnlyFmt } from '../lib/format'
 import { TradeChart } from '../components/TradeChart'
 import { TradeJournalPanel } from '../components/TradeJournalPanel'
+import { ChevronLeft, ClipboardCheck } from 'lucide-react'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Card } from '../components/ui/Card'
+import { EmptyState } from '../components/ui/EmptyState'
 
 /** How many trades carry each tag, most common first -- whatever labels were used,
  * so tags since removed from the checklist still count. */
@@ -82,7 +86,7 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-4">
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+      <div className="rounded-2xl border border-(--border) bg-(--card) p-5">
         <div className="text-xs uppercase tracking-wide text-neutral-500">{longDayLabel(date)} — reviewed</div>
         <div className={`mt-1 text-3xl font-semibold tabular-nums ${pnlClass(net)}`}>{currency(net)}</div>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-neutral-400">
@@ -116,7 +120,7 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
         )}
       </div>
 
-      <div className="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+      <div className="flex flex-col gap-3 rounded-2xl border border-(--border) bg-(--card) p-5">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-neutral-300">How did today go?</span>
           <textarea
@@ -124,7 +128,7 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
             onChange={(e) => setNote(e.target.value)}
             rows={4}
             placeholder="What did you do well? What pattern do you want to stop?"
-            className="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            className="w-full resize-y rounded-lg border border-(--border-strong) bg-(--card-raised) p-3 text-sm text-neutral-100 outline-none focus:border-(--accent)"
           />
         </label>
         <div className="flex gap-1.5">
@@ -147,14 +151,14 @@ function WrapUp({ date, trades, userId }: { date: string; trades: TradeWithDetai
             value={focus}
             onChange={(e) => setFocus(e.target.value)}
             placeholder="e.g. No trades outside my watchlist"
-            className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
           />
           <span className="text-xs text-neutral-600">Shows on {longDayLabel(tomorrow)}'s plan.</span>
         </label>
         <button
           onClick={handleFinish}
           disabled={saving}
-          className="mt-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+          className="mt-1 rounded-lg bg-(--accent) py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Finish review'}
         </button>
@@ -282,34 +286,35 @@ export function ReviewPage() {
   if (dayTrades === null || !user) return <div className="text-neutral-500">Loading review…</div>
 
   const header = (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <Link to={`/journal?date=${date}`} className="text-sm text-neutral-500 hover:text-neutral-300">
-          ← Journal
-        </Link>
-        <h1 className="text-lg font-semibold text-neutral-100">Review · {longDayLabel(date)}</h1>
-      </div>
-      <label className="flex items-center gap-1.5 text-xs text-neutral-500">
-        <input type="checkbox" checked={includeReviewed} onChange={(e) => setIncludeReviewed(e.target.checked)} />
-        Include already-reviewed trades
-      </label>
-    </div>
+    <PageHeader
+      back={{ to: `/journal?date=${date}`, label: 'Journal' }}
+      title={`Review · ${longDayLabel(date)}`}
+      subtitle="One trade at a time: whose idea, the checklist, setup — then Next."
+      actions={
+        <label className="flex items-center gap-2 text-sm text-neutral-400">
+          <input type="checkbox" checked={includeReviewed} onChange={(e) => setIncludeReviewed(e.target.checked)} className="h-4 w-4 accent-(--accent)" />
+          Include already-reviewed
+        </label>
+      }
+    />
   )
 
   if (dayTrades.length === 0) {
     return (
-      <div className="mx-auto flex max-w-5xl flex-col gap-4">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
         {header}
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-8 text-center text-sm text-neutral-500">
-          No closed trades on this day.
-        </div>
+        <Card>
+          <EmptyState icon={<ClipboardCheck size={20} />} title="Nothing to review">
+            No closed trades on this day.
+          </EmptyState>
+        </Card>
       </div>
     )
   }
 
   if (!current) {
     return (
-      <div className="mx-auto flex max-w-5xl flex-col gap-4">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
         {header}
         <WrapUp date={date} trades={dayTrades} userId={user.id} />
       </div>
@@ -318,7 +323,7 @@ export function ReviewPage() {
 
   const net = current.realized_pnl_net ?? 0
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4">
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
       {header}
 
       <div className="flex items-center gap-3">
@@ -327,21 +332,21 @@ export function ReviewPage() {
             <button
               key={id}
               onClick={() => setIndex(i)}
-              className={`h-1.5 flex-1 rounded-full transition ${i === index ? 'bg-blue-500' : i < index ? 'bg-neutral-500' : 'bg-neutral-800'}`}
+              className={`h-2 flex-1 rounded-full transition ${i === index ? 'bg-(--accent)' : i < index ? 'bg-(--accent)/40' : 'bg-neutral-800 hover:bg-neutral-700'}`}
               aria-label={`Trade ${i + 1}`}
             />
           ))}
         </div>
-        <span className="text-xs tabular-nums text-neutral-500">
-          {index + 1} / {queueIds.length}
+        <span className="text-sm font-medium tabular-nums text-neutral-300">
+          {index + 1} <span className="text-neutral-600">of</span> {queueIds.length}
         </span>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
         <div className="flex flex-col gap-4 lg:col-span-3">
-          <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-(--border) bg-(--card) p-5">
             <div>
-              <Link to={`/trades/${current.id}`} className="text-lg font-semibold text-neutral-100 hover:underline">
+              <Link to={`/trades/${current.id}`} className="text-2xl font-semibold tracking-tight text-white hover:underline">
                 {current.symbol}{' '}
                 {current.options_detail && (
                   <span className="text-base font-normal text-neutral-400">
@@ -355,34 +360,35 @@ export function ReviewPage() {
                 {priceFmt(current.avg_exit)} · held {holdTimeFmt(current.hold_seconds)}
               </div>
             </div>
-            <div className={`text-2xl font-semibold tabular-nums ${pnlClass(net)}`}>{currency(net)}</div>
+            <div className={`text-3xl font-semibold tracking-tight tabular-nums ${pnlClass(net)}`}>{currency(net)}</div>
           </div>
           <TradeChart trade={current} />
         </div>
 
         <div className="flex flex-col gap-4 lg:col-span-2">
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <div className="rounded-2xl border border-(--border) bg-(--card) p-5">
             <TradeJournalPanel trade={current} journal={journal} setups={setups} shortcuts highlightMissing={warned} />
           </div>
           {warned && (
-            <div className="rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-200">
               Still to answer: {missing.join(', ')}. Press Next again to skip — it stays “to review”.
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="sticky bottom-4 z-10 flex gap-2 rounded-2xl border border-(--border) bg-(--card)/95 p-2 shadow-2xl backdrop-blur">
             <button
               onClick={back}
               disabled={index === 0}
-              className="rounded-lg border border-neutral-700 px-4 py-2 text-sm text-neutral-300 transition hover:bg-neutral-800 disabled:opacity-30"
+              aria-label="Previous trade"
+              className="inline-flex h-11 items-center justify-center rounded-xl border border-(--border-strong) px-4 text-neutral-300 transition hover:bg-(--card-raised) disabled:opacity-30"
             >
-              ←
+              <ChevronLeft size={18} />
             </button>
             <button
               onClick={next}
-              className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
+              className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-(--accent) text-sm font-semibold text-white transition hover:brightness-110"
             >
               {index + 1 === queueIds.length ? 'Done — wrap up the day' : 'Next trade'}
-              <kbd className="ml-2 rounded border border-blue-400/50 px-1 text-[10px] text-blue-100">N</kbd>
+              <kbd className="rounded border border-white/30 px-1.5 text-[10px] text-white/80">N</kbd>
             </button>
           </div>
         </div>

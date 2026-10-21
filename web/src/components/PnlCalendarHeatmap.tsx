@@ -81,7 +81,7 @@ function NoteIcon({ hasNote, onClick }: { hasNote: boolean; onClick: (e: React.M
       title={hasNote ? 'View/edit note' : 'Add note'}
       className={`absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded transition ${
         hasNote
-          ? 'text-blue-400 hover:bg-blue-500/20'
+          ? 'text-blue-400 hover:brightness-110/20'
           : 'text-neutral-700 opacity-0 group-hover:opacity-100 hover:bg-neutral-700 hover:text-neutral-300'
       }`}
     >
@@ -166,7 +166,7 @@ function MonthView({
           <select
             value={cursor.month}
             onChange={(e) => setCursor((c) => ({ ...c, month: Number(e.target.value) }))}
-            className="rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-neutral-200 outline-none focus:border-blue-500"
+            className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1 text-sm text-neutral-200 outline-none focus:border-(--accent)"
           >
             {MONTH_LABELS.map((label, i) => (
               <option key={label} value={i}>{label}</option>
@@ -175,7 +175,7 @@ function MonthView({
           <select
             value={cursor.year}
             onChange={(e) => setCursor((c) => ({ ...c, year: Number(e.target.value) }))}
-            className="rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-neutral-200 outline-none focus:border-blue-500"
+            className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1 text-sm text-neutral-200 outline-none focus:border-(--accent)"
           >
             {yearOptions.map((y) => (
               <option key={y} value={y}>{y}</option>
@@ -344,7 +344,7 @@ function YearView({
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {months.map(({ month, cells, total }) => (
-          <div key={month} className="rounded-lg border border-neutral-800/70 bg-neutral-950/40 p-2">
+          <div key={month} className="rounded-xl border border-(--border) bg-(--card-raised)/50 p-2">
             <div className="mb-1.5 flex items-center justify-between px-0.5">
               <span className="text-xs font-medium text-neutral-400">{MONTH_LABELS_SHORT[month]}</span>
               {total !== 0 && (
@@ -404,7 +404,7 @@ export function PnlCalendarHeatmap({ daysByDate, journalByDate, targetsByDate, p
   const plannedSet = plannedDates ?? new Set<string>()
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
       <div className="mb-3 flex justify-end">
         <div className="inline-flex rounded-md border border-neutral-700 p-0.5 text-xs">
           <button

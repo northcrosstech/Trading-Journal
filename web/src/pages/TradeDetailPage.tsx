@@ -14,6 +14,9 @@ import type { Trade, TradeWithDetails, Playbook } from '../lib/database.types'
 import { useTradeJournal } from '../lib/useTradeJournal'
 import { TradeChart } from '../components/TradeChart'
 import { TradeJournalPanel } from '../components/TradeJournalPanel'
+import { ChevronLeft, Pencil, Trash2 } from 'lucide-react'
+import { Pill } from '../components/ui/Pill'
+import { Button } from '../components/ui/Button'
 import { currency, holdTimeFmt, optionLabel, dateFmt, dateTimeFmt, timeOnlyFmt, priceFmt, percentFmt, dteLabel } from '../lib/format'
 import { returnOnCapitalPct, entrySizeUsd, exitSizeUsd, computeCostBasisAnalysis } from '../lib/metrics'
 
@@ -64,9 +67,9 @@ function TradeNavPanel({ currentTradeId }: { currentTradeId: string }) {
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         placeholder="Filter by symbol…"
-        className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-xs text-neutral-100 outline-none focus:border-blue-500"
+        className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-1.5 text-xs text-neutral-100 outline-none focus:border-(--accent)"
       />
-      <div className="sticky top-6 flex max-h-[calc(100vh-8rem)] flex-col gap-0.5 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 p-1.5">
+      <div className="sticky top-6 flex max-h-[calc(100vh-8rem)] flex-col gap-0.5 overflow-y-auto rounded-2xl border border-(--border) bg-(--card) p-1.5">
         {navTrades === null && <div className="p-3 text-xs text-neutral-500">Loading…</div>}
         {navTrades !== null && visible.length === 0 && <div className="p-3 text-xs text-neutral-500">No trades match.</div>}
         {visible.map((t) => {
@@ -188,42 +191,36 @@ export function TradeDetailPage() {
   return (
     <div className="flex gap-5">
       <TradeNavPanel currentTradeId={trade.id} />
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
+      <div className="flex min-w-0 flex-1 flex-col gap-6">
       <div>
-        <Link to="/trades" className="text-sm text-neutral-500 hover:text-neutral-300">
-          ← Trades
+        <Link to="/trades" className="mb-1 inline-flex items-center gap-0.5 text-xs text-neutral-500 transition hover:text-neutral-200">
+          <ChevronLeft size={14} />
+          Trades
         </Link>
-        <div className="mt-1 flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-neutral-100">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight text-white">
             {trade.symbol} {optionLabel(trade.options_detail?.strike, trade.options_detail?.option_type)}
           </h1>
           {trade.options_detail && (
-            <span className="text-sm text-neutral-500">{dteLabel(trade.first_in_at, trade.options_detail.expiration)}</span>
+            <span className="text-sm text-neutral-400">{dteLabel(trade.first_in_at, trade.options_detail.expiration)}</span>
           )}
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-              trade.status === 'OPEN' ? 'bg-blue-950 text-blue-300' : 'bg-neutral-800 text-neutral-300'
-            }`}
-          >
-            {trade.status}
-          </span>
+          <Pill tone={trade.status === 'OPEN' ? 'blue' : 'neutral'}>{trade.status === 'OPEN' ? 'Open' : 'Closed'}</Pill>
           {trade.trade_key === null && !confirmingDelete && (
-            <>
-              <Link to={`/trades/${trade.id}/edit`} className="text-xs text-blue-400 hover:underline">
-                Edit
-              </Link>
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(true)}
-                className="text-xs text-neutral-500 hover:text-red-400 hover:underline"
+            <span className="ml-auto flex gap-1">
+              <Link
+                to={`/trades/${trade.id}/edit`}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-neutral-300 transition hover:bg-(--card-raised) hover:text-white"
               >
+                <Pencil size={13} /> Edit
+              </Link>
+              <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => setConfirmingDelete(true)} className="hover:text-red-300">
                 Delete
-              </button>
-            </>
+              </Button>
+            </span>
           )}
           {trade.trade_key === null && confirmingDelete && (
-            <span className="flex items-center gap-2 text-xs">
-              <span className="text-red-300">Delete this trade permanently?</span>
+            <span className="ml-auto flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs">
+              <span className="text-red-200">Delete this trade permanently?</span>
               <button type="button" onClick={handleDelete} disabled={deleting} className="text-red-400 hover:underline disabled:opacity-50">
                 {deleting ? 'Deleting…' : 'Confirm'}
               </button>
@@ -272,7 +269,7 @@ export function TradeDetailPage() {
       </div>
 
       {/* stats row */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat
           label="Avg Entry"
           value={priceFmt(trade.avg_entry)}
@@ -309,12 +306,12 @@ export function TradeDetailPage() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
         {/* executions */}
         <div className="lg:col-span-3">
-          <h2 className="mb-2 text-sm font-medium text-neutral-300">Executions</h2>
-          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
+          <h2 className="mb-3 text-sm font-semibold text-neutral-100">Executions</h2>
+          <div className="overflow-hidden rounded-2xl border border-(--border) bg-(--card)">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500">
-                  <th className="px-4 py-2">Time (CT)</th>
+                <tr className="border-b border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                  <th className="px-4 py-2.5">Time (CT)</th>
                   <th className="px-4 py-2">Action</th>
                   <th className="px-4 py-2">Side</th>
                   <th className="px-4 py-2 text-right">Qty</th>
@@ -328,7 +325,7 @@ export function TradeDetailPage() {
                 {sortedExecutions.map((e) => {
                   const trim = costBasis.trimResults.get(e.id)
                   return (
-                    <tr key={e.id} className="border-b border-neutral-800/60 last:border-0">
+                    <tr key={e.id} className="border-b border-(--border) last:border-0">
                       <td className="px-4 py-2 text-neutral-400" title={dateTimeFmt(e.filled_at)}>
                         {timeOnlyFmt(e.filled_at)}
                       </td>
@@ -355,8 +352,8 @@ export function TradeDetailPage() {
         </div>
 
         <div className="lg:col-span-2">
-          <h2 className="mb-2 text-sm font-medium text-neutral-300">Review</h2>
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <h2 className="mb-3 text-sm font-semibold text-neutral-100">Review</h2>
+          <div className="rounded-2xl border border-(--border) bg-(--card) p-5">
             <TradeJournalPanel trade={trade} journal={journal} setups={setups} />
           </div>
         </div>
@@ -399,10 +396,10 @@ function Stat({
 }) {
   const toneClass = tone === 'good' ? 'text-(--status-good)' : tone === 'critical' ? 'text-(--status-critical)' : 'text-neutral-100'
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
-      <div className="text-[11px] uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className={`mt-1 text-base font-semibold tabular-nums ${toneClass}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-neutral-600">{sub}</div>}
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
+      <div className="text-xs font-medium text-neutral-400">{label}</div>
+      <div className={`mt-1.5 text-xl font-semibold tracking-tight tabular-nums ${toneClass}`}>{value}</div>
+      {sub && <div className="mt-1 text-xs text-neutral-500">{sub}</div>}
     </div>
   )
 }

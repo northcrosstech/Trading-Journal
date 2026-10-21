@@ -67,7 +67,7 @@ export function DayNoteModal({ date, journal, onSave, onClose, onOpenFullDay }: 
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-xl border border-neutral-700 bg-neutral-900 p-4 shadow-2xl"
+        className="w-full max-w-md rounded-2xl border border-(--border) bg-(--card) p-4 shadow-2xl"
       >
         <div className="mb-3 flex items-center justify-between">
           <div className="text-sm font-medium text-neutral-200">{dateHeading(date)}</div>
@@ -107,7 +107,7 @@ export function DayNoteModal({ date, journal, onSave, onClose, onOpenFullDay }: 
           }}
           placeholder="How did today go? What did you notice about your process?"
           rows={6}
-          className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className="w-full resize-none rounded-lg border border-(--border-strong) bg-(--card-raised) p-3 text-sm text-neutral-100 outline-none focus:border-(--accent)"
         />
 
         <div className="mt-3 flex justify-end">

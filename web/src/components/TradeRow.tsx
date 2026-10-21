@@ -29,7 +29,7 @@ export function TradeRow({
   const origin = t.trade_origin
 
   return (
-    <Link to={`/trades/${t.id}`} className="flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-neutral-800/40">
+    <Link to={`/trades/${t.id}`} className="flex items-center gap-3 px-5 py-3 text-sm transition hover:bg-white/3">
       <span className="w-20 shrink-0 text-xs tabular-nums text-neutral-500">{timeOnlyFmt(t.first_in_at)}</span>
       <span className="w-40 shrink-0 truncate font-medium">
         <span className={origin ? ORIGIN_TEXT[origin] : 'text-neutral-100'} title={origin ? ORIGIN_LABEL[origin] : 'Not reviewed yet'}>

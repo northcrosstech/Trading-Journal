@@ -358,8 +358,8 @@ export function CsvImportPage() {
   if (manualAccounts.length === 0) {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-3">
-        <h1 className="text-lg font-semibold text-neutral-100">Import CSV</h1>
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-6 text-center text-sm text-neutral-400">
+        <h1 className="text-2xl font-semibold tracking-tight text-white">Import CSV</h1>
+        <div className="rounded-2xl border border-(--border) bg-(--card) p-6 text-center text-sm text-neutral-400">
           No manual-entry accounts yet.{' '}
           <Link to="/accounts" className="text-blue-400 hover:underline">
             Create one on the Accounts page
@@ -383,19 +383,19 @@ export function CsvImportPage() {
         <Link to="/trades" className="text-sm text-neutral-500 hover:text-neutral-300">
           ← Trades
         </Link>
-        <h1 className="mt-1 text-lg font-semibold text-neutral-100">Import CSV</h1>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">Import CSV</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Upload any CSV and map its columns below -- no fixed format required. Each trade becomes real executions
           rows, same as manual entry.
         </p>
       </div>
 
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
         <label className="mb-1 block text-xs text-neutral-500">Account</label>
         <select
           value={accountId}
           onChange={(e) => setAccountId(e.target.value)}
-          className="mb-3 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className="mb-3 w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
         >
           {manualAccounts.map((a) => (
             <option key={a.id} value={a.id}>
@@ -417,7 +417,7 @@ export function CsvImportPage() {
 
       {headers.length > 0 && (
         <>
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
             <h2 className="mb-3 text-sm font-medium text-neutral-300">Map Columns</h2>
             <div className="grid grid-cols-2 gap-3">
               {activeFields.map(({ field, label }) => (
@@ -429,7 +429,7 @@ export function CsvImportPage() {
                   <select
                     value={mapping[field as keyof typeof mapping] ?? ''}
                     onChange={(e) => setMapping(field, e.target.value || null)}
-                    className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+                    className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-(--accent)"
                   >
                     <option value="">— none —</option>
                     {headers.map((h) => (
@@ -443,14 +443,14 @@ export function CsvImportPage() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-            <div className="border-b border-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-300">
+          <div className="overflow-hidden rounded-2xl border border-(--border) bg-(--card)">
+            <div className="border-b border-(--border) px-4 py-2.5 text-sm font-medium text-neutral-300">
               Preview (first {preview.length} of {allParsed.length} trade{allParsed.length === 1 ? '' : 's'})
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-neutral-800 text-left uppercase tracking-wide text-neutral-500">
+                  <tr className="border-b border-(--border) text-left uppercase tracking-wide text-neutral-500">
                     <th className="px-3 py-2">Symbol</th>
                     <th className="px-3 py-2">Side</th>
                     <th className="px-3 py-2 text-right">Fills</th>
@@ -463,7 +463,7 @@ export function CsvImportPage() {
                   {preview.map((p, i) => {
                     if ('error' in p) {
                       return (
-                        <tr key={i} className="border-b border-neutral-800/60 last:border-0">
+                        <tr key={i} className="border-b border-(--border) last:border-0">
                           <td colSpan={6} className="px-3 py-2 text-(--status-critical)">
                             {p.rowIndex !== undefined ? `CSV row ${p.rowIndex + 2}` : `Row ${i + 2}`}: {p.error}
                           </td>
@@ -472,7 +472,7 @@ export function CsvImportPage() {
                     }
                     const summary = summarizeFills(p.fills)
                     return (
-                      <tr key={i} className="border-b border-neutral-800/60 last:border-0">
+                      <tr key={i} className="border-b border-(--border) last:border-0">
                         <td className="px-3 py-2 text-neutral-200">{p.symbol}</td>
                         <td className="px-3 py-2 capitalize text-neutral-400">{p.side}</td>
                         <td className="px-3 py-2 text-right tabular-nums text-neutral-300">{p.fills.length}</td>
@@ -490,14 +490,14 @@ export function CsvImportPage() {
           <button
             onClick={handleImport}
             disabled={!requiredMapped || importing}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
+            className="rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-40"
           >
             {importing ? 'Importing…' : `Import ${allParsed.length} trade${allParsed.length === 1 ? '' : 's'}`}
           </button>
           {!requiredMapped && <p className="text-xs text-amber-400/80">Map all required (*) columns before importing.</p>}
 
           {results && (
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+            <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
               <p className="text-sm text-neutral-200">
                 Imported <span className="text-(--status-good)">{results.success}</span> trade{results.success === 1 ? '' : 's'}
                 {results.errors.length > 0 && (

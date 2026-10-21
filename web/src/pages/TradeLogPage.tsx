@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAccountFilter } from '../accounts/AccountContext'
 import { fetchTradesWithDetails } from '../lib/queries'
 import type { TradeWithDetails } from '../lib/database.types'
@@ -7,6 +7,10 @@ import { currency, priceFmt, holdTimeFmt, optionLabel, dateFmt, percentFmt, dteL
 import { returnOnCapitalPct, computeCostBasisAnalysis } from '../lib/metrics'
 import { TradeTags } from '../components/TradeTags'
 import { DATE_RANGE_PRESETS, presetRange, type DateRangePreset } from '../lib/dateRange'
+import { Plus, Upload, X } from 'lucide-react'
+import { PageHeader } from '../components/ui/PageHeader'
+import { ButtonLink, Button } from '../components/ui/Button'
+import { INPUT_SM } from '../lib/ui'
 
 type SortKey = 'date' | 'holdTime' | 'netPnl' | 'symbol' | 'returnPct'
 type WinLossFilter = 'all' | 'win' | 'loss'
@@ -173,66 +177,66 @@ export function TradeLogPage() {
   const COLUMN_COUNT = 11
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-neutral-100">Trades</h1>
-        <div className="flex items-center gap-4">
-          <div className="text-sm text-neutral-400">
-            {summary.count} trade{summary.count === 1 ? '' : 's'} · {summary.closedCount} closed ·{' '}
-            <span className={summary.net >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}>
-              {currency(summary.net)}
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <Link
-              to="/trades/new"
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500"
-            >
-              + Add Trade
-            </Link>
-          </div>
-        </div>
-      </div>
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <PageHeader
+        title="Trades"
+        subtitle={
+          <>
+            {summary.count} trade{summary.count === 1 ? '' : 's'} · {summary.closedCount} closed · net{' '}
+            <span className={`font-medium ${summary.net >= 0 ? 'text-(--status-good)' : 'text-(--status-critical)'}`}>{currency(summary.net)}</span>
+          </>
+        }
+        actions={
+          <>
+            <ButtonLink to="/trades/import" icon={<Upload size={15} />}>
+              Import
+            </ButtonLink>
+            <ButtonLink to="/trades/new" variant="primary" icon={<Plus size={16} />}>
+              Add trade
+            </ButtonLink>
+          </>
+        }
+      />
 
       {/* filters -- one row, per dataviz interaction convention */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-(--border) bg-(--card) p-3.5">
         <input
           type="text"
           placeholder="Symbol…"
           value={symbolFilter}
           onChange={(e) => setSymbolFilter(e.target.value)}
-          className="w-28 rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className={`${INPUT_SM} w-32`}
         />
         <select
           value={playbookFilter}
           onChange={(e) => setPlaybookFilter(e.target.value)}
-          className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className={`${INPUT_SM} w-auto`}
         >
           <option value="all">All setups</option>
           {allPlaybooks.map(([id, name]) => (
             <option key={id} value={id}>{name}</option>
           ))}
         </select>
-        <div className="flex overflow-hidden rounded-md border border-neutral-700">
+        <div className="inline-flex rounded-lg border border-(--border-strong) bg-(--card-raised) p-0.5">
           {(['all', 'win', 'loss'] as const).map((v) => (
             <button
               key={v}
               onClick={() => setWinLossFilter(v)}
-              className={`px-3 py-1.5 text-sm capitalize transition ${
-                winLossFilter === v ? 'bg-neutral-700 text-neutral-50' : 'bg-neutral-950 text-neutral-400 hover:bg-neutral-800'
+              className={`rounded-md px-3 py-1 text-sm font-medium capitalize transition ${
+                winLossFilter === v ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
               {v}
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap overflow-hidden rounded-md border border-neutral-700">
+        <div className="inline-flex flex-wrap rounded-lg border border-(--border-strong) bg-(--card-raised) p-0.5">
           {DATE_RANGE_PRESETS.map((p) => (
             <button
               key={p.value}
               onClick={() => applyDatePreset(p.value)}
-              className={`px-2.5 py-1.5 text-xs font-medium transition ${
-                activeDatePreset === p.value ? 'bg-neutral-700 text-neutral-50' : 'bg-neutral-950 text-neutral-400 hover:bg-neutral-800'
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                activeDatePreset === p.value ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
               {p.label}
@@ -243,17 +247,20 @@ export function TradeLogPage() {
           type="date"
           value={dateFrom}
           onChange={(e) => setDateFrom(e.target.value)}
-          className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className={`${INPUT_SM} w-auto`}
         />
         <span className="text-neutral-600">to</span>
         <input
           type="date"
           value={dateTo}
           onChange={(e) => setDateTo(e.target.value)}
-          className="rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className={`${INPUT_SM} w-auto`}
         />
         {(symbolFilter || playbookFilter !== 'all' || winLossFilter !== 'all' || dateFrom || dateTo) && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<X size={14} />}
             onClick={() => {
               setSymbolFilter('')
               setPlaybookFilter('all')
@@ -261,17 +268,16 @@ export function TradeLogPage() {
               setDateFrom('')
               setDateTo('')
             }}
-            className="text-sm text-neutral-500 hover:text-neutral-300"
           >
             Clear filters
-          </button>
+          </Button>
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-900">
+      <div className="overflow-x-auto rounded-2xl border border-(--border) bg-(--card)">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500">
+            <tr className="border-b border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
               <th className="cursor-pointer select-none px-3 py-2.5" onClick={() => toggleSort('date')}>
                 Date (CT){sortIndicator('date')}
               </th>
@@ -305,7 +311,7 @@ export function TradeLogPage() {
                 {group.date && (
                   <tr
                     onClick={() => toggleDateExpanded(group.date!)}
-                    className="cursor-pointer border-b border-neutral-800/60 bg-neutral-800/30 hover:bg-neutral-800/50"
+                    className="cursor-pointer border-b border-(--border) bg-neutral-800/30 hover:bg-neutral-800/50"
                   >
                     <td colSpan={9} className="px-3 py-1.5 text-xs font-medium text-neutral-400">
                       <span className={`mr-1.5 inline-block text-neutral-600 transition-transform ${collapsed ? '-rotate-90' : ''}`}>
@@ -334,7 +340,7 @@ export function TradeLogPage() {
                     <tr
                       key={t.id}
                       onClick={() => navigate(`/trades/${t.id}`)}
-                      className="cursor-pointer border-b border-neutral-800/60 transition last:border-0 hover:bg-neutral-800/40"
+                      className="cursor-pointer border-b border-(--border) transition last:border-0 hover:bg-neutral-800/40"
                     >
                       <td className="px-3 py-2.5 text-neutral-400">{dateFmt(date)}</td>
                       <td className="px-3 py-2.5 font-medium text-neutral-100">

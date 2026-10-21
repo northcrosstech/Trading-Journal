@@ -37,7 +37,7 @@ function TradeRow({
 
   return (
     <>
-      <tr className="border-b border-neutral-800/60 last:border-0 hover:bg-neutral-800/40">
+      <tr className="border-b border-(--border) last:border-0 hover:bg-neutral-800/40">
         <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
           <input type="checkbox" checked={selected} onChange={onToggle} />
         </td>
@@ -72,7 +72,7 @@ function TradeRow({
         </td>
       </tr>
       {expanded && (
-        <tr className="border-b border-neutral-800/60 bg-neutral-950/60 last:border-0">
+        <tr className="border-b border-(--border) bg-(--card-raised)/60 last:border-0">
           <td colSpan={10} className="px-3 py-2">
             <table className="w-full text-[11px]">
               <thead>
@@ -223,8 +223,8 @@ export function RobinhoodImportPage() {
   if (manualAccounts.length === 0) {
     return (
       <div className="mx-auto flex max-w-3xl flex-col gap-3">
-        <h1 className="text-lg font-semibold text-neutral-100">Import Robinhood CSV</h1>
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-6 text-center text-sm text-neutral-400">
+        <h1 className="text-2xl font-semibold tracking-tight text-white">Import Robinhood CSV</h1>
+        <div className="rounded-2xl border border-(--border) bg-(--card) p-6 text-center text-sm text-neutral-400">
           No manual-entry accounts yet.{' '}
           <Link to="/accounts" className="text-blue-400 hover:underline">
             Create one on the Accounts page
@@ -241,19 +241,19 @@ export function RobinhoodImportPage() {
         <Link to="/trades" className="text-sm text-neutral-500 hover:text-neutral-300">
           ← Trades
         </Link>
-        <h1 className="mt-1 text-lg font-semibold text-neutral-100">Import Robinhood CSV</h1>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">Import Robinhood CSV</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Upload the "Activity" export from Robinhood (Account → Statements &amp; History → Export). Review the
           grouped trades below, uncheck anything you don't want, then import the rest.
         </p>
       </div>
 
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
         <label className="mb-1 block text-xs text-neutral-500">Account</label>
         <select
           value={accountId}
           onChange={(e) => setAccountId(e.target.value)}
-          className="mb-3 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+          className="mb-3 w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
         >
           {manualAccounts.map((a) => (
             <option key={a.id} value={a.id}>
@@ -271,7 +271,7 @@ export function RobinhoodImportPage() {
 
       {parsed && grouped && (
         <>
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 text-sm text-neutral-300">
+          <div className="rounded-2xl border border-(--border) bg-(--card) p-4 text-sm text-neutral-300">
             Parsed <span className="font-medium text-neutral-100">{parsed.executions.length}</span> fill
             {parsed.executions.length === 1 ? '' : 's'} into{' '}
             <span className="font-medium text-neutral-100">{grouped.trades.length}</span> trade
@@ -294,11 +294,11 @@ export function RobinhoodImportPage() {
           </div>
 
           {skippedByReason.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-              <div className="border-b border-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-300">Skipped rows, by reason</div>
+            <div className="overflow-hidden rounded-2xl border border-(--border) bg-(--card)">
+              <div className="border-b border-(--border) px-4 py-2.5 text-sm font-medium text-neutral-300">Skipped rows, by reason</div>
               <div className="flex flex-col">
                 {skippedByReason.map(([reason, rows]) => (
-                  <div key={reason} className="border-b border-neutral-800/60 last:border-0">
+                  <div key={reason} className="border-b border-(--border) last:border-0">
                     <button
                       onClick={() => setExpandedReason(expandedReason === reason ? null : reason)}
                       className="flex w-full items-center justify-between px-4 py-2 text-left text-xs text-neutral-400 hover:bg-neutral-800/40"
@@ -324,8 +324,8 @@ export function RobinhoodImportPage() {
             </div>
           )}
 
-          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-            <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
+          <div className="overflow-hidden rounded-2xl border border-(--border) bg-(--card)">
+            <div className="flex items-center justify-between border-b border-(--border) px-4 py-2.5">
               <span className="text-sm font-medium text-neutral-300">Grouped trades (click a row to see its fills)</span>
               <div className="flex items-center gap-3 text-xs">
                 <span className="text-neutral-500">{selected.size} of {grouped.trades.length} selected</span>
@@ -343,7 +343,7 @@ export function RobinhoodImportPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-neutral-800 text-left uppercase tracking-wide text-neutral-500">
+                  <tr className="border-b border-(--border) text-left uppercase tracking-wide text-neutral-500">
                     <th className="px-3 py-2"></th>
                     <th className="px-3 py-2">Symbol</th>
                     <th className="px-3 py-2">Type</th>
@@ -370,7 +370,7 @@ export function RobinhoodImportPage() {
             <button
               onClick={handleImport}
               disabled={importing || selected.size === 0 || !accountId}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
+              className="rounded-md bg-(--accent) px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-40"
             >
               {importing ? 'Importing…' : `Import ${selected.size} trade${selected.size === 1 ? '' : 's'}`}
             </button>
@@ -390,7 +390,7 @@ export function RobinhoodImportPage() {
           </div>
 
           {grouped.warnings.length > 0 && (
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+            <div className="rounded-2xl border border-(--border) bg-(--card) p-4">
               <h2 className="mb-2 text-sm font-medium text-neutral-300">Grouping warnings</h2>
               <ul className="flex flex-col gap-1 text-xs text-neutral-500">
                 {grouped.warnings.map((w, i) => (

@@ -38,6 +38,9 @@ function parseBalance(raw: string): number | null | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined
 }
 
+/** Shows a balance with thousands separators (inputs accept commas back). */
+const fmtBalance = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
+
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /** The month's balances as a table: open accounts only, pre-filled with this month's entry
@@ -66,7 +69,7 @@ function BalancesTable({
     for (const a of open) {
       let best: NetworthBalance | null = null
       for (const b of balances) if (b.account_id === a.id && b.month <= month && (!best || b.month > best.month)) best = b
-      out.set(a.id, { value: best ? String(Number(best.balance)) : '', from: best && best.month !== month ? best.month : null })
+      out.set(a.id, { value: best ? fmtBalance(Number(best.balance)) : '', from: best && best.month !== month ? best.month : null })
     }
     return out
   }, [open, balances, month])
@@ -174,6 +177,10 @@ function BalancesTable({
                               aria-label={`${a.name} balance`}
                               value={draft.get(a.id) ?? ''}
                               onChange={(e) => setDraft((d) => new Map(d).set(a.id, e.target.value))}
+                              onBlur={(e) => {
+                                const n = parseBalance(e.target.value)
+                                if (n !== null && n !== undefined) setDraft((d) => new Map(d).set(a.id, fmtBalance(n)))
+                              }}
                               className={`${INPUT_SM} pl-6 text-right tabular-nums ${p?.from ? 'border-amber-500/40' : ''}`}
                             />
                           </span>

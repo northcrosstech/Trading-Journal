@@ -24,7 +24,7 @@ function CalendarTooltip({ active, payload }: { active?: boolean; payload?: { pa
   if (!active || !payload?.length) return null
   const m = payload[0].payload
   return (
-    <div className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-xs shadow-lg">
       <div className="text-neutral-400">
         {m.label} · {m.kind === 'received' ? 'received' : 'expected'}
       </div>
@@ -38,7 +38,7 @@ function CalendarTooltip({ active, payload }: { active?: boolean; payload?: { pa
               <span className="tabular-nums">{currency(b.amount)}</span>
             </div>
           ))}
-          <div className="mt-0.5 flex justify-between gap-4 border-t border-neutral-800 pt-0.5 font-medium text-neutral-100">
+          <div className="mt-0.5 flex justify-between gap-4 border-t border-(--border) pt-0.5 font-medium text-neutral-100">
             <span>Total</span>
             <span className="tabular-nums">{currency(m.amount)}</span>
           </div>

@@ -91,9 +91,9 @@ export function ReviewChecklistCard() {
   })
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-5">
       <div className="mb-1 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-neutral-300">Review checklist</h2>
+        <h2 className="text-sm font-semibold text-white">Review checklist</h2>
         <button
           onClick={() => update(DEFAULT_CHECKLIST)}
           className="text-xs text-neutral-500 hover:text-neutral-300"

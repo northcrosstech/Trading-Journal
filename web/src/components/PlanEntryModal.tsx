@@ -86,7 +86,7 @@ export function PlanEntryModal({ date, userId, initialPlan, allPlaybooks, onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-xl border border-neutral-700 bg-neutral-900 p-4 shadow-2xl">
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-(--border) bg-(--card) p-4 shadow-2xl">
         <div className="mb-3 flex items-center justify-between">
           <div>
             <div className="text-sm font-medium text-neutral-200">Today's Plan</div>
@@ -111,7 +111,7 @@ export function PlanEntryModal({ date, userId, initialPlan, allPlaybooks, onClos
                 scheduleSave({ planned_max_trades: e.target.value.trim() === '' ? null : Number(e.target.value) })
               }}
               placeholder="e.g. 3"
-              className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500"
+              className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-sm text-neutral-100 outline-none focus:border-(--accent)"
             />
           </div>
           <div>
@@ -129,7 +129,7 @@ export function PlanEntryModal({ date, userId, initialPlan, allPlaybooks, onClos
                   scheduleSave({ planned_max_loss: e.target.value.trim() === '' ? null : Number(e.target.value) })
                 }}
                 placeholder="e.g. 250"
-                className="w-full rounded-md border border-neutral-700 bg-neutral-950 py-2 pl-6 pr-3 text-sm text-neutral-100 outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) py-2 pl-6 pr-3 text-sm text-neutral-100 outline-none focus:border-(--accent)"
               />
             </div>
           </div>
@@ -158,7 +158,7 @@ export function PlanEntryModal({ date, userId, initialPlan, allPlaybooks, onClos
             }}
             placeholder="What's the thesis today? What would make you stop early?"
             rows={3}
-            className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            className="w-full resize-none rounded-lg border border-(--border-strong) bg-(--card-raised) p-3 text-sm text-neutral-100 outline-none focus:border-(--accent)"
           />
         </div>
       </div>

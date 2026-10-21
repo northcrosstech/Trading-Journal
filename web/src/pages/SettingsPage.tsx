@@ -6,6 +6,9 @@ import type { Playbook } from '../lib/database.types'
 import { TAG_COLORS, tagChipStyle } from '../lib/tagColors'
 import { ColorPicker } from '../components/ColorPicker'
 import { ReviewChecklistCard } from '../components/ReviewChecklistCard'
+import { Database, ListChecks, LogOut, ShieldAlert, Tags, UserRound } from 'lucide-react'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Button } from '../components/ui/Button'
 
 function DollarInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
@@ -19,7 +22,7 @@ function DollarInput({ value, onChange, placeholder }: { value: string; onChange
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-md border border-neutral-700 bg-neutral-950 py-2 pl-6 pr-3 text-sm text-neutral-100 outline-none focus:border-blue-500"
+        className="w-full rounded-lg border border-(--border-strong) bg-(--card-raised) py-2 pl-6 pr-3 text-sm text-neutral-100 outline-none focus:border-(--accent)"
       />
     </div>
   )
@@ -52,15 +55,15 @@ function RiskCard() {
 
   if (!loaded) {
     return (
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <div className="rounded-2xl border border-(--border) bg-(--card) p-5">
         <div className="text-sm text-neutral-500">Loading…</div>
       </div>
     )
   }
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-      <h2 className="mb-1 text-sm font-medium text-neutral-300">Daily risk</h2>
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-5">
+      <h2 className="mb-1 text-sm font-semibold text-white">Daily risk</h2>
       <p className="mb-3 text-xs text-neutral-500">
         Your default max daily loss — pre-filled into each day's plan and tracked live on Today. The profit target marks
         green days on the calendar.
@@ -79,7 +82,7 @@ function RiskCard() {
         <span className="text-xs text-neutral-600">{saved ? '' : 'Saving…'}</span>
         <button
           onClick={handleSave}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500"
+          className="rounded-md bg-(--accent) px-3 py-1.5 text-xs font-medium text-white transition hover:brightness-110"
         >
           Save
         </button>
@@ -114,7 +117,7 @@ function SetupRow({ setup, onChanged }: { setup: Playbook; onChanged: () => void
               setEditing(false)
             }
           }}
-          className="flex-1 rounded-md border border-blue-500 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 outline-none"
+          className="flex-1 rounded-md border border-(--accent) bg-(--card-raised) px-2 py-1 text-sm text-neutral-100 outline-none"
         />
       ) : (
         <button onClick={() => setEditing(true)} className="flex-1 text-left text-sm text-neutral-200 hover:text-neutral-50">
@@ -158,9 +161,9 @@ function SetupsCard() {
   const visible = (setups ?? []).filter((s) => showArchived || !s.archived)
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-5">
       <div className="mb-1 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-neutral-300">Setups</h2>
+        <h2 className="text-sm font-semibold text-white">Setups</h2>
         {(setups ?? []).some((s) => s.archived) && (
           <label className="flex items-center gap-1.5 text-xs text-neutral-500">
             <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
@@ -169,7 +172,7 @@ function SetupsCard() {
         )}
       </div>
       <p className="mb-3 text-xs text-neutral-500">The patterns you trade. Tag each trade with one during review. Click a name to rename.</p>
-      <div className="flex flex-col divide-y divide-neutral-800/60">
+      <div className="flex flex-col divide-y divide-(--border)">
         {setups === null && <div className="py-2 text-xs text-neutral-600">Loading…</div>}
         {setups !== null && visible.length === 0 && <div className="py-2 text-xs text-neutral-600">No setups yet.</div>}
         {visible.map((s) => (
@@ -182,7 +185,7 @@ function SetupsCard() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="New setup, e.g. Opening range breakout"
-            className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            className="flex-1 rounded-lg border border-(--border-strong) bg-(--card-raised) px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-(--accent)"
           />
           <button
             type="submit"
@@ -203,8 +206,8 @@ const linkClass =
 
 function DataCard() {
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-2">
-      <h2 className="px-3 pb-1 pt-2 text-sm font-medium text-neutral-300">Accounts & data</h2>
+    <div className="rounded-2xl border border-(--border) bg-(--card) p-2">
+      <h2 className="px-3 pb-1 pt-2 text-sm font-semibold text-white">Accounts & data</h2>
       <Link to="/accounts" className={linkClass}>
         Broker accounts <span className="text-neutral-600">→</span>
       </Link>
@@ -221,25 +224,58 @@ function DataCard() {
   )
 }
 
+const SECTIONS = [
+  { id: 'risk', label: 'Risk limits', icon: ShieldAlert },
+  { id: 'setups', label: 'Setups', icon: Tags },
+  { id: 'checklist', label: 'Review checklist', icon: ListChecks },
+  { id: 'data', label: 'Accounts & data', icon: Database },
+  { id: 'profile', label: 'Profile', icon: UserRound },
+] as const
+
+/** Settings: a section menu on the left (jumps to the section) and every section's card on
+ * the right, so everything stays one scroll away. */
 export function SettingsPage() {
   const { user, signOut } = useAuth()
+  const jump = (id: string) => document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-4">
-      <h1 className="text-lg font-semibold text-neutral-100">Settings</h1>
-      <RiskCard />
-      <SetupsCard />
-      <ReviewChecklistCard />
-      <DataCard />
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-neutral-400">{user?.email}</span>
-          <button
-            onClick={() => signOut()}
-            className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-neutral-800"
-          >
-            Sign out
-          </button>
+    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+      <PageHeader title="Settings" subtitle="Risk limits, setups, your review checklist, accounts and data." />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[13rem_1fr]">
+        <nav className="flex gap-1 overflow-x-auto lg:sticky lg:top-8 lg:flex-col lg:self-start">
+          {SECTIONS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => jump(id)}
+              className="flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-neutral-400 transition hover:bg-(--card) hover:text-white"
+            >
+              <Icon size={16} />
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="flex min-w-0 flex-col gap-6">
+          <div id="settings-risk" className="scroll-mt-8">
+            <RiskCard />
+          </div>
+          <div id="settings-setups" className="scroll-mt-8">
+            <SetupsCard />
+          </div>
+          <div id="settings-checklist" className="scroll-mt-8">
+            <ReviewChecklistCard />
+          </div>
+          <div id="settings-data" className="scroll-mt-8">
+            <DataCard />
+          </div>
+          <div id="settings-profile" className="scroll-mt-8 rounded-2xl border border-(--border) bg-(--card) p-5">
+            <h2 className="text-sm font-semibold text-white">Profile</h2>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm text-neutral-300">{user?.email}</span>
+              <Button icon={<LogOut size={15} />} onClick={() => signOut()}>
+                Sign out
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

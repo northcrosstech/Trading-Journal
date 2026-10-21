@@ -20,7 +20,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: { payl
   if (!active || !payload?.length) return null
   const p = payload[0].payload
   return (
-    <div className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-xs shadow-lg">
       <div className="text-neutral-400">
         {new Date(p.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
       </div>
