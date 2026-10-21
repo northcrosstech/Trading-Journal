@@ -130,7 +130,9 @@ function EditRow({ row, onSave, onRemove, onCancel }: { row: DividendRow; onSave
 /** Projected dividend income: a Jan-Dec calendar (received for months gone by, expected
  * ahead), totals, and -- on a portfolio's page -- the per-ticker table where the yearly
  * dividend, frequency and pay month are entered once per ticker, plus one-tap Record.
- * `portfolioId` set = one portfolio (editable); unset = all of `portfolioIds` combined. */
+ * `portfolioId` set = one portfolio (with Record); unset = all of `portfolioIds` combined --
+ * the one place to set up every ticker's dividend. Either way a ticker's dividend is saved
+ * once per user and applies to every portfolio holding it. */
 export function DividendsCard({
   holdings,
   prices,
@@ -173,7 +175,7 @@ export function DividendsCard({
   const projected = rows.reduce((s, r) => s + r.perYear, 0)
   const receivedThisYear = receivedSince(received, `${year}-01-01`)
   const received12m = receivedSince(received, yearAgo)
-  const editable = !!portfolioId
+  const singlePortfolio = !!portfolioId
 
   const run = (p: Promise<unknown>, after?: () => void) =>
     p
@@ -197,7 +199,7 @@ export function DividendsCard({
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-medium text-neutral-200">Dividends{!editable && ' · all portfolios'}</h2>
+        <h2 className="text-sm font-medium text-neutral-200">Dividends{!singlePortfolio && ' · all portfolios'}</h2>
         <span className="text-xs text-neutral-500">
           Projected <span className="tabular-nums text-neutral-200">{currency(projected)}</span>/yr ·{' '}
           <span className="tabular-nums text-neutral-200">{currency(projected / 12)}</span>/mo
@@ -220,79 +222,79 @@ export function DividendsCard({
 
       <DividendCalendarChart data={calendar} />
 
-      {editable && (
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-800 text-left text-[11px] uppercase tracking-wide text-neutral-500">
-                <th className="py-1.5 pr-2">Ticker</th>
-                <th className="py-1.5 pr-2 text-right">$/share/yr</th>
-                <th className="py-1.5 pr-2">Pays</th>
-                <th className="py-1.5 pr-2 text-right" title="Yearly dividend ÷ today's price">Yield</th>
-                <th className="py-1.5 pr-2 text-right" title="Yearly dividend ÷ your average cost">On cost</th>
-                <th className="py-1.5 pr-2 text-right">Shares</th>
-                <th className="py-1.5 pr-2 text-right">Per year</th>
-                <th className="py-1.5 pr-2 text-right">Next</th>
-                <th className="py-1.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) =>
-                editing === r.symbol ? (
-                  <EditRow
-                    key={r.symbol}
-                    row={r}
-                    onCancel={() => setEditing(null)}
-                    onSave={(d) => user && run(saveDividendInfo(user.id, { symbol: r.symbol, ...d }), () => setEditing(null))}
-                    onRemove={() => run(deleteDividendInfo(r.symbol), () => setEditing(null))}
-                  />
-                ) : r.info ? (
-                  <tr key={r.symbol} className="border-b border-neutral-800/60 last:border-0">
-                    <td className="py-2 pr-2 font-medium text-neutral-100">{r.symbol}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">${Number(r.info.annual_per_share).toFixed(2)}</td>
-                    <td className="py-2 pr-2 text-xs text-neutral-400" title={cycleLabel(r.info.frequency, r.info.pay_month)}>
-                      {FREQUENCIES.find((f) => f.value === r.info!.frequency)?.label}
-                    </td>
-                    <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">{pct(r.yield)}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{pct(r.yieldOnCost)}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{r.shares}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums text-neutral-100">{currency(r.perYear)}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">
-                      {r.nextMonth !== null && (
-                        <>
-                          <span className="text-neutral-500">{MONTHS[r.nextMonth - 1]}</span> {currency(r.perPayment)}
-                        </>
-                      )}
-                    </td>
-                    <td className="py-2 text-right">
-                      <span className="flex justify-end gap-2 text-xs">
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-neutral-800 text-left text-[11px] uppercase tracking-wide text-neutral-500">
+              <th className="py-1.5 pr-2">Ticker</th>
+              <th className="py-1.5 pr-2 text-right">$/share/yr</th>
+              <th className="py-1.5 pr-2">Pays</th>
+              <th className="py-1.5 pr-2 text-right" title="Yearly dividend ÷ today's price">Yield</th>
+              <th className="py-1.5 pr-2 text-right" title="Yearly dividend ÷ your average cost">On cost</th>
+              <th className="py-1.5 pr-2 text-right">Shares</th>
+              <th className="py-1.5 pr-2 text-right">Per year</th>
+              <th className="py-1.5 pr-2 text-right">Next</th>
+              <th className="py-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) =>
+              editing === r.symbol ? (
+                <EditRow
+                  key={r.symbol}
+                  row={r}
+                  onCancel={() => setEditing(null)}
+                  onSave={(d) => user && run(saveDividendInfo(user.id, { symbol: r.symbol, ...d }), () => setEditing(null))}
+                  onRemove={() => run(deleteDividendInfo(r.symbol), () => setEditing(null))}
+                />
+              ) : r.info ? (
+                <tr key={r.symbol} className="border-b border-neutral-800/60 last:border-0">
+                  <td className="py-2 pr-2 font-medium text-neutral-100">{r.symbol}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">${Number(r.info.annual_per_share).toFixed(2)}</td>
+                  <td className="py-2 pr-2 text-xs text-neutral-400" title={cycleLabel(r.info.frequency, r.info.pay_month)}>
+                    {FREQUENCIES.find((f) => f.value === r.info!.frequency)?.label}
+                  </td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">{pct(r.yield)}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{pct(r.yieldOnCost)}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-400">{r.shares}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-100">{currency(r.perYear)}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-neutral-300">
+                    {r.nextMonth !== null && (
+                      <>
+                        <span className="text-neutral-500">{MONTHS[r.nextMonth - 1]}</span> {currency(r.perPayment)}
+                      </>
+                    )}
+                  </td>
+                  <td className="py-2 text-right">
+                    <span className="flex justify-end gap-2 text-xs">
+                      {singlePortfolio && (
                         <button onClick={() => record(r)} className="text-blue-400 hover:text-blue-300">
                           Record
                         </button>
-                        <button onClick={() => setEditing(r.symbol)} className="text-neutral-600 hover:text-neutral-300">
-                          Edit
-                        </button>
-                      </span>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={r.symbol} className="border-b border-neutral-800/60 last:border-0">
-                    <td className="py-2 pr-2 font-medium text-neutral-500">{r.symbol}</td>
-                    <td colSpan={8} className="py-2">
-                      <button onClick={() => setEditing(r.symbol)} className="text-xs text-neutral-500 hover:text-neutral-300">
-                        + add dividend <span className="text-neutral-600">(leave it if {r.symbol} doesn't pay)</span>
+                      )}
+                      <button onClick={() => setEditing(r.symbol)} className="text-neutral-600 hover:text-neutral-300">
+                        Edit
                       </button>
-                    </td>
-                  </tr>
-                ),
-              )}
-            </tbody>
-          </table>
-          <p className="mt-2 text-[11px] text-neutral-600">
-            Enter each ticker's dividend once — it applies to every portfolio holding it. Monthly bars split the yearly amount evenly across its pay months; past months show what you recorded.
-          </p>
-        </div>
-      )}
+                    </span>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={r.symbol} className="border-b border-neutral-800/60 last:border-0">
+                  <td className="py-2 pr-2 font-medium text-neutral-500">{r.symbol}</td>
+                  <td colSpan={8} className="py-2">
+                    <button onClick={() => setEditing(r.symbol)} className="text-xs text-neutral-500 hover:text-neutral-300">
+                      + add dividend <span className="text-neutral-600">(leave it if {r.symbol} doesn't pay)</span>
+                    </button>
+                  </td>
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
+        <p className="mt-2 text-[11px] text-neutral-600">
+          {singlePortfolio ? 'Enter each ticker’s dividend once — it applies to every portfolio holding it.' : 'Set up each ticker here once — every portfolio holding it uses it. Record payments on the portfolio’s own page.'} Monthly bars split the yearly amount evenly across its pay months; past months show what you recorded.
+        </p>
+      </div>
       {error && <p className="mt-2 text-xs text-(--status-critical)">{error}</p>}
     </div>
   )

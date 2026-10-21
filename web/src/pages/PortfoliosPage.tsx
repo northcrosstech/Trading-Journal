@@ -16,7 +16,8 @@ import {
 } from '../lib/wealthQueries'
 import { PORTFOLIO_KINDS, combineDailyValues, kindLabel, optionValue, portfolioSnapshot, seriesFor, signedCurrency as signed, timeWeightedReturn, unpricedSymbols } from '../lib/portfolio'
 import { currency, percentFmt } from '../lib/format'
-import { AllocationList, ValueHistoryChart } from '../components/WealthCharts'
+import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
+import { allocationSlices } from '../lib/allocation'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { DividendsCard } from '../components/DividendsCard'
 import { GetPricesButton } from '../components/GetPricesButton'
@@ -105,12 +106,12 @@ export function PortfoliosPage() {
   const allocation = useMemo(() => {
     const bySymbol = new Map<string, number>()
     for (const v of combined.holdings) bySymbol.set(v.holding.symbol, (bySymbol.get(v.holding.symbol) ?? 0) + v.value)
-    const rows = Array.from(bySymbol, ([symbol, value]) => ({ key: symbol, label: symbol, value }))
+    const positions = Array.from(bySymbol, ([symbol, value]) => ({ key: symbol, label: symbol, value }))
     const longOptions = openOptions.filter((o) => o.side === 'long').reduce((s, o) => s + optionValue(o, prices), 0)
-    if (longOptions > 0) rows.push({ key: 'options', label: 'Options', value: longOptions })
-    if (combined.cashAvailable > 0) rows.push({ key: 'cash', label: 'Cash', value: combined.cashAvailable })
-    if (combined.collateral > 0) rows.push({ key: 'collateral', label: 'Put collateral', value: Math.min(combined.collateral, combined.cash) })
-    return rows
+    if (longOptions > 0) positions.push({ key: 'options', label: 'Options', value: longOptions })
+    const cashSub =
+      combined.collateral > 0 && combined.cash > 0 ? `incl. ${currency(Math.min(combined.collateral, combined.cash))} set aside for puts` : undefined
+    return allocationSlices(positions, combined.cash, cashSub)
   }, [combined, openOptions, prices])
 
   async function add() {
@@ -243,7 +244,7 @@ export function PortfoliosPage() {
         <div className="flex flex-col gap-5 lg:col-span-2">
           <div className={CARD}>
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Allocation · all portfolios</h2>
-            <AllocationList rows={allocation} total={allocation.reduce((s, r) => s + r.value, 0)} />
+            <AllocationDonut allocation={allocation} centerLabel="All portfolios" />
           </div>
           <div className={CARD}>
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Value · all portfolios</h2>

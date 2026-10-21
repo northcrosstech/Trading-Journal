@@ -15,7 +15,8 @@ import {
 } from '../lib/wealthQueries'
 import { PORTFOLIO_KINDS, kindLabel, optionValue, portfolioSnapshot, seriesFor, signedCurrency as signed, unpricedSymbols, type HoldingView } from '../lib/portfolio'
 import { currency, dateFmt, percentFmt, priceFmt } from '../lib/format'
-import { AllocationList, ValueHistoryChart } from '../components/WealthCharts'
+import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
+import { allocationSlices } from '../lib/allocation'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { PortfolioActions } from '../components/PortfolioActions'
 import { CspSection } from '../components/CspSection'
@@ -170,18 +171,17 @@ export function PortfolioDetailPage() {
   const realized = useMemo(() => activity.reduce((s, a) => s + (a.realized_gain !== null ? Number(a.realized_gain) : 0), 0), [activity])
 
   const allocation = useMemo(() => {
-    if (!snap) return []
-    const rows = snap.holdings.map((v) => ({ key: v.holding.id, label: v.holding.symbol, value: v.value }))
+    if (!snap) return allocationSlices([], 0)
+    const positions = snap.holdings.map((v) => ({ key: v.holding.id, label: v.holding.symbol, value: v.value }))
     for (const o of openOptions)
       if (o.side === 'long')
-        rows.push({ key: o.id, label: `${o.symbol} ${Number(o.strike)}${o.option_type === 'call' ? 'C' : 'P'}`, value: optionValue(o, prices) })
-    if (snap.cashAvailable > 0) rows.push({ key: 'cash', label: 'Cash', value: snap.cashAvailable })
-    if (snap.collateral > 0) rows.push({ key: 'collateral', label: 'Put collateral', value: Math.min(snap.collateral, Math.max(0, snap.cash)) })
-    return rows
+        positions.push({ key: o.id, label: `${o.symbol} ${Number(o.strike)}${o.option_type === 'call' ? 'C' : 'P'}`, value: optionValue(o, prices) })
+    const cashSub = snap.collateral > 0 && snap.cash > 0 ? `incl. ${currency(Math.min(snap.collateral, snap.cash))} set aside for puts` : undefined
+    return allocationSlices(positions, snap.cash, cashSub)
   }, [snap, openOptions, prices])
   // Weights share the Allocation card's base -- everything held (shares, long options,
   // positive cash) -- so a negative cash balance can't inflate them past 100%.
-  const allocationTotal = allocation.reduce((s, r) => s + r.value, 0)
+  const allocationTotal = allocation.total
 
   if (error) return <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-red-300">{error}</div>
   if (portfolio === undefined || !snap) return <div className="text-neutral-500">Loading portfolio…</div>
@@ -286,7 +286,7 @@ export function PortfolioDetailPage() {
             holdings={holdings} prices={prices} cashAvailable={snap.cashAvailable} onDone={load} />
           <div className={CARD}>
             <h2 className="mb-2 text-sm font-medium text-neutral-200">Allocation</h2>
-            <AllocationList rows={allocation} total={allocationTotal} />
+            <AllocationDonut allocation={allocation} centerLabel="Value" />
           </div>
         </div>
       </div>

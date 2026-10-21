@@ -1,5 +1,7 @@
-import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts'
-import { currency, percentFmt } from '../lib/format'
+import { ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts'
+import { useState } from 'react'
+import { SLICE_THRESHOLD, type Allocation, type Slice } from '../lib/allocation'
+import { currency } from '../lib/format'
 
 const axisCurrency = (n: number) =>
   Math.abs(n) >= 1_000_000
@@ -91,35 +93,100 @@ export function ValueHistoryChart({ data }: { data: ValuePoint[] }) {
   )
 }
 
-export type AllocationRow = { key: string; label: string; sub?: string; value: number }
+const pctOf = (w: number) => `${(w * 100).toFixed(1)}%`
 
-/** Share of the total, largest first: one bar per row in a single hue (the row label
- * carries identity), which reads close values far better than a donut. */
-export function AllocationList({ rows, total }: { rows: AllocationRow[]; total: number }) {
-  if (rows.length === 0 || total <= 0) return <p className="text-sm text-neutral-500">Nothing to allocate yet.</p>
-  const sorted = [...rows].filter((r) => r.value > 0).sort((a, b) => b.value - a.value)
+function SliceTooltip({ active, payload }: { active?: boolean; payload?: { payload: Slice }[] }) {
+  if (!active || !payload?.length) return null
+  const s = payload[0].payload
   return (
-    <table className="w-full text-sm">
-      <tbody>
-        {sorted.map((r) => {
-          const share = r.value / total
-          return (
-            <tr key={r.key} className="border-b border-neutral-800/60 last:border-0">
-              <td className="w-28 py-1.5 pr-2">
-                <div className="font-medium text-neutral-200">{r.label}</div>
-                {r.sub && <div className="text-[11px] text-neutral-500">{r.sub}</div>}
-              </td>
-              <td className="py-1.5">
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
-                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, share * 100)}%`, backgroundColor: 'var(--series-1)' }} />
-                </div>
-              </td>
-              <td className="w-16 py-1.5 pl-3 text-right tabular-nums text-neutral-300">{percentFmt(share).replace('+', '')}</td>
-              <td className="w-24 py-1.5 pl-3 text-right tabular-nums text-neutral-500">{currency(r.value)}</td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+    <div className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs shadow-lg">
+      <div className="font-medium text-neutral-100">
+        {s.label} · {pctOf(s.weight)}
+      </div>
+      <div className="tabular-nums text-neutral-400">{currency(s.value)}</div>
+      {s.role === 'other' && s.members.length > 1 && (
+        <div className="mt-1 text-neutral-400">{s.members.map((m) => m.label).join(', ')}</div>
+      )}
+    </div>
   )
 }
+
+function Swatch({ color, small = false }: { color: string; small?: boolean }) {
+  return <span className={`inline-block shrink-0 rounded-sm ${small ? 'h-1.5 w-1.5' : 'h-2.5 w-2.5'}`} style={{ backgroundColor: color }} />
+}
+
+/** Allocation donut: positions at 5%+ get their own color, smaller ones share a grey
+ * "Other" slice, cash is its own neutral slice; total in the center. The legend beside it
+ * lists every holding -- including each one inside Other -- with weight and value, so no
+ * position is ever hidden and identity never rests on color alone. Hovering a legend row
+ * highlights its slice and vice versa. */
+export function AllocationDonut({ allocation, centerLabel = 'Total' }: { allocation: Allocation; centerLabel?: string }) {
+  const [hover, setHover] = useState<string | null>(null)
+  const { total, slices } = allocation
+  if (slices.length === 0) return <p className="text-sm text-neutral-500">Nothing to allocate yet.</p>
+  const dim = (key: string) => (hover !== null && hover !== key ? 0.35 : 1)
+
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+      <div className="relative mx-auto h-44 w-44 shrink-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={slices}
+              dataKey="value"
+              nameKey="label"
+              innerRadius="62%"
+              outerRadius="100%"
+              startAngle={90}
+              endAngle={-270}
+              stroke="#171717"
+              strokeWidth={2}
+              isAnimationActive={false}
+              onMouseEnter={(_, i) => setHover(slices[i].key)}
+              onMouseLeave={() => setHover(null)}
+            >
+              {slices.map((s) => (
+                <Cell key={s.key} fill={s.color} fillOpacity={dim(s.key)} />
+              ))}
+            </Pie>
+            <Tooltip content={<SliceTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-[11px] text-neutral-500">{centerLabel}</span>
+          <span className="text-sm font-semibold tabular-nums text-neutral-100">{compactUsd(total)}</span>
+        </div>
+      </div>
+
+      <div className="min-w-0 flex-1 text-sm">
+        {slices.map((s) => (
+          <div key={s.key} onMouseEnter={() => setHover(s.key)} onMouseLeave={() => setHover(null)} className="rounded px-1 hover:bg-neutral-800/40">
+            <div className="flex items-center gap-2 py-1">
+              <Swatch color={s.color} />
+              <span className="min-w-0 flex-1 truncate font-medium text-neutral-200">
+                {s.role === 'other' && s.members.length > 1 ? `Other (${s.members.length})` : s.label}
+              </span>
+              <span className="w-14 text-right tabular-nums text-neutral-300">{pctOf(s.weight)}</span>
+              <span className="w-24 text-right tabular-nums text-neutral-500">{currency(s.value)}</span>
+            </div>
+            {s.role === 'other' &&
+              s.members.length > 1 &&
+              s.members.map((m) => (
+                <div key={m.key} className="flex items-center gap-2 py-0.5 pl-4 text-xs">
+                  <Swatch color={s.color} small />
+                  <span className="min-w-0 flex-1 truncate text-neutral-400">{m.label}</span>
+                  <span className="w-14 text-right tabular-nums text-neutral-500">{pctOf(m.value / total)}</span>
+                  <span className="w-24 text-right tabular-nums text-neutral-600">{currency(m.value)}</span>
+                </div>
+              ))}
+            {s.role === 'cash' && s.members[0] && <div className="pb-1 pl-4.5 text-[11px] text-neutral-500">{s.members[0].label}</div>}
+          </div>
+        ))}
+        <p className="mt-2 text-[11px] text-neutral-600">Positions under {Math.round(SLICE_THRESHOLD * 100)}% are grouped as Other.</p>
+      </div>
+    </div>
+  )
+}
+
+const compactUsd = (n: number) =>
+  Math.abs(n) >= 1_000_000 ? `$${(n / 1_000_000).toFixed(2)}M` : Math.abs(n) >= 10_000 ? `$${(n / 1_000).toFixed(1)}k` : currency(n)
