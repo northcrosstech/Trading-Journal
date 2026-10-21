@@ -2,11 +2,12 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Landmark, Plus, Settings2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import type { NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, PortfolioDailyValue } from '../lib/database.types'
+import type { InstallmentPayment, NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, PortfolioDailyValue } from '../lib/database.types'
 import {
   createNetworthAccount,
   deleteNetworthAccount,
   fetchDailyValues,
+  fetchInstallmentPayments,
   fetchNetworthAccounts,
   fetchNetworthBalances,
   fetchPortfolios,
@@ -21,6 +22,8 @@ import { useToast } from '../lib/toastContext'
 import { signedCurrency as signed } from '../lib/portfolio'
 import { NetWorthChart } from '../components/WealthCharts'
 import { NetWorthComposition } from '../components/NetWorthComposition'
+import { InstallmentsCard } from '../components/InstallmentsCard'
+import { usePaymentSetup } from '../lib/usePaymentSetup'
 import { Kpi } from '../components/WealthBits'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
@@ -290,6 +293,7 @@ function ManageAccounts({ accounts, defaultMonth, onChanged }: { accounts: Netwo
   const { user } = useAuth()
   const dialog = useDialog()
   const toast = useToast()
+  const editPayment = usePaymentSetup(onChanged)
   const [name, setName] = useState('')
   const [category, setCategory] = useState<NetworthCategory>('cash')
   const [opened, setOpened] = useState(defaultMonth.slice(0, 7))
@@ -411,6 +415,7 @@ function ManageAccounts({ accounts, defaultMonth, onChanged }: { accounts: Netwo
                     <Pill tone={isDebt(a.category) ? 'red' : 'teal'}>{categoryLabel(a.category)}</Pill>
                     since {monthLabel(a.opened_month)}
                     {a.closed_month && <Pill>closed {monthLabel(a.closed_month)}</Pill>}
+                    {(a.payment_amount ?? 0) > 0 && <Pill tone="amber">{currency(Number(a.payment_amount))}/mo</Pill>}
                   </div>
                 </div>
                 <Menu
@@ -424,6 +429,7 @@ function ManageAccounts({ accounts, defaultMonth, onChanged }: { accounts: Netwo
                         ]
                       : [
                           { label: 'Rename', onClick: () => rename(a) },
+                          ...(isDebt(a.category) ? [{ label: 'Payment details…', onClick: () => editPayment(a) }] : []),
                           { label: 'Close account…', onClick: () => close(a) },
                           { label: 'Delete…', tone: 'danger', onClick: () => remove(a) },
                         ]
@@ -446,16 +452,18 @@ export function NetWorthPage() {
   const [balances, setBalances] = useState<NetworthBalance[]>([])
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
   const [dailyValues, setDailyValues] = useState<PortfolioDailyValue[]>([])
+  const [payments, setPayments] = useState<InstallmentPayment[]>([])
   const [error, setError] = useState<string | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
 
   const load = useCallback(() => {
-    Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchPortfolios(), fetchDailyValues()])
-      .then(([a, b, p, v]) => {
+    Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchPortfolios(), fetchDailyValues(), fetchInstallmentPayments()])
+      .then(([a, b, p, v, ip]) => {
         setAccounts(a)
         setBalances(b)
         setPortfolios(p)
         setDailyValues(v)
+        setPayments(ip)
       })
       .catch((e) => setError(errorMessage(e)))
   }, [])
@@ -558,6 +566,8 @@ export function NetWorthPage() {
       </Card>
 
       <NetWorthComposition lines={totals.lines} monthName={monthLabel(month)} />
+
+      <InstallmentsCard month={month} today={centralDateStr(new Date())} accounts={accounts} balances={balances} payments={payments} onChanged={load} />
 
       <BalancesTable
         month={month}

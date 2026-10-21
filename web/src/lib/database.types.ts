@@ -247,6 +247,20 @@ export type NetworthAccountRow = {
   opened_month: string // yyyy-mm-01
   closed_month: string | null // yyyy-mm-01; the account is gone from this month on
   sort_order: number
+  /** Installment details (debts only). Absent until migration 20261023020000_installments. */
+  payment_amount?: number | null
+  payment_day?: number | null // 1-31
+  interest_rate?: number | null // APR, percent
+  created_at: string
+}
+
+export type InstallmentPaymentRow = {
+  id: string
+  user_id: string
+  account_id: string
+  month: string // yyyy-mm-01
+  amount: number
+  paid_on: string
   created_at: string
 }
 
@@ -422,6 +436,7 @@ export type Database = {
       daily_plan_playbooks: ReturnType<typeof table<DailyPlanPlaybookRow>>
       networth_accounts: ReturnType<typeof table<NetworthAccountRow>>
       networth_balances: ReturnType<typeof table<NetworthBalanceRow>>
+      installment_payments: ReturnType<typeof table<InstallmentPaymentRow>>
       portfolios: ReturnType<typeof table<PortfolioRow>>
       holdings: ReturnType<typeof table<HoldingRow>>
       csp_positions: ReturnType<typeof table<CspPositionRow>>
@@ -506,6 +521,7 @@ export type SyncLog = SyncLogRow
 export type DailyPlan = DailyPlanRow
 export type NetworthAccount = NetworthAccountRow
 export type NetworthBalance = NetworthBalanceRow
+export type InstallmentPayment = InstallmentPaymentRow
 export type Portfolio = PortfolioRow
 export type Holding = HoldingRow
 export type CspPosition = CspPositionRow

@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import type {
   CspPosition,
+  InstallmentPayment,
   DividendInfo,
   OptionPosition,
   Holding,
@@ -38,7 +39,7 @@ export async function createNetworthAccount(
 
 export async function updateNetworthAccount(
   id: string,
-  patch: Partial<Pick<NetworthAccount, 'name' | 'category' | 'opened_month' | 'closed_month' | 'sort_order'>>,
+  patch: Partial<Pick<NetworthAccount, 'name' | 'category' | 'opened_month' | 'closed_month' | 'sort_order' | 'payment_amount' | 'payment_day' | 'interest_rate'>>,
 ) {
   const { error } = await supabase.from('networth_accounts').update(patch).eq('id', id)
   if (error) throw error
@@ -344,5 +345,31 @@ export async function optionClose(p: { optionId: string; outcome: 'closed' | 'ex
     p_price: p.price ?? null,
     p_on: p.on,
   })
+  if (error) throw error
+}
+
+// ---------------------------------------------------------------------------
+// Installments (monthly payments on debts)
+// ---------------------------------------------------------------------------
+
+/** Payments marked paid. Empty (not an error) until the installments migration is applied. */
+export async function fetchInstallmentPayments(): Promise<InstallmentPayment[]> {
+  const { data, error } = await supabase.from('installment_payments').select('*').order('month')
+  if (error) {
+    if (error.code === '42P01' || /installment_payments/.test(error.message)) return []
+    throw error
+  }
+  return data ?? []
+}
+
+export async function markInstallmentPaid(userId: string, p: { accountId: string; month: string; amount: number; paidOn: string }) {
+  const { error } = await supabase
+    .from('installment_payments')
+    .upsert({ user_id: userId, account_id: p.accountId, month: p.month, amount: p.amount, paid_on: p.paidOn }, { onConflict: 'account_id,month' })
+  if (error) throw error
+}
+
+export async function unmarkInstallmentPaid(accountId: string, month: string) {
+  const { error } = await supabase.from('installment_payments').delete().eq('account_id', accountId).eq('month', month)
   if (error) throw error
 }
