@@ -17,6 +17,7 @@ import {
 import {
   KIND_TONE,
   PORTFOLIO_KINDS,
+  dayChangeLabel,
   kindLabel,
   optionValue,
   portfolioSnapshot,
@@ -119,7 +120,7 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
   )
 }
 
-function HoldingsTable({ views, total, onSaved }: { views: HoldingView[]; total: number; onSaved: () => void }) {
+function HoldingsTable({ views, total, dayLabel, onSaved }: { views: HoldingView[]; total: number; dayLabel: string; onSaved: () => void }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   return (
     <div className="overflow-x-auto">
@@ -131,7 +132,7 @@ function HoldingsTable({ views, total, onSaved }: { views: HoldingView[]; total:
             <th className="px-3 py-2.5 text-right">Avg cost</th>
             <th className="px-3 py-2.5 text-right">Price</th>
             <th className="px-3 py-2.5 text-right">Value</th>
-            <th className="px-3 py-2.5 text-right">Today</th>
+            <th className="px-3 py-2.5 text-right">{dayLabel}</th>
             <th className="px-3 py-2.5 text-right">Gain</th>
             <th className="px-3 py-2.5 text-right">Weight</th>
             <th className="w-16 px-3 py-2.5" />
@@ -373,7 +374,7 @@ export function PortfolioDetailPage() {
           accent
         />
         <Kpi
-          label="Today"
+          label={dayChangeLabel(snap.asOf) === 'Today' ? 'Today' : `Last close · ${dayChangeLabel(snap.asOf)}`}
           value={signed(snap.dayChange)}
           tone={snap.dayChange}
           chip={snap.total - snap.dayChange > 0 ? percentFmt(snap.dayChange / (snap.total - snap.dayChange)) : undefined}
@@ -432,7 +433,7 @@ export function PortfolioDetailPage() {
                 Use “Add existing” for shares you already hold, or “Buy” for new purchases from this portfolio’s cash.
               </EmptyState>
             ) : (
-              <HoldingsTable views={snap.holdings} total={allocationTotal} onSaved={load} />
+              <HoldingsTable views={snap.holdings} total={allocationTotal} dayLabel={dayChangeLabel(snap.asOf)} onSaved={load} />
             )}
           </Card>
           <OptionsCard options={options} csps={csps} prices={prices} onChanged={load} onAdd={() => setTrade('option')} />

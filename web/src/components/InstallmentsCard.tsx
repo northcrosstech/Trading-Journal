@@ -3,7 +3,7 @@ import { useAuth } from '../auth/AuthContext'
 import type { InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
 import { markInstallmentPaid, unmarkInstallmentPaid } from '../lib/wealthQueries'
 import { categoryLabel, isDebt, isOpenIn, monthLabel } from '../lib/networth'
-import { daysBetween, dueDateIn, durationLabel, payoff } from '../lib/installments'
+import { balanceUpTo, daysBetween, dueDateIn, durationLabel, expectedPayment, hasPaymentPlan, payoff } from '../lib/installments'
 import { currency, dateFmt } from '../lib/format'
 import { parseAmount, useDialog, validators } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
@@ -39,31 +39,28 @@ export function InstallmentsCard({
   const currentMonth = `${today.slice(0, 7)}-01`
 
   const debts = accounts.filter((a) => isDebt(a.category) && isOpenIn(a, month))
-  const withPayment = debts.filter((a) => (a.payment_amount ?? 0) > 0)
-  const withoutPayment = debts.filter((a) => !((a.payment_amount ?? 0) > 0))
-
-  const latestBalance = (a: NetworthAccount) => {
-    let best: NetworthBalance | null = null
-    for (const b of balances) if (b.account_id === a.id && b.month <= month && (!best || b.month > best.month)) best = b
-    return best ? Number(best.balance) : null
-  }
+  const withPayment = debts.filter(hasPaymentPlan)
+  const withoutPayment = debts.filter((a) => !hasPaymentPlan(a))
 
   const rows = withPayment
     .map((a) => {
       const due = dueDateIn(month, a.payment_day ?? 1)
       const paid = payments.find((p) => p.account_id === a.id && p.month === month) ?? null
-      const balance = latestBalance(a)
+      const balance = balanceUpTo(a, balances, month)
+      const { amount: expected, fixed } = expectedPayment(a, balances, month)
       // Escrow (property tax + insurance) doesn't pay down the loan: payoff uses principal + interest only.
-      const escrow = Number(a.escrow_amount ?? 0)
-      const principalAndInterest = Number(a.payment_amount) - escrow
-      const plan = balance !== null ? payoff(balance, a.interest_rate ?? null, principalAndInterest, month) : null
-      return { a, due, paid, balance, plan, escrow, principalAndInterest }
+      const escrow = fixed ? Number(a.escrow_amount ?? 0) : 0
+      const principalAndInterest = expected - escrow
+      const monthlyInterest = balance !== null && a.interest_rate ? (balance * Number(a.interest_rate)) / 1200 : 0
+      // A card paid off each statement has no payoff schedule.
+      const plan = fixed && balance !== null ? payoff(balance, a.interest_rate ?? null, principalAndInterest, month) : null
+      return { a, due, paid, balance, plan, escrow, principalAndInterest, monthlyInterest, expected, fixed, nothingDue: !fixed && expected === 0 }
     })
     .sort((x, y) => x.due.localeCompare(y.due))
 
-  const total = rows.reduce((s, r) => s + Number(r.a.payment_amount), 0)
+  const total = rows.reduce((s, r) => s + r.expected, 0)
   const paidTotal = rows.reduce((s, r) => s + (r.paid ? Number(r.paid.amount) : 0), 0)
-  const left = rows.filter((r) => !r.paid).reduce((s, r) => s + Number(r.a.payment_amount), 0)
+  const left = rows.filter((r) => !r.paid).reduce((s, r) => s + r.expected, 0)
 
   async function markPaid(r: (typeof rows)[number]) {
     if (!user) return
@@ -72,7 +69,7 @@ export function InstallmentsCard({
       description: `${monthLabel(month)} payment, due ${dateFmt(r.due)}.`,
       submitLabel: 'Mark paid',
       fields: [
-        { name: 'amount', label: 'Amount paid', type: 'number', prefix: '$', defaultValue: String(Number(r.a.payment_amount)), validate: validators.positive },
+        { name: 'amount', label: 'Amount paid', type: 'number', prefix: '$', defaultValue: String(r.expected), validate: validators.positive },
         { name: 'on', label: 'Paid on', type: 'date', defaultValue: month === currentMonth ? today : r.due },
       ],
     })
@@ -98,6 +95,7 @@ export function InstallmentsCard({
 
   function status(r: (typeof rows)[number]) {
     if (r.paid) return <Pill tone="green"><CheckCircle2 size={12} /> Paid {dateFmt(r.paid.paid_on)}</Pill>
+    if (r.nothingDue) return <Pill>Nothing due</Pill>
     if (month < currentMonth) return <Pill tone="red">Not marked paid</Pill>
     if (month > currentMonth) return <Pill>Scheduled</Pill>
     const days = daysBetween(today, r.due)
@@ -152,7 +150,8 @@ export function InstallmentsCard({
                     <div className="text-xs text-neutral-500">{categoryLabel(r.a.category)}</div>
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">
-                    <div className="font-medium text-white">{currency(Number(r.a.payment_amount))}</div>
+                    <div className={`font-medium ${r.nothingDue ? 'text-neutral-500' : 'text-white'}`}>{currency(r.expected)}</div>
+                    {!r.fixed && <div className="whitespace-nowrap text-xs text-neutral-500">statement balance</div>}
                     {r.escrow > 0 && (
                       <div className="whitespace-nowrap text-xs text-neutral-500" title="Principal & interest · escrow (property tax + insurance)">
                         {currency(r.principalAndInterest)} P&amp;I · {currency(r.escrow)} escrow
@@ -162,13 +161,18 @@ export function InstallmentsCard({
                   <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{r.a.interest_rate != null ? `${Number(r.a.interest_rate)}%` : '—'}</td>
                   <td className="px-3 py-3 text-right tabular-nums text-neutral-300">{r.balance !== null ? currency(r.balance) : '—'}</td>
                   <td className="px-3 py-3">
-                    {r.plan === null ? (
+                    {!r.fixed ? (
+                      <span className="text-xs text-neutral-600">paid each statement</span>
+                    ) : r.plan === null ? (
                       <span className="text-xs text-neutral-600">{r.balance === null ? 'needs a balance' : '—'}</span>
                     ) : r.plan.kind === 'paid_off' ? (
                       <span className="text-emerald-300">Paid off</span>
                     ) : r.plan.kind === 'never' ? (
-                      <span className="text-xs text-red-300" title="The payment is less than the monthly interest">
+                      <span className="text-xs text-red-300" title="Check the payment is the total you pay including escrow, and the rate is the yearly APR">
                         Payment doesn’t cover interest
+                        <span className="block text-neutral-500">
+                          {r.escrow > 0 ? 'P&I' : 'Payment'} {currency(r.principalAndInterest)} vs {currency(r.monthlyInterest)} interest/mo
+                        </span>
                       </span>
                     ) : (
                       <>
@@ -183,7 +187,7 @@ export function InstallmentsCard({
                   <td className="px-3 py-3">{status(r)}</td>
                   <td className="px-5 py-3 text-right">
                     <span className="flex items-center justify-end gap-1">
-                      {!r.paid && (
+                      {!r.paid && !r.nothingDue && (
                         <Button size="sm" variant="primary" onClick={() => markPaid(r)}>
                           Mark paid
                         </Button>

@@ -1,4 +1,24 @@
+import type { NetworthAccount, NetworthBalance } from './database.types'
 import { addMonths } from './networth'
+
+/** A debt is on the Monthly payments list once it has a fixed payment or a due day. */
+export const hasPaymentPlan = (a: NetworthAccount) => (a.payment_amount ?? 0) > 0 || a.payment_day != null
+
+/** Latest balance on or before `month` (null = none entered yet). */
+export function balanceUpTo(a: NetworthAccount, balances: NetworthBalance[], month: string): number | null {
+  let best: NetworthBalance | null = null
+  for (const b of balances) if (b.account_id === a.id && b.month <= month && (!best || b.month > best.month)) best = b
+  return best ? Number(best.balance) : null
+}
+
+/** What's due in `month`. A fixed payment (mortgage, loans) is that amount. With only a due
+ * day (credit cards), it's the statement balance: last month's closing balance, else the
+ * latest one -- so a card at $0 has nothing due. */
+export function expectedPayment(a: NetworthAccount, balances: NetworthBalance[], month: string): { amount: number; fixed: boolean } {
+  if ((a.payment_amount ?? 0) > 0) return { amount: Number(a.payment_amount), fixed: true }
+  const statement = balanceUpTo(a, balances, addMonths(month, -1)) ?? balanceUpTo(a, balances, month) ?? 0
+  return { amount: Math.max(statement, 0), fixed: false }
+}
 
 /** The due date (yyyy-mm-dd) of a payment in a given month (yyyy-mm-01). A due day past the
  * month's end -- the 31st in a 30-day month -- falls on the month's last day. */

@@ -4,7 +4,7 @@ import { Archive, ChevronRight, Plus, Wallet } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { PortfolioKind } from '../lib/database.types'
 import { createPortfolio, updatePortfolio } from '../lib/wealthQueries'
-import { KIND_TONE, PORTFOLIO_KINDS, kindLabel, seriesFor, signedCurrency as signed, timeWeightedReturn } from '../lib/portfolio'
+import { KIND_TONE, PORTFOLIO_KINDS, dayChangeLabel, kindLabel, seriesFor, signedCurrency as signed, timeWeightedReturn } from '../lib/portfolio'
 import { currency, percentFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
 import { useDialog } from '../lib/dialogContext'
@@ -96,7 +96,7 @@ export function PortfoliosPage() {
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Kpi label="Total value" value={currency(combined.total)} sub={`${active.length} portfolio${active.length === 1 ? '' : 's'}`} accent />
             <Kpi
-              label="Today"
+              label={dayChangeLabel(combined.asOf) === 'Today' ? 'Today' : `Last close · ${dayChangeLabel(combined.asOf)}`}
               value={signed(combined.dayChange)}
               tone={combined.dayChange}
               chip={pctChip(combined.dayChange, combined.total - combined.dayChange)}
@@ -138,7 +138,7 @@ export function PortfoliosPage() {
                   <div className="text-2xl font-semibold tracking-tight tabular-nums text-white">{currency(snap.total)}</div>
                   <div className="grid grid-cols-3 gap-2 border-t border-(--border) pt-3 text-xs">
                     <div>
-                      <div className="text-neutral-500">Today</div>
+                      <div className="text-neutral-500">{dayChangeLabel(snap.asOf)}</div>
                       <div className={`mt-0.5 font-medium tabular-nums ${toneClass(snap.dayChange)}`}>{signed(snap.dayChange)}</div>
                     </div>
                     <div>

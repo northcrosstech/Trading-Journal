@@ -5,7 +5,7 @@ import type { DividendInfo, InstallmentPayment, NetworthAccount, NetworthBalance
 import { fetchDividendInfo, fetchInstallmentPayments, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
 import { addMonths, categoryLabel, isDebt, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
-import { KIND_TONE, kindLabel, signedCurrency as signed } from '../lib/portfolio'
+import { KIND_TONE, dayChangeLabel, kindLabel, signedCurrency as signed } from '../lib/portfolio'
 import { dividendRows } from '../lib/dividends'
 import { centralDateStr, currency, percentFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
@@ -124,7 +124,7 @@ export function WealthOverviewPage() {
               value={currency(w.combined.total)}
               chip={w.combined.total - w.combined.dayChange > 0 ? percentFmt(w.combined.dayChange / (w.combined.total - w.combined.dayChange)) : undefined}
               chipTone={w.combined.dayChange}
-              sub="today"
+              sub={dayChangeLabel(w.combined.asOf) === 'Today' ? 'today' : `last close · ${dayChangeLabel(w.combined.asOf)}`}
             />
             <StatCard label="Dividend income" value={`${currency(projectedDividends)}/yr`} sub={`≈ ${currency(projectedDividends / 12)} a month`} />
           </div>
@@ -199,7 +199,7 @@ export function WealthOverviewPage() {
                       </span>
                       <span className="text-right">
                         <span className="block text-sm font-semibold tabular-nums text-white">{currency(snap.total)}</span>
-                        <span className={`text-xs tabular-nums ${toneClass(snap.dayChange)}`}>{signed(snap.dayChange)} today</span>
+                        <span className={`text-xs tabular-nums ${toneClass(snap.dayChange)}`}>{signed(snap.dayChange)} {dayChangeLabel(snap.asOf) === 'Today' ? 'today' : dayChangeLabel(snap.asOf)}</span>
                       </span>
                     </Link>
                   ))}

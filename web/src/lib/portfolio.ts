@@ -1,6 +1,6 @@
 import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioDailyValue, PortfolioKind } from './database.types'
 import type { SymbolPrice } from './wealthQueries'
-import { currency } from './format'
+import { centralDateStr, currency } from './format'
 import type { PillTone } from '../components/ui/Pill'
 
 /** $ amount with an explicit + for gains. */
@@ -29,6 +29,7 @@ export type HoldingView = {
   gainPct: number | null
   dayChange: number | null
   dayChangePct: number | null
+  priceDate: string | null // date of the close used (null = manual or no price)
 }
 
 export function holdingView(h: Holding, prices: Map<string, SymbolPrice>): HoldingView {
@@ -49,6 +50,7 @@ export function holdingView(h: Holding, prices: Map<string, SymbolPrice>): Holdi
     gainPct: price !== null && cost > 0 ? (value - cost) / cost : null,
     dayChange,
     dayChangePct: dayChange !== null && p?.prevClose ? (p.close - p.prevClose) / p.prevClose : null,
+    priceDate: priced === 'close' && p ? p.date : null,
   }
 }
 
@@ -94,7 +96,10 @@ export type PortfolioSnapshot = {
   total: number
   cost: number
   unrealized: number
+  /** Change over the latest trading day with prices (asOf) -- holdings whose newest close is
+   * older than that don't count, so one stale ticker can't mix in an older day's move. */
   dayChange: number
+  asOf: string | null // date of the latest close behind dayChange
   unpriced: number // holdings still waiting for their first price
 }
 
@@ -113,6 +118,7 @@ export function portfolioSnapshot(
   const cash = portfolios.reduce((s, p) => s + Number(p.cash), 0)
   const collateral = openCsps.reduce((s, c) => s + cspCollateral(c), 0)
   const liability = openCsps.reduce((s, c) => s + cspLiability(c, prices), 0)
+  const asOf = views.reduce<string | null>((m, v) => (v.priceDate !== null && (m === null || v.priceDate > m) ? v.priceDate : m), null)
   return {
     holdings: views,
     holdingsValue,
@@ -125,9 +131,18 @@ export function portfolioSnapshot(
     total: holdingsValue + cash - liability + optionsValue,
     cost,
     unrealized: views.reduce((s, v) => s + (v.gain ?? 0), 0) + optionsGain,
-    dayChange: views.reduce((s, v) => s + (v.dayChange ?? 0), 0),
+    dayChange: views.reduce((s, v) => s + (v.priceDate === asOf ? (v.dayChange ?? 0) : 0), 0),
+    asOf,
     unpriced: views.filter((v) => v.priced === 'none').length,
   }
+}
+
+/** What a day change covers: "Today" once today's close is in, otherwise the day of the
+ * last close (e.g. before today's prices arrive, it's yesterday's move, not today's). */
+export function dayChangeLabel(asOf: string | null, today: string = centralDateStr(new Date())): string {
+  if (asOf === null || asOf >= today) return 'Today'
+  const [y, m, d] = asOf.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
 /** Sums several portfolios' daily values by date -- for the combined view. A date only

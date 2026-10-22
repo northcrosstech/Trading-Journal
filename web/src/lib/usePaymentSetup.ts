@@ -14,17 +14,17 @@ export function usePaymentSetup(onChanged: () => void) {
     async (a: NetworthAccount) => {
       const v = await dialog.form({
         title: `Payment details · ${a.name}`,
-        description: 'Leave the payment blank to remove it. Balances still come from your statements.',
+        description: 'For a card, set just the due day: what\u2019s due is the statement balance (nothing when it\u2019s $0). Clear both to remove it. Balances still come from your statements.',
         submitLabel: 'Save',
         fields: [
           {
             name: 'amount',
-            label: 'Monthly payment',
+            label: 'Monthly payment (total, incl. escrow)',
             type: 'number',
             prefix: '$',
             optional: true,
             defaultValue: a.payment_amount != null ? String(Number(a.payment_amount)) : '',
-            placeholder: 'e.g. 2,150',
+            placeholder: 'blank = pays the statement balance',
             validate: validators.nonNegative,
           },
           {
@@ -32,10 +32,10 @@ export function usePaymentSetup(onChanged: () => void) {
             label: 'Due day of the month',
             type: 'number',
             optional: true,
-            defaultValue: a.payment_day != null ? String(a.payment_day) : '1',
+            defaultValue: a.payment_day != null ? String(a.payment_day) : '',
             hint: '1–31. In shorter months, the 31st falls on the last day.',
-            validate: (s, all) => {
-              if (all.amount === '') return null
+            validate: (s) => {
+              if (s.trim() === '') return null
               const n = Number(s)
               return Number.isInteger(n) && n >= 1 && n <= 31 ? null : 'Enter a day from 1 to 31'
             },
@@ -58,7 +58,7 @@ export function usePaymentSetup(onChanged: () => void) {
             optional: true,
             defaultValue: a.escrow_amount != null ? String(Number(a.escrow_amount)) : '',
             placeholder: 'e.g. 450',
-            hint: 'Optional — the part of the monthly payment held in escrow. Your servicer’s statement shows it; update it when they re-calculate escrow.',
+            hint: 'Optional — the part of the total above held in escrow, from your servicer’s statement. The payment minus escrow is what pays the loan.',
             validate: (s, all) => {
               const bad = validators.nonNegative(s)
               if (bad || s.trim() === '' || all.amount === '') return bad
@@ -69,17 +69,18 @@ export function usePaymentSetup(onChanged: () => void) {
       })
       if (!v) return
       const amount = v.amount === '' ? null : parseAmount(v.amount)
+      const day = v.day.trim() === '' ? (amount === null ? null : 1) : Number(v.day)
       const escrow = amount === null || v.escrow === '' ? null : parseAmount(v.escrow)
       try {
         await updateNetworthAccount(a.id, {
           payment_amount: amount,
-          payment_day: amount === null ? null : Number(v.day || 1),
-          interest_rate: amount === null || v.apr === '' ? null : parseAmount(v.apr),
+          payment_day: day,
+          interest_rate: v.apr === '' ? null : parseAmount(v.apr),
           // Only send escrow when there is (or was) one, so saving still works before the
           // escrow migration has been run.
           ...(escrow !== null || a.escrow_amount != null ? { escrow_amount: escrow } : {}),
         })
-        toast(amount === null ? `Removed the payment for ${a.name}` : `Saved the payment for ${a.name}`)
+        toast(amount === null && day === null ? `Removed the payment for ${a.name}` : `Saved the payment for ${a.name}`)
         onChanged()
       } catch (e) {
         toast(e instanceof Error ? e.message : String(e), 'error')
