@@ -14,7 +14,7 @@ import {
   saveMonthBalances,
   updateNetworthAccount,
 } from '../lib/wealthQueries'
-import { CATEGORIES, addMonths, categoryLabel, categoryOrder, isDebt, isOpenIn, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
+import { ACCOUNT_CATEGORIES, addMonths, categoryLabel, categoryOrder, isDebt, isOpenIn, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
 import { centralDateStr, currency, percentFmt } from '../lib/format'
 import { INPUT, INPUT_SM, LABEL } from '../lib/ui'
 import { useDialog } from '../lib/dialogContext'
@@ -372,14 +372,14 @@ function ManageAccounts({ accounts, defaultMonth, onChanged }: { accounts: Netwo
           <span className={LABEL}>Category</span>
           <select value={category} onChange={(e) => setCategory(e.target.value as NetworthCategory)} className={INPUT}>
             <optgroup label="What you own">
-              {CATEGORIES.filter((c) => !c.debt).map((c) => (
+              {ACCOUNT_CATEGORIES.filter((c) => !c.debt).map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.label}
                 </option>
               ))}
             </optgroup>
             <optgroup label="What you owe">
-              {CATEGORIES.filter((c) => c.debt).map((c) => (
+              {ACCOUNT_CATEGORIES.filter((c) => c.debt).map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.label}
                 </option>
@@ -451,12 +451,13 @@ export function NetWorthPage() {
   const currentMonth = monthOf(centralDateStr(new Date()))
   const [searchParams] = useSearchParams()
   const requested = searchParams.get('month')
-  const [month, setMonth] = useState(requested && /^\d{4}-\d{2}$/.test(requested) ? `${requested}-01` : currentMonth)
+  // Month-end balances belong to a finished month, so open on the last completed one.
+  const [month, setMonth] = useState(requested && /^\d{4}-\d{2}$/.test(requested) ? `${requested}-01` : addMonths(currentMonth, -1))
   // The month-end checklist links here with ?month=yyyy-mm.
   useEffect(() => {
     if (requested && /^\d{4}-\d{2}$/.test(requested)) setMonth(`${requested}-01`)
   }, [requested])
-  const [year, setYear] = useState(Number(currentMonth.slice(0, 4)))
+  const [year, setYear] = useState(Number(month.slice(0, 4)))
   const [accounts, setAccounts] = useState<NetworthAccount[] | null>(null)
   const [balances, setBalances] = useState<NetworthBalance[]>([])
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])

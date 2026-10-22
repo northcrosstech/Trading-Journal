@@ -224,6 +224,7 @@ export type SyncLogRow = {
 }
 
 export type NetworthCategory =
+  | 'margin' // display only: a portfolio's margin loan (negative cash); never stored on an account
   | 'home'
   | 'cash'
   | 'emergency_fund'

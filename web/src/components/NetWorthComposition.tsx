@@ -56,6 +56,19 @@ export function NetWorthComposition({ lines, monthName }: { lines: NetworthLine[
                       <div className="h-full rounded-full bg-red-400/80" style={{ width: `${(d.total / maxDebt) * 100}%` }} />
                     </div>
                     {debtTotal > 0 && <div className="mt-0.5 text-xs text-neutral-500">{((d.total / debtTotal) * 100).toFixed(1)}% of debt</div>}
+                    {d.count > 1 && (
+                      <ul className="mt-1.5 flex flex-col gap-0.5 border-l border-(--border) pl-3 text-xs">
+                        {lines
+                          .filter((l) => l.category === d.category)
+                          .sort((a, b) => a.amount - b.amount)
+                          .map((l) => (
+                            <li key={l.key} className="flex justify-between gap-3">
+                              <span className="truncate text-neutral-400">{l.name}</span>
+                              <span className="tabular-nums text-neutral-400">−{currency(Math.abs(l.amount))}</span>
+                            </li>
+                          ))}
+                      </ul>
+                    )}
                   </div>
                 ))}
               </div>

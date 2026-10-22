@@ -13,9 +13,13 @@ export const CATEGORIES: { value: NetworthCategory; label: string; debt: boolean
   { value: 'mortgage', label: 'Mortgage', debt: true },
   { value: 'auto_loan', label: 'Auto loan', debt: true },
   { value: 'credit_card', label: 'Credit cards', debt: true },
+  { value: 'margin', label: 'Margin loans', debt: true },
   { value: 'debt', label: 'Debt', debt: true },
   { value: 'other_debt', label: 'Other debt', debt: true },
 ]
+
+/** Categories an account can be given ('margin' only comes from portfolios). */
+export const ACCOUNT_CATEGORIES = CATEGORIES.filter((c) => c.value !== 'margin')
 
 const CATEGORY_BY_VALUE = new Map(CATEGORIES.map((c) => [c.value, c]))
 export const categoryLabel = (c: NetworthCategory) => CATEGORY_BY_VALUE.get(c)?.label ?? c
@@ -104,7 +108,7 @@ export function monthTotals(
     // full value -- the same net as the portfolio's value, but assets and debts read true.
     const margin = Math.min(Number(best.cash) || 0, 0)
     lines.push({ key: `portfolio:${p.id}`, name: p.name, category: PORTFOLIO_CATEGORY[p.kind], amount: Number(best.total_value) - margin, source: 'portfolio' })
-    if (margin < 0) lines.push({ key: `margin:${p.id}`, name: `${p.name} · margin`, category: 'other_debt', amount: margin, source: 'portfolio' })
+    if (margin < 0) lines.push({ key: `margin:${p.id}`, name: `${p.name} · margin`, category: 'margin', amount: margin, source: 'portfolio' })
   }
 
   const assets = lines.filter((l) => l.amount > 0).reduce((s, l) => s + l.amount, 0)
