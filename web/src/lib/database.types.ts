@@ -509,6 +509,26 @@ export type Database = {
         Args: { p_csp: string; p_outcome: 'expired' | 'closed' | 'assigned'; p_price?: number | null; p_on?: string }
         Returns: undefined
       }
+      portfolio_entry_delete: {
+        Args: { p_activity: string }
+        Returns: undefined
+      }
+      portfolio_entry_edit: {
+        Args: { p_activity: string; p_symbol: string | null; p_quantity: number | null; p_price: number | null; p_amount: number | null; p_on: string }
+        Returns: undefined
+      }
+      option_edit: {
+        Args: { p_option: string; p_symbol: string; p_strike: number; p_expiration: string; p_contracts: number; p_price: number; p_is_hedge: boolean; p_on: string }
+        Returns: string
+      }
+      csp_edit: {
+        Args: { p_csp: string; p_symbol: string; p_strike: number; p_expiration: string; p_contracts: number; p_premium: number; p_on: string }
+        Returns: string
+      }
+      position_undo_last: {
+        Args: { p_option?: string | null; p_csp?: string | null }
+        Returns: undefined
+      }
     }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>

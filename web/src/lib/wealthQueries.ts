@@ -349,6 +349,65 @@ export async function optionClose(p: { optionId: string; outcome: 'closed' | 'ex
 }
 
 // ---------------------------------------------------------------------------
+// Fixing mistakes: each call reverses the original exactly and (for edits) re-applies it
+// with the new values in the same save.
+// ---------------------------------------------------------------------------
+
+/** Undo one Activity entry (cash, shares, average cost, option status all reversed). */
+export async function deleteActivityEntry(activityId: string) {
+  const { error } = await supabase.rpc('portfolio_entry_delete', { p_activity: activityId })
+  if (error) throw error
+}
+
+/** Edit a buy / sell / add-existing (symbol, quantity, price) or a deposit / withdrawal /
+ * dividend (amount, dividend symbol). The kind stays the same. */
+export async function editActivityEntry(p: { activityId: string; symbol: string | null; quantity: number | null; price: number | null; amount: number | null; on: string }) {
+  const { error } = await supabase.rpc('portfolio_entry_edit', {
+    p_activity: p.activityId,
+    p_symbol: p.symbol,
+    p_quantity: p.quantity,
+    p_price: p.price,
+    p_amount: p.amount,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
+export async function optionEdit(p: { optionId: string; symbol: string; strike: number; expiration: string; contracts: number; price: number; isHedge: boolean; on: string }) {
+  const { error } = await supabase.rpc('option_edit', {
+    p_option: p.optionId,
+    p_symbol: p.symbol,
+    p_strike: p.strike,
+    p_expiration: p.expiration,
+    p_contracts: p.contracts,
+    p_price: p.price,
+    p_is_hedge: p.isHedge,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
+export async function cspEdit(p: { cspId: string; symbol: string; strike: number; expiration: string; contracts: number; premium: number; on: string }) {
+  const { error } = await supabase.rpc('csp_edit', {
+    p_csp: p.cspId,
+    p_symbol: p.symbol,
+    p_strike: p.strike,
+    p_expiration: p.expiration,
+    p_contracts: p.contracts,
+    p_premium: p.premium,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
+/** Undo a position's newest entry: a closed/expired/assigned/exercised one reopens, an
+ * open one is deleted (its premium reversed). */
+export async function undoPositionLast(p: { optionId?: string; cspId?: string }) {
+  const { error } = await supabase.rpc('position_undo_last', { p_option: p.optionId ?? null, p_csp: p.cspId ?? null })
+  if (error) throw error
+}
+
+// ---------------------------------------------------------------------------
 // Installments (monthly payments on debts)
 // ---------------------------------------------------------------------------
 

@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Layers, Plus } from 'lucide-react'
 import type { CspPosition, OptionPosition } from '../lib/database.types'
-import { cspResolve, optionClose, setCspMark, setOptionMark, type SymbolPrice } from '../lib/wealthQueries'
+import { cspEdit, cspResolve, optionClose, optionEdit, setCspMark, setOptionMark, undoPositionLast, type SymbolPrice } from '../lib/wealthQueries'
 import { OPTION_MULTIPLIER, cspAnnualizedYield, cspCollateral, cspLiability, cspStats, optionGain, optionValue } from '../lib/portfolio'
 import { centralDateStr, currency, dateFmt, percentFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
-import { parseAmount, useDialog, validators } from '../lib/dialogContext'
+import { parseAmount, useDialog, validators, type DialogField } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
@@ -94,6 +94,113 @@ export function OptionsCard({
 
   const labelOf = (symbol: string, strike: number, type: 'call' | 'put') => `${symbol} ${Number(strike)}${type === 'call' ? 'C' : 'P'}`
 
+  /** The fields shared by editing an option and a put: the contract and what was paid/received. */
+  const contractFields = (
+    p: { symbol: string; strike: number; expiration: string; contracts: number; price: number; openedOn: string },
+    priceLabel: string,
+  ): DialogField[] => [
+    { name: 'symbol', label: 'Ticker', defaultValue: p.symbol, validate: validators.required },
+    { name: 'strike', label: 'Strike', type: 'number', prefix: '$', defaultValue: String(Number(p.strike)), validate: validators.positive },
+    { name: 'expiration', label: 'Expiration', type: 'date', defaultValue: p.expiration, validate: validators.required },
+    {
+      name: 'contracts',
+      label: 'Contracts',
+      type: 'number',
+      defaultValue: String(p.contracts),
+      validate: (s) => (Number.isInteger(Number(s)) && Number(s) > 0 ? null : 'Enter a whole number above 0'),
+    },
+    {
+      name: 'price',
+      label: priceLabel,
+      type: 'number',
+      prefix: '$',
+      defaultValue: String(Number(p.price)),
+      hint: 'Per share, as quoted.',
+      validate: (s) => validators.required(s) ?? validators.nonNegative(s),
+    },
+    { name: 'on', label: 'Opened on', type: 'date', defaultValue: p.openedOn, validate: validators.required },
+  ]
+  const EDIT_NOTE = 'The original is reversed and this is saved in its place — the premium in cash updates to match.'
+
+  async function editOption(o: OptionPosition) {
+    const long = o.side === 'long'
+    const fields = contractFields(
+      { symbol: o.symbol, strike: o.strike, expiration: o.expiration, contracts: o.contracts, price: o.open_price, openedOn: o.opened_on },
+      long ? 'Price paid' : 'Premium received',
+    )
+    if (long)
+      fields.push({
+        name: 'hedge',
+        label: 'Hedge',
+        type: 'select',
+        defaultValue: o.is_hedge ? 'yes' : 'no',
+        options: [
+          { value: 'no', label: 'No' },
+          { value: 'yes', label: 'Yes — protects other positions' },
+        ],
+      })
+    const v = await dialog.form({ title: `Edit ${labelOf(o.symbol, o.strike, o.option_type)}`, description: EDIT_NOTE, submitLabel: 'Save changes', fields })
+    if (!v) return
+    run(
+      optionEdit({
+        optionId: o.id,
+        symbol: v.symbol.toUpperCase(),
+        strike: parseAmount(v.strike)!,
+        expiration: v.expiration,
+        contracts: Number(v.contracts),
+        price: parseAmount(v.price)!,
+        isHedge: long ? v.hedge === 'yes' : false,
+        on: v.on,
+      }),
+      'Option updated',
+    )
+  }
+
+  async function editCsp(c: CspPosition) {
+    const fields = contractFields(
+      { symbol: c.symbol, strike: c.strike, expiration: c.expiration, contracts: c.contracts, price: c.premium, openedOn: c.opened_on },
+      'Premium received',
+    )
+    const v = await dialog.form({ title: `Edit ${labelOf(c.symbol, c.strike, 'put')}`, description: EDIT_NOTE, submitLabel: 'Save changes', fields })
+    if (!v) return
+    run(
+      cspEdit({
+        cspId: c.id,
+        symbol: v.symbol.toUpperCase(),
+        strike: parseAmount(v.strike)!,
+        expiration: v.expiration,
+        contracts: Number(v.contracts),
+        premium: parseAmount(v.price)!,
+        on: v.on,
+      }),
+      'Put updated',
+    )
+  }
+
+  async function deletePosition(label: string, target: { optionId?: string; cspId?: string }) {
+    if (
+      await dialog.confirm({
+        title: `Delete ${label}?`,
+        message: 'For a position entered by mistake: it’s removed and its premium reversed in cash. To record a real close, use Sell / Buy back / Expired instead.',
+        confirmLabel: 'Delete position',
+        tone: 'danger',
+      })
+    )
+      run(undoPositionLast(target), `${label} deleted`)
+  }
+
+  async function reopen(label: string, status: string, target: { optionId?: string; cspId?: string }) {
+    if (
+      await dialog.confirm({
+        title: `Reopen ${label}?`,
+        message: `Undoes “${status}” — cash, shares and the realized gain go back to how they were before it.`,
+        confirmLabel: 'Reopen',
+        tone: 'warning',
+      })
+    )
+      run(undoPositionLast(target), `${label} reopened`)
+  }
+
   const optionRows: Row[] = options
     .filter((o) => o.status === 'open')
     .map((o) => {
@@ -159,6 +266,7 @@ export function OptionsCard({
               run(optionClose({ optionId: o.id, outcome: 'assigned', on: resolveDate(o.expiration) }), `${label} assigned`)
           },
         })
+      menu.push({ label: 'Edit…', onClick: () => editOption(o) }, { label: 'Delete', tone: 'danger', onClick: () => deletePosition(label, { optionId: o.id }) })
       return {
         key: o.id,
         label: `${label} ×${o.contracts}`,
@@ -219,6 +327,8 @@ export function OptionsCard({
               run(cspResolve({ cspId: c.id, outcome: 'assigned', on: resolveDate(c.expiration) }), `${label} assigned`)
           },
         },
+        { label: 'Edit…', onClick: () => editCsp(c) },
+        { label: 'Delete', tone: 'danger', onClick: () => deletePosition(label, { cspId: c.id }) },
       ]
       return {
         key: c.id,
@@ -250,14 +360,14 @@ export function OptionsCard({
         const premium = Number(o.open_price) * n
         const exit = o.close_price !== null ? Number(o.close_price) * n : 0
         const result = o.status === 'exercised' || o.status === 'assigned' ? null : o.side === 'long' ? exit - premium : premium - exit
-        return { key: o.id, label: `${labelOf(o.symbol, o.strike, o.option_type)} ×${o.contracts}`, kind: o.side === 'long' ? `Long ${o.option_type}` : 'Covered call', status: STATUS_LABEL[o.status], date: o.closed_on, result }
+        return { key: o.id, label: `${labelOf(o.symbol, o.strike, o.option_type)} ×${o.contracts}`, kind: o.side === 'long' ? `Long ${o.option_type}` : 'Covered call', status: STATUS_LABEL[o.status], date: o.closed_on, result, target: { optionId: o.id } }
       }),
     ...csps
       .filter((c) => c.status !== 'open')
       .map((c) => {
         const credit = Number(c.premium) * OPTION_MULTIPLIER * c.contracts
         const kept = c.status === 'closed' && c.close_price !== null ? credit - Number(c.close_price) * OPTION_MULTIPLIER * c.contracts : credit
-        return { key: c.id, label: `${labelOf(c.symbol, c.strike, 'put')} ×${c.contracts}`, kind: 'Cash-secured put', status: c.status === 'closed' ? 'Bought back' : STATUS_LABEL[c.status], date: c.closed_on, result: kept }
+        return { key: c.id, label: `${labelOf(c.symbol, c.strike, 'put')} ×${c.contracts}`, kind: 'Cash-secured put', status: c.status === 'closed' ? 'Bought back' : STATUS_LABEL[c.status], date: c.closed_on, result: kept, target: { cspId: c.id } }
       }),
   ].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
 
@@ -359,6 +469,13 @@ export function OptionsCard({
                       {h.date && ` ${dateFmt(h.date)}`}
                     </span>
                     {h.result !== null && <span className={`font-medium tabular-nums ${toneClass(h.result)}`}>{currency(h.result)}</span>}
+                    <button
+                      onClick={() => reopen(h.label, h.status, h.target)}
+                      title="Undo this close if it was a mistake"
+                      className="rounded-md px-1.5 py-0.5 text-neutral-500 transition hover:bg-(--card-raised) hover:text-white"
+                    >
+                      Reopen
+                    </button>
                   </span>
                 </div>
               ))}

@@ -25,7 +25,7 @@ import {
   unpricedSymbols,
   type HoldingView,
 } from '../lib/portfolio'
-import { currency, dateFmt, percentFmt, priceFmt } from '../lib/format'
+import { currency, percentFmt, priceFmt } from '../lib/format'
 import { INPUT_SM, toneClass } from '../lib/ui'
 import { allocationSlices } from '../lib/allocation'
 import { useDialog } from '../lib/dialogContext'
@@ -36,6 +36,7 @@ import { PortfolioActions, type TradeTab } from '../components/PortfolioActions'
 import { DividendsCard } from '../components/DividendsCard'
 import { GetPricesButton } from '../components/GetPricesButton'
 import { OptionsCard } from '../components/OptionsCard'
+import { ActivityTable } from '../components/ActivityTable'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -43,27 +44,6 @@ import { Pill } from '../components/ui/Pill'
 import { Tabs } from '../components/ui/Tabs'
 import { Drawer } from '../components/ui/Drawer'
 import { EmptyState } from '../components/ui/EmptyState'
-
-const ACTIVITY_LABEL: Record<PortfolioActivity['kind'], string> = {
-  deposit: 'Deposit',
-  withdrawal: 'Withdrawal',
-  dividend: 'Dividend',
-  buy: 'Buy',
-  sell: 'Sell',
-  transfer_in: 'Added / moved in',
-  transfer_out: 'Moved out',
-  csp_open: 'Sold put',
-  csp_close: 'Bought back put',
-  csp_expire: 'Put expired',
-  csp_assign: 'Put assigned',
-  option_buy: 'Bought option',
-  option_sell: 'Sold option',
-  option_write: 'Sold covered call',
-  option_buyback: 'Bought back call',
-  option_expire: 'Option expired',
-  option_exercise: 'Exercised call',
-  option_assign: 'Call assigned',
-}
 
 type View = 'positions' | 'performance' | 'dividends' | 'activity'
 
@@ -478,43 +458,8 @@ export function PortfolioDetailPage() {
       {view === 'dividends' && <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} />}
 
       {view === 'activity' && (
-        <Card flush title="Activity" subtitle="Every trade, cash move and option event in this portfolio">
-          {activity.length === 0 ? (
-            <EmptyState title="Nothing yet">Trades and cash moves you record show up here.</EmptyState>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-                    <th className="px-5 py-2.5">Date</th>
-                    <th className="px-3 py-2.5">Event</th>
-                    <th className="px-3 py-2.5">Details</th>
-                    <th className="px-3 py-2.5 text-right">Cash</th>
-                    <th className="px-5 py-2.5 text-right">Realized</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activity.map((a) => (
-                    <tr key={a.id} className="border-b border-(--border) last:border-0 hover:bg-white/2">
-                      <td className="whitespace-nowrap px-5 py-2.5 tabular-nums text-neutral-400">{dateFmt(a.occurred_on)}</td>
-                      <td className="px-3 py-2.5 text-neutral-200">{ACTIVITY_LABEL[a.kind]}</td>
-                      <td className="px-3 py-2.5 text-neutral-400">
-                        {a.symbol}
-                        {a.quantity !== null && ` × ${Number(Number(a.quantity).toFixed(6))}`}
-                        {a.price !== null && ` @ ${priceFmt(Number(a.price))}`}
-                      </td>
-                      <td className={`px-3 py-2.5 text-right tabular-nums ${Number(a.cash_change) === 0 ? 'text-neutral-600' : toneClass(Number(a.cash_change))}`}>
-                        {Number(a.cash_change) === 0 ? '—' : signed(Number(a.cash_change))}
-                      </td>
-                      <td className={`px-5 py-2.5 text-right tabular-nums ${a.realized_gain === null ? 'text-neutral-600' : toneClass(Number(a.realized_gain))}`}>
-                        {a.realized_gain === null ? '—' : signed(Number(a.realized_gain))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <Card flush title="Activity" subtitle="Every trade, cash move and option event — use ⋯ to edit or undo a mistake">
+          <ActivityTable activity={activity} onChanged={load} />
         </Card>
       )}
 
