@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { Holding, OptionPosition, Portfolio } from '../lib/database.types'
-import { portfolioBuy, portfolioCash, portfolioSell, portfolioTransfer, type SymbolPrice } from '../lib/wealthQueries'
+import { portfolioBuy, portfolioCash, portfolioSell, portfolioSetCash, portfolioTransfer, type SymbolPrice } from '../lib/wealthQueries'
 import { centralDateStr, currency } from '../lib/format'
 import { INPUT, LABEL } from '../lib/ui'
 import { Button } from './ui/Button'
@@ -13,7 +13,7 @@ const TABS: { value: TradeTab; label: string; hint: string }[] = [
   { value: 'sell', label: 'Sell', hint: 'Proceeds go to this portfolio’s cash; the gain or loss is recorded.' },
   { value: 'existing', label: 'Add existing', hint: 'Shares you already own or moved in. Counts as money added, not a purchase — cash isn’t touched.' },
   { value: 'transfer', label: 'Transfer', hint: 'Move shares to another portfolio, or out of the app. The average cost carries over — it isn’t a sale.' },
-  { value: 'cash', label: 'Cash', hint: 'Deposits and withdrawals are money in/out. Dividends count as earnings.' },
+  { value: 'cash', label: 'Cash', hint: 'Deposits and withdrawals are money in/out. Dividends count as earnings. Set balance matches your broker, including margin.' },
   { value: 'option', label: 'Option', hint: '' },
 ]
 
@@ -43,6 +43,7 @@ export function PortfolioActions({
   options,
   prices,
   cashAvailable,
+  cash,
   initialTab = 'buy',
   onDone,
 }: {
@@ -52,6 +53,8 @@ export function PortfolioActions({
   options: OptionPosition[]
   prices: Map<string, SymbolPrice>
   cashAvailable: number
+  /** Current cash; negative = margin used. */
+  cash: number
   initialTab?: TradeTab
   onDone: (message: string) => void
 }) {
@@ -59,7 +62,8 @@ export function PortfolioActions({
   const [symbol, setSymbol] = useState('')
   const [qty, setQty] = useState('')
   const [price, setPrice] = useState('')
-  const [cashKind, setCashKind] = useState<'deposit' | 'withdrawal' | 'dividend'>('deposit')
+  const [cashKind, setCashKind] = useState<'deposit' | 'withdrawal' | 'dividend' | 'balance'>('deposit')
+  const [balanceReason, setBalanceReason] = useState<'correction' | 'interest'>('correction')
   const [amount, setAmount] = useState('')
   const [on, setOn] = useState(centralDateStr(new Date()))
   const [destination, setDestination] = useState<string>('')
@@ -84,7 +88,12 @@ export function PortfolioActions({
         await portfolioTransfer({ fromPortfolioId: portfolioId, symbol: sym, quantity: q, toPortfolioId: destination === 'out' ? null : destination, on })
         const to = destination === 'out' ? 'out of the app' : `to ${otherPortfolios.find((p) => p.id === destination)?.name ?? 'portfolio'}`
         message = `Moved ${fmtQty(q)} ${sym} ${to}`
-      } else if (tab === 'cash') {
+      } else if (tab === 'cash' && cashKind === 'balance') {
+        const b = num(amount.replace(/^\((.*)\)$/, '-$1'))
+        if (b === null) throw new Error('Enter the cash balance your broker shows (negative for margin used).')
+        await portfolioSetCash({ portfolioId, balance: b, countsInReturn: balanceReason === 'interest', on })
+        message = b < 0 ? `Margin used set to ${currency(-b)}` : `Cash set to ${currency(b)}`
+      } else if (tab === 'cash' && cashKind !== 'balance') {
         const a = num(amount)
         if (a === null || a <= 0) throw new Error('Enter an amount above zero.')
         await portfolioCash({ portfolioId, kind: cashKind, amount: a, symbol: cashKind === 'dividend' ? sym || null : null, on })
@@ -156,18 +165,23 @@ export function PortfolioActions({
                     { value: 'deposit', label: 'Deposit' },
                     { value: 'withdrawal', label: 'Withdrawal' },
                     { value: 'dividend', label: 'Dividend' },
+                    { value: 'balance', label: 'Set balance' },
                   ]}
                   value={cashKind}
                   onChange={setCashKind}
                   size="sm"
                 />
               </Field>
-              <Field label="Amount">
-                <span className="relative">
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-500">$</span>
-                  <input autoFocus inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${INPUT} pl-7`} />
-                </span>
-              </Field>
+              {cashKind === 'balance' ? (
+                <BalanceFields cash={cash} amount={amount} setAmount={setAmount} reason={balanceReason} setReason={setBalanceReason} />
+              ) : (
+                <Field label="Amount">
+                  <span className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-500">$</span>
+                    <input autoFocus inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${INPUT} pl-7`} />
+                  </span>
+                </Field>
+              )}
               {cashKind === 'dividend' && (
                 <Field label="From ticker (optional)">
                   <input value={symbol} onChange={(e) => setSymbol(e.target.value)} className={`${INPUT} uppercase`} />
@@ -236,10 +250,71 @@ export function PortfolioActions({
 
           {error && <p className="text-sm text-red-400">{error}</p>}
           <Button variant="primary" onClick={submit} disabled={busy} className="w-full">
-            {busy ? 'Saving…' : tab === 'existing' ? 'Add shares' : tab === 'cash' ? `Record ${cashKind}` : meta.label}
+            {busy ? 'Saving…' : tab === 'existing' ? 'Add shares' : tab === 'cash' ? (cashKind === 'balance' ? 'Set balance' : `Record ${cashKind}`) : meta.label}
           </Button>
         </>
       )}
     </div>
+  )
+}
+
+/** Cash tab, "Set balance": type what the broker shows (negative = margin used) and why it
+ * differs, with the current balance and the change it makes. */
+function BalanceFields({
+  cash,
+  amount,
+  setAmount,
+  reason,
+  setReason,
+}: {
+  cash: number
+  amount: string
+  setAmount: (v: string) => void
+  reason: 'correction' | 'interest'
+  setReason: (v: 'correction' | 'interest') => void
+}) {
+  const target = num(amount)
+  const delta = target === null ? null : target - cash
+  const show = (n: number) => (n < 0 ? `${currency(-n)} margin used` : currency(n))
+  return (
+    <>
+      <Field
+        label="Cash balance at your broker"
+        hint={
+          <>
+            Now {show(cash)}. Enter a negative number for margin used, e.g. <span className="tabular-nums text-neutral-300">-33,481.61</span>.
+            {delta !== null && delta !== 0 && (
+              <span className={`mt-0.5 block ${delta < 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                Changes cash by {delta > 0 ? '+' : '−'}
+                {currency(Math.abs(delta))} → {show(target!)}
+              </span>
+            )}
+          </>
+        }
+      >
+        <span className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-500">$</span>
+          <input autoFocus inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="-33,481.61" className={`${INPUT} pl-7`} />
+        </span>
+      </Field>
+      <Field
+        label="Why is it different?"
+        hint={
+          reason === 'correction'
+            ? 'Setup or correction, e.g. shares added with “Add existing” that were bought on margin. Treated as money in/out, so it isn’t a gain or loss.'
+            : 'Margin interest or fees: a real cost, so it lowers your return.'
+        }
+      >
+        <Segmented
+          options={[
+            { value: 'correction', label: 'Setup / correction' },
+            { value: 'interest', label: 'Interest or fees' },
+          ]}
+          value={reason}
+          onChange={setReason}
+          size="sm"
+        />
+      </Field>
+    </>
   )
 }

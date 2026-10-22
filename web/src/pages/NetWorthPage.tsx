@@ -187,7 +187,9 @@ function BalancesTable({
                           <td className="px-5 py-2.5">
                             <div className="font-medium text-neutral-100">{it.name}</div>
                             {it.kind === 'portfolio' ? (
-                              <div className="text-xs text-neutral-500">from Portfolios · last close</div>
+                              <div className="text-xs text-neutral-500">
+                                {it.key.startsWith('margin:') ? 'margin used · from Portfolios' : 'from Portfolios · last close'}
+                              </div>
                             ) : (
                               p?.from && <div className="text-xs text-amber-400/90">carried from {monthLabel(p.from)}</div>
                             )}

@@ -473,6 +473,7 @@ export function PortfolioDetailPage() {
             options={options}
             prices={prices}
             cashAvailable={snap.cashAvailable}
+            cash={snap.cash}
             initialTab={trade}
             onDone={tradeDone}
           />

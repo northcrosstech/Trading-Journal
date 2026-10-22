@@ -202,6 +202,18 @@ export async function portfolioSell(p: { portfolioId: string; symbol: string; qu
   if (error) throw error
 }
 
+/** Set cash to the broker's balance (negative = margin used). countsInReturn = false for a
+ * setup/correction (treated as money in/out), true for margin interest or fees. */
+export async function portfolioSetCash(p: { portfolioId: string; balance: number; countsInReturn: boolean; on: string }) {
+  const { error } = await supabase.rpc('portfolio_set_cash', {
+    p_portfolio: p.portfolioId,
+    p_balance: p.balance,
+    p_counts_in_return: p.countsInReturn,
+    p_on: p.on,
+  })
+  if (error) throw error
+}
+
 /** Move shares to another of your portfolios (toPortfolioId) or out of the app (null).
  * The average cost carries over; no gain or loss is realized. */
 export async function portfolioTransfer(p: { fromPortfolioId: string; symbol: string; quantity: number; toPortfolioId: string | null; on: string }) {

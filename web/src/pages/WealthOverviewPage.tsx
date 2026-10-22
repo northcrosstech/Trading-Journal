@@ -192,8 +192,9 @@ export function WealthOverviewPage() {
                     <Link key={p.id} to={`/portfolios/${p.id}`} className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-3 transition hover:bg-(--card-raised)">
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium text-white">{p.name}</span>
-                        <span className="mt-1 inline-block">
+                        <span className="mt-1 flex flex-wrap gap-1.5">
                           <Pill tone={KIND_TONE[p.kind]}>{kindLabel(p.kind)}</Pill>
+                          {snap.cash < 0 && <Pill tone="amber">{currency(-snap.cash)} margin</Pill>}
                         </span>
                       </span>
                       <span className="text-right">

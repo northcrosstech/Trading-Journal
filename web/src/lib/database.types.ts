@@ -329,6 +329,7 @@ export type PortfolioActivityKind =
   | 'deposit'
   | 'withdrawal'
   | 'dividend'
+  | 'cash_adjust' // cash balance set to match the broker; price = the balance it was set to
   | 'buy'
   | 'sell'
   | 'transfer_in'
@@ -468,6 +469,10 @@ export type Database = {
       }
       portfolio_transfer: {
         Args: { p_from: string; p_symbol: string; p_quantity: number; p_to?: string | null; p_on?: string }
+        Returns: undefined
+      }
+      portfolio_set_cash: {
+        Args: { p_portfolio: string; p_balance: number; p_counts_in_return?: boolean; p_on?: string }
         Returns: undefined
       }
       portfolio_cash: {

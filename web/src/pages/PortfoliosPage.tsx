@@ -130,6 +130,7 @@ export function PortfoliosPage() {
                           {snap.holdings.length} holding{snap.holdings.length === 1 ? '' : 's'}
                         </span>
                         {snap.unpriced > 0 && <Pill tone="amber">{snap.unpriced} price pending</Pill>}
+                        {snap.cash < 0 && <Pill tone="amber">{currency(-snap.cash)} margin</Pill>}
                       </div>
                     </div>
                     <ChevronRight size={18} className="mt-1 shrink-0 text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300" />

@@ -100,7 +100,11 @@ export function monthTotals(
       if (!best || v.value_date > best.value_date) best = v
     }
     if (!best) continue
-    lines.push({ key: `portfolio:${p.id}`, name: p.name, category: PORTFOLIO_CATEGORY[p.kind], amount: Number(best.total_value), source: 'portfolio' })
+    // Margin (negative cash) is a loan, so it's shown as a debt and the investments at their
+    // full value -- the same net as the portfolio's value, but assets and debts read true.
+    const margin = Math.min(Number(best.cash) || 0, 0)
+    lines.push({ key: `portfolio:${p.id}`, name: p.name, category: PORTFOLIO_CATEGORY[p.kind], amount: Number(best.total_value) - margin, source: 'portfolio' })
+    if (margin < 0) lines.push({ key: `margin:${p.id}`, name: `${p.name} · margin`, category: 'other_debt', amount: margin, source: 'portfolio' })
   }
 
   const assets = lines.filter((l) => l.amount > 0).reduce((s, l) => s + l.amount, 0)
