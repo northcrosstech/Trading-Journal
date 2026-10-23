@@ -234,7 +234,7 @@ export function PortfolioDetailPage() {
   )
   const series = useMemo(() => (portfolioId ? seriesFor(values, portfolioId) : []), [values, portfolioId])
   const pending = useMemo(() => unpricedSymbols(holdings, openCsps, prices, openOptions), [holdings, openCsps, prices, openOptions])
-  const realized = useMemo(() => activity.reduce((s, a) => s + (a.realized_gain !== null ? Number(a.realized_gain) : 0), 0), [activity])
+  const realized = useMemo(() => activity.reduce((s, a) => s + (a.voided_at === null && a.realized_gain !== null ? Number(a.realized_gain) : 0), 0), [activity])
 
   const allocation = useMemo(() => {
     if (!snap) return allocationSlices([], 0)
@@ -389,7 +389,7 @@ export function PortfolioDetailPage() {
           { value: 'positions', label: 'Positions', count: snap.holdings.length + openOptions.length + openCsps.length },
           { value: 'performance', label: 'Performance' },
           { value: 'dividends', label: 'Dividends' },
-          { value: 'activity', label: 'Activity', count: activity.length },
+          { value: 'activity', label: 'Activity', count: activity.filter((a) => a.voided_at === null).length },
         ]}
         value={view}
         onChange={setView}

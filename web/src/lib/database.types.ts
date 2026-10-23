@@ -363,6 +363,10 @@ export type PortfolioActivityRow = {
   csp_id: string | null
   option_id: string | null
   created_at: string
+  /** Set when the entry was undone; it stays as history. */
+  voided_at: string | null
+  /** An edited (voided) entry points at the entry that replaced it. */
+  replaced_by: string | null
 }
 
 export type PriceRow = {
@@ -459,7 +463,9 @@ export type Database = {
       dividend_info: ReturnType<typeof table<DividendInfoRow>>
       option_positions: ReturnType<typeof table<OptionPositionRow>>
     }
-    Views: Record<string, never>
+    Views: {
+      audit_summary: { Row: AuditProblem; Relationships: [] }
+    }
     Functions: {
       portfolio_buy: {
         Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_from_cash?: boolean; p_on?: string }
@@ -563,6 +569,17 @@ export type DailyPlan = DailyPlanRow
 export type NetworthAccount = NetworthAccountRow
 export type NetworthBalance = NetworthBalanceRow
 export type InstallmentPayment = InstallmentPaymentRow
+
+/** One row of the audit_summary view: something stored that doesn't match Activity. */
+export type AuditProblem = {
+  user_id: string
+  portfolio_id: string
+  portfolio: string
+  check_name: 'shares' | 'avg_cost' | 'cash' | 'position' | 'covered_call' | 'price' | 'daily_value'
+  item: string | null
+  detail: string
+  fix: string
+}
 export type Portfolio = PortfolioRow
 export type Holding = HoldingRow
 export type CspPosition = CspPositionRow

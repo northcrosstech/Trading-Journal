@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import type {
+  AuditProblem,
   CspPosition,
   InstallmentPayment,
   DividendInfo,
@@ -107,7 +108,8 @@ export async function fetchHoldings(portfolioId?: string): Promise<Holding[]> {
 
 /** Direct correction (e.g. after a stock split, or setting a manual price) -- no cash or
  * money-in/out effect. Buying and selling go through portfolioBuy / portfolioSell. */
-export async function updateHolding(id: string, patch: Partial<Pick<Holding, 'quantity' | 'avg_cost' | 'manual_price'>>) {
+/** Only the manual price can be set directly; shares and cost change through Activity. */
+export async function updateHolding(id: string, patch: Pick<Holding, 'manual_price'>) {
   const { error } = await supabase
     .from('holdings')
     .update({ ...patch, updated_at: new Date().toISOString() })
@@ -138,9 +140,20 @@ export async function fetchActivity(portfolioId: string): Promise<PortfolioActiv
   return data ?? []
 }
 
+/** Problems from the audit_summary view (empty = everything reconciles); null when the
+ * audit migration hasn't been run yet. */
+export async function fetchAuditProblems(): Promise<AuditProblem[] | null> {
+  const { data, error } = await supabase.from('audit_summary').select('*').order('portfolio').order('check_name')
+  if (error) {
+    if (error.code === '42P01' || /audit_summary/.test(error.message)) return null
+    throw error
+  }
+  return data ?? []
+}
+
 /** Realized gains for every portfolio (activity rows that carry one). */
 export async function fetchRealizedGains(): Promise<Pick<PortfolioActivity, 'portfolio_id' | 'realized_gain'>[]> {
-  const { data, error } = await supabase.from('portfolio_activity').select('portfolio_id, realized_gain').not('realized_gain', 'is', null)
+  const { data, error } = await supabase.from('portfolio_activity').select('portfolio_id, realized_gain').not('realized_gain', 'is', null).is('voided_at', null)
   if (error) throw error
   return data ?? []
 }
@@ -306,7 +319,7 @@ export async function deleteDividendInfo(symbol: string) {
 
 /** Dividends actually received (recorded with the Dividend cash action) since a date. */
 export async function fetchDividendsReceived(since: string, portfolioId?: string): Promise<PortfolioActivity[]> {
-  let q = supabase.from('portfolio_activity').select('*').eq('kind', 'dividend').gte('occurred_on', since).order('occurred_on')
+  let q = supabase.from('portfolio_activity').select('*').eq('kind', 'dividend').is('voided_at', null).gte('occurred_on', since).order('occurred_on')
   if (portfolioId) q = q.eq('portfolio_id', portfolioId)
   const { data, error } = await q
   if (error) throw error
@@ -475,6 +488,7 @@ export async function fetchExternalFlows(): Promise<Pick<PortfolioActivity, 'por
     .from('portfolio_activity')
     .select('portfolio_id, kind, external_flow, occurred_on')
     .neq('external_flow', 0)
+    .is('voided_at', null)
   if (error) throw error
   return data ?? []
 }

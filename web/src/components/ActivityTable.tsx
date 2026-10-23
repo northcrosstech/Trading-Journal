@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { PortfolioActivity } from '../lib/database.types'
 import { deleteActivityEntry, editActivityEntry } from '../lib/wealthQueries'
 import { signedCurrency as signed } from '../lib/portfolio'
@@ -75,6 +76,9 @@ function undoMessage(a: PortfolioActivity): string {
 export function ActivityTable({ activity, onChanged }: { activity: PortfolioActivity[]; onChanged: () => void }) {
   const dialog = useDialog()
   const toast = useToast()
+  const [showUndone, setShowUndone] = useState(false)
+  const undoneCount = activity.filter((a) => a.voided_at !== null).length
+  const rows = showUndone ? activity : activity.filter((a) => a.voided_at === null)
 
   async function run(p: Promise<unknown>, message: string) {
     try {
@@ -152,6 +156,14 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
 
   return (
     <div className="overflow-x-auto">
+      {undoneCount > 0 && (
+        <div className="flex justify-end border-b border-(--border) px-5 py-2">
+          <label className="flex items-center gap-2 text-xs text-neutral-400">
+            <input type="checkbox" checked={showUndone} onChange={(e) => setShowUndone(e.target.checked)} className="h-3.5 w-3.5 accent-(--accent)" />
+            Show {undoneCount} undone or edited {undoneCount === 1 ? 'entry' : 'entries'}
+          </label>
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
@@ -164,10 +176,11 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
           </tr>
         </thead>
         <tbody>
-          {activity.map((a) => {
-            const items = menuFor(a)
+          {rows.map((a) => {
+            const undone = a.voided_at !== null
+            const items = undone ? [] : menuFor(a)
             return (
-              <tr key={a.id} className="border-b border-(--border) last:border-0 hover:bg-white/2">
+              <tr key={a.id} className={`border-b border-(--border) last:border-0 hover:bg-white/2 ${undone ? 'opacity-50 [&_td:not(:last-child)]:line-through' : ''}`}>
                 <td className="whitespace-nowrap px-5 py-2.5 tabular-nums text-neutral-400">{dateFmt(a.occurred_on)}</td>
                 <td className="px-3 py-2.5 text-neutral-200">{ACTIVITY_LABEL[a.kind]}</td>
                 <td className="px-3 py-2.5 text-neutral-400">
@@ -196,7 +209,11 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
                   {a.realized_gain === null ? '—' : signed(Number(a.realized_gain))}
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  {items.length > 0 ? (
+                  {undone ? (
+                    <span className="text-xs text-neutral-400 no-underline" title={`Undone ${dateFmt(a.voided_at)}`}>
+                      {a.replaced_by ? 'Edited' : 'Undone'}
+                    </span>
+                  ) : items.length > 0 ? (
                     <Menu items={items} label={`Actions for ${ACTIVITY_LABEL[a.kind]} ${a.symbol ?? ''}`} />
                   ) : (
                     <span className="text-xs text-neutral-600" title="Transfer the shares back, or use Add existing">

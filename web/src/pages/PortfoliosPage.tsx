@@ -14,6 +14,7 @@ import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { DividendsCard } from '../components/DividendsCard'
 import { GetPricesButton } from '../components/GetPricesButton'
+import { HealthCheckCard } from '../components/HealthCheckCard'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -111,6 +112,8 @@ export function PortfoliosPage() {
             />
             <Kpi label="Realized gain" value={signed(w.realizedTotal)} tone={w.realizedTotal} sub="sales, options and puts" />
           </div>
+
+          <HealthCheckCard />
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {w.perPortfolio.map(({ portfolio: p, snap }) => {

@@ -88,7 +88,11 @@ class _FakeQuery:
         self.filters.append(lambda r: r.get(col) < val)
         return self
 
-    lte = gt = lt
+    lte = lt
+
+    def gt(self, col, val):
+        self.filters.append(lambda r: r.get(col) is not None and r.get(col) > val)
+        return self
 
     def order(self, *_a, **_k):
         return self
@@ -143,6 +147,24 @@ def test_only_new_fetches_unpriced_tickers_and_skips_daily_values(monkeypatch):
     assert fetched == [["NEW"]]
     assert s.prices_saved == 1
     assert "portfolio_daily_values" not in db.writes
+
+
+def test_net_flow_counts_entries_when_made_and_takes_back_undone_ones():
+    import prices
+
+    since = "2026-10-21T21:00:00+00:00"
+    db = _FakeDb(
+        {
+            "portfolio_activity": [
+                {"portfolio_id": "p", "external_flow": 500, "created_at": "2026-10-20T15:00:00+00:00", "voided_at": None},  # before: ignored
+                {"portfolio_id": "p", "external_flow": 1000, "created_at": "2026-10-22T15:00:00+00:00", "voided_at": None},  # new deposit
+                {"portfolio_id": "p", "external_flow": 300, "created_at": "2026-10-20T15:00:00+00:00", "voided_at": "2026-10-22T16:00:00+00:00"},  # undone today
+                {"portfolio_id": "p", "external_flow": 200, "created_at": "2026-10-22T15:00:00+00:00", "voided_at": "2026-10-22T15:30:00+00:00"},  # made and undone today
+                {"portfolio_id": "q", "external_flow": 9999, "created_at": "2026-10-22T15:00:00+00:00", "voided_at": None},  # other portfolio
+            ]
+        }
+    )
+    assert prices.net_flow_since(db, "p", since) == pytest.approx(1000 - 300)
 
 
 def test_long_option_valued_at_mark_else_what_was_paid():

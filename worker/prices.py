@@ -164,6 +164,21 @@ def _all_rows(query) -> list[dict]:
         start += 1000
 
 
+def net_flow_since(client, portfolio_id: str, since_iso: str) -> float:
+    """Money in/out of a portfolio since the last saved value. Entries are never deleted --
+    an undone one is voided -- so an entry counts when it's made and is taken back when it's
+    voided (one made and undone in the same period nets to zero)."""
+    made = _all_rows(
+        client.table("portfolio_activity").select("external_flow")
+        .eq("portfolio_id", portfolio_id).gt("created_at", since_iso)
+    )
+    undone = _all_rows(
+        client.table("portfolio_activity").select("external_flow")
+        .eq("portfolio_id", portfolio_id).gt("voided_at", since_iso)
+    )
+    return sum(float(f["external_flow"]) for f in made) - sum(float(f["external_flow"]) for f in undone)
+
+
 def run_pricing(
     value_date: date, client=None, api_key: Optional[str] = TWELVEDATA_API_KEY, only_new: bool = False
 ) -> PricingSummary:
@@ -270,13 +285,7 @@ def run_pricing(
                 .eq("portfolio_id", p["id"]).lt("value_date", value_date.isoformat())
                 .order("value_date", desc=True).limit(1).execute().data
             )
-            net_flow = 0.0
-            if prev_rows:
-                flows = _all_rows(
-                    client.table("portfolio_activity").select("external_flow")
-                    .eq("portfolio_id", p["id"]).gt("created_at", prev_rows[0]["computed_at"])
-                )
-                net_flow = sum(float(f["external_flow"]) for f in flows)
+            net_flow = net_flow_since(client, p["id"], prev_rows[0]["computed_at"]) if prev_rows else 0.0
 
             client.table("portfolio_daily_values").upsert(
                 {
