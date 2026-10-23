@@ -331,6 +331,7 @@ export type PortfolioActivityKind =
   | 'withdrawal'
   | 'dividend'
   | 'cash_adjust' // cash balance set to match the broker; price = the balance it was set to
+  | 'split' // stock split; price = ratio (new shares per old), quantity = shares after
   | 'buy'
   | 'sell'
   | 'transfer_in'
@@ -470,6 +471,10 @@ export type Database = {
       }
       portfolio_transfer: {
         Args: { p_from: string; p_symbol: string; p_quantity: number; p_to?: string | null; p_on?: string }
+        Returns: undefined
+      }
+      portfolio_split: {
+        Args: { p_portfolio: string; p_symbol: string; p_ratio: number; p_on?: string }
         Returns: undefined
       }
       portfolio_set_cash: {

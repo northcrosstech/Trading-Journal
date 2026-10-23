@@ -19,6 +19,7 @@ const ACTIVITY_LABEL: Record<Kind, string> = {
   sell: 'Sell',
   transfer_in: 'Added / moved in',
   transfer_out: 'Moved out',
+  split: 'Split',
   csp_open: 'Sold put',
   csp_close: 'Bought back put',
   csp_expire: 'Put expired',
@@ -37,6 +38,8 @@ const CASH_KINDS: Kind[] = ['deposit', 'withdrawal', 'dividend']
 const OPEN_KINDS: Kind[] = ['csp_open', 'option_buy', 'option_write']
 /** Entries that only moved cash -- undone by reversing the cash change. */
 const CASH_ONLY: Kind[] = [...CASH_KINDS, 'cash_adjust']
+/** Undone with a plain Delete (not a reopen), but not editable. */
+const PLAIN_UNDO: Kind[] = [...CASH_ONLY, 'split']
 
 const qtyOf = (a: PortfolioActivity) => Number(Number(a.quantity ?? 0).toFixed(6))
 
@@ -54,6 +57,8 @@ function undoMessage(a: PortfolioActivity): string {
     case 'withdrawal':
     case 'dividend':
       return `Reverses the ${currency(cash)} ${a.kind}.`
+    case 'split':
+      return `Reverses the ${a.symbol} split: shares and average cost go back to what they were.`
     case 'cash_adjust':
       return `Puts cash back to what it was before, reversing the ${currency(cash)} change.`
     case 'csp_open':
@@ -123,7 +128,7 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
 
   async function undo(a: PortfolioActivity) {
     const opening = OPEN_KINDS.includes(a.kind)
-    const closing = !opening && !SHARE_KINDS.includes(a.kind) && !CASH_ONLY.includes(a.kind)
+    const closing = !opening && !SHARE_KINDS.includes(a.kind) && !PLAIN_UNDO.includes(a.kind)
     const ok = await dialog.confirm({
       title: opening ? 'Delete this position?' : closing ? 'Undo and reopen the position?' : `Delete this ${ACTIVITY_LABEL[a.kind].toLowerCase()}?`,
       message: undoMessage(a),
@@ -138,7 +143,7 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
     const items: MenuItem[] = []
     if (SHARE_KINDS.includes(a.kind) || CASH_KINDS.includes(a.kind)) items.push({ label: 'Edit…', onClick: () => edit(a) })
     const opening = OPEN_KINDS.includes(a.kind)
-    const closing = !opening && !SHARE_KINDS.includes(a.kind) && !CASH_ONLY.includes(a.kind)
+    const closing = !opening && !SHARE_KINDS.includes(a.kind) && !PLAIN_UNDO.includes(a.kind)
     items.push({ label: opening ? 'Delete position' : closing ? 'Undo (reopen)' : 'Delete', tone: 'danger', onClick: () => undo(a) })
     return items
   }
@@ -166,7 +171,12 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
                 <td className="whitespace-nowrap px-5 py-2.5 tabular-nums text-neutral-400">{dateFmt(a.occurred_on)}</td>
                 <td className="px-3 py-2.5 text-neutral-200">{ACTIVITY_LABEL[a.kind]}</td>
                 <td className="px-3 py-2.5 text-neutral-400">
-                  {a.kind === 'cash_adjust' && a.price !== null ? (
+                  {a.kind === 'split' && a.price !== null ? (
+                    <>
+                      {a.symbol} {Number(a.price) >= 1 ? `${Number(Number(a.price).toFixed(4))}-for-1` : `1-for-${Number((1 / Number(a.price)).toFixed(4))}`}
+                      {a.quantity !== null && <span className="text-neutral-500"> · now {qtyOf(a)}</span>}
+                    </>
+                  ) : a.kind === 'cash_adjust' && a.price !== null ? (
                     <>
                       to {Number(a.price) < 0 ? `${currency(-Number(a.price))} margin used` : currency(Number(a.price))}
                       {Number(a.external_flow) === 0 && <span className="text-neutral-500"> · interest/fees</span>}

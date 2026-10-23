@@ -1,18 +1,19 @@
 import { useState, type ReactNode } from 'react'
 import type { Holding, OptionPosition, Portfolio } from '../lib/database.types'
-import { portfolioBuy, portfolioCash, portfolioSell, portfolioSetCash, portfolioTransfer, type SymbolPrice } from '../lib/wealthQueries'
+import { portfolioBuy, portfolioCash, portfolioSell, portfolioSetCash, portfolioSplit, portfolioTransfer, type SymbolPrice } from '../lib/wealthQueries'
 import { centralDateStr, currency } from '../lib/format'
 import { INPUT, LABEL } from '../lib/ui'
 import { Button } from './ui/Button'
 import { Segmented } from './ui/Tabs'
 import { OptionTradeForm } from './OptionTradeForm'
 
-export type TradeTab = 'buy' | 'sell' | 'existing' | 'transfer' | 'cash' | 'option'
+export type TradeTab = 'buy' | 'sell' | 'existing' | 'transfer' | 'split' | 'cash' | 'option'
 const TABS: { value: TradeTab; label: string; hint: string }[] = [
   { value: 'buy', label: 'Buy', hint: 'Paid from this portfolio’s cash. The average cost updates for you.' },
   { value: 'sell', label: 'Sell', hint: 'Proceeds go to this portfolio’s cash; the gain or loss is recorded.' },
   { value: 'existing', label: 'Add existing', hint: 'Shares you already own or moved in. Counts as money added, not a purchase — cash isn’t touched.' },
   { value: 'transfer', label: 'Transfer', hint: 'Move shares to another portfolio, or out of the app. The average cost carries over — it isn’t a sale.' },
+  { value: 'split', label: 'Split', hint: 'A stock split or reverse split. Shares and average cost change; total cost and cash don’t.' },
   { value: 'cash', label: 'Cash', hint: 'Deposits and withdrawals are money in/out. Dividends count as earnings. Set balance matches your broker, including margin.' },
   { value: 'option', label: 'Option', hint: '' },
 ]
@@ -67,6 +68,8 @@ export function PortfolioActions({
   const [amount, setAmount] = useState('')
   const [on, setOn] = useState(centralDateStr(new Date()))
   const [destination, setDestination] = useState<string>('')
+  const [splitNew, setSplitNew] = useState('2')
+  const [splitOld, setSplitOld] = useState('1')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -80,7 +83,14 @@ export function PortfolioActions({
     try {
       setBusy(true)
       let message: string
-      if (tab === 'transfer') {
+      if (tab === 'split') {
+        const n = num(splitNew)
+        const o = num(splitOld)
+        if (!sym) throw new Error('Choose a ticker.')
+        if (n === null || o === null || n <= 0 || o <= 0 || n === o) throw new Error('Enter the split, e.g. 2 for 1 (or 1 for 10 for a reverse split).')
+        await portfolioSplit({ portfolioId, symbol: sym, ratio: n / o, on })
+        message = `${sym} split ${fmtQty(n)}-for-${fmtQty(o)}`
+      } else if (tab === 'transfer') {
         const q = num(qty)
         if (!sym) throw new Error('Choose a ticker.')
         if (q === null || q <= 0) throw new Error('Enter a quantity above zero.')
@@ -189,6 +199,20 @@ export function PortfolioActions({
               )}
               {dateField}
             </div>
+          ) : tab === 'split' ? (
+            <div className="flex flex-col gap-4">
+              <Field label="Ticker">{tickerSelect}</Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="New shares">
+                  <input inputMode="decimal" value={splitNew} onChange={(e) => setSplitNew(e.target.value)} className={INPUT} />
+                </Field>
+                <Field label="For every old share(s)">
+                  <input inputMode="decimal" value={splitOld} onChange={(e) => setSplitOld(e.target.value)} className={INPUT} />
+                </Field>
+              </div>
+              <p className="-mt-2 text-xs text-neutral-500">2 for 1 doubles your shares. A 1-for-10 reverse split is 1 new for every 10 old.</p>
+              {dateField}
+            </div>
           ) : tab === 'transfer' ? (
             <div className="flex flex-col gap-4">
               <Field label="Ticker">{tickerSelect}</Field>
@@ -238,6 +262,21 @@ export function PortfolioActions({
                 <span className="text-neutral-400">Total</span>
                 <span className="font-semibold tabular-nums text-white">{currency(total)}</span>
               </div>
+            ) : tab === 'split' && held && num(splitNew) && num(splitOld) && num(splitNew) !== num(splitOld) ? (
+              <div className="flex flex-col gap-1">
+                <div className="flex justify-between">
+                  <span className="text-neutral-400">Shares</span>
+                  <span className="tabular-nums text-white">
+                    {fmtQty(Number(held.quantity))} → {fmtQty((Number(held.quantity) * num(splitNew)!) / num(splitOld)!)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-neutral-400">Average cost</span>
+                  <span className="tabular-nums text-white">
+                    {currency(Number(held.avg_cost))} → {currency((Number(held.avg_cost) * num(splitOld)!) / num(splitNew)!)}
+                  </span>
+                </div>
+              </div>
             ) : tab === 'transfer' && held ? (
               <span className="text-neutral-400">Average cost {currency(Number(held.avg_cost))}/share carries over.</span>
             ) : (
@@ -250,7 +289,7 @@ export function PortfolioActions({
 
           {error && <p className="text-sm text-red-400">{error}</p>}
           <Button variant="primary" onClick={submit} disabled={busy} className="w-full">
-            {busy ? 'Saving…' : tab === 'existing' ? 'Add shares' : tab === 'cash' ? (cashKind === 'balance' ? 'Set balance' : `Record ${cashKind}`) : meta.label}
+            {busy ? 'Saving…' : tab === 'existing' ? 'Add shares' : tab === 'split' ? 'Record split' : tab === 'cash' ? (cashKind === 'balance' ? 'Set balance' : `Record ${cashKind}`) : meta.label}
           </Button>
         </>
       )}

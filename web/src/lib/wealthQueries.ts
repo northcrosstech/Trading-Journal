@@ -214,6 +214,13 @@ export async function portfolioSetCash(p: { portfolioId: string; balance: number
   if (error) throw error
 }
 
+/** A stock split: quantity x ratio, average cost / ratio, no cash. ratio = new shares per
+ * old share (2 for 2-for-1, 0.1 for a 1-for-10 reverse split). */
+export async function portfolioSplit(p: { portfolioId: string; symbol: string; ratio: number; on: string }) {
+  const { error } = await supabase.rpc('portfolio_split', { p_portfolio: p.portfolioId, p_symbol: p.symbol, p_ratio: p.ratio, p_on: p.on })
+  if (error) throw error
+}
+
 /** Move shares to another of your portfolios (toPortfolioId) or out of the app (null).
  * The average cost carries over; no gain or loss is realized. */
 export async function portfolioTransfer(p: { fromPortfolioId: string; symbol: string; quantity: number; toPortfolioId: string | null; on: string }) {

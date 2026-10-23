@@ -48,26 +48,21 @@ import { EmptyState } from '../components/ui/EmptyState'
 
 type View = 'positions' | 'performance' | 'dividends' | 'activity'
 
-/** Inline correction of a holding -- no cash or money-in/out effect. For a stock split, a
- * typo, or a manual price for a fund with no public ticker. Enter saves, Esc cancels. */
+/** Inline manual price for a holding -- for funds with no public ticker (many 401k funds).
+ * Shares and average cost only change through Activity entries (Buy, Sell, Add existing,
+ * Split...), so the holding always matches its history and cash. Enter saves, Esc cancels. */
 function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; onSaved: () => void; onCancel: () => void }) {
-  const [qty, setQty] = useState(String(Number(h.quantity)))
-  const [avg, setAvg] = useState(String(Number(h.avg_cost)))
   const [manual, setManual] = useState(h.manual_price !== null ? String(Number(h.manual_price)) : '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function save() {
-    const quantity = Number(qty.replace(/[$,\s]/g, ''))
-    const avgCost = Number(avg.replace(/[$,\s]/g, ''))
     const manualPrice = manual.trim() === '' ? null : Number(manual.replace(/[$,\s]/g, ''))
-    if (!(quantity > 0)) return setError('Quantity must be above zero.')
-    if (!(avgCost >= 0)) return setError('Average cost can’t be negative.')
     if (manualPrice !== null && !(manualPrice >= 0)) return setError('Manual price can’t be negative.')
     setSaving(true)
     setError(null)
     try {
-      await updateHolding(h.id, { quantity, avg_cost: avgCost, manual_price: manualPrice })
+      await updateHolding(h.id, { manual_price: manualPrice })
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -85,19 +80,11 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
       <td className="px-5 py-3 align-top font-semibold text-white">{h.symbol}</td>
       <td colSpan={8} className="px-3 py-3">
         <div className="flex flex-wrap items-end gap-3" onKeyDown={onKeyDown}>
-          <label className="flex w-32 flex-col gap-1">
-            <span className="text-xs text-neutral-400">Quantity</span>
-            <input autoFocus inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} className={`${INPUT_SM} text-right tabular-nums`} />
-          </label>
-          <label className="flex w-32 flex-col gap-1">
-            <span className="text-xs text-neutral-400">Avg cost / share</span>
-            <input inputMode="decimal" value={avg} onChange={(e) => setAvg(e.target.value)} className={`${INPUT_SM} text-right tabular-nums`} />
-          </label>
           <label className="flex w-40 flex-col gap-1">
             <span className="text-xs text-neutral-400" title="Only for funds with no public ticker, like many 401k funds">
               Manual price <span className="text-neutral-600">(optional)</span>
             </span>
-            <input inputMode="decimal" value={manual} onChange={(e) => setManual(e.target.value)} placeholder="daily close" className={`${INPUT_SM} text-right tabular-nums`} />
+            <input autoFocus inputMode="decimal" value={manual} onChange={(e) => setManual(e.target.value)} placeholder="daily close" className={`${INPUT_SM} text-right tabular-nums`} />
           </label>
           <span className="flex items-center gap-2 pb-0.5">
             <Button size="sm" variant="primary" onClick={save} disabled={saving}>
@@ -112,7 +99,7 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
           {error ? (
             <span className="text-red-400">{error}</span>
           ) : (
-            'Corrections only (splits, typos) — no cash moves. Use Buy / Sell for trades. Manual price is for funds without a public ticker; leave it blank to use the daily close.'
+            'For funds without a public ticker; leave blank to use the daily close. Shares and average cost come from Activity — to fix them, edit the entry there, or use Trade → Split for a stock split.'
           )}
         </p>
       </td>
@@ -184,7 +171,7 @@ function HoldingsTable({ views, total, dayLabel, onSaved }: { views: HoldingView
                 <td className="px-3 py-3 text-right">
                   <button
                     onClick={() => setEditingId(v.holding.id)}
-                    title={`Edit ${v.holding.symbol}`}
+                    title={`Manual price for ${v.holding.symbol}`}
                     className="rounded-md p-1.5 text-neutral-600 transition hover:bg-(--card-raised) hover:text-white group-hover:text-neutral-300"
                   >
                     <Pencil size={14} />
