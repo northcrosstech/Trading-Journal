@@ -40,7 +40,7 @@ export function HealthCheckCard() {
     <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 px-4 py-3.5">
       <div className="flex items-center gap-2 text-sm font-semibold text-amber-100">
         <ShieldAlert size={16} className="shrink-0 text-amber-300" />
-        Health check · {problems.length} {problems.length === 1 ? 'thing doesn’t' : 'things don’t'} match Activity
+        Health check · {problems.length} {problems.length === 1 ? 'issue' : 'issues'}
       </div>
       <ul className="mt-2 flex flex-col divide-y divide-amber-500/10 text-sm">
         {problems.map((p, i) => (
