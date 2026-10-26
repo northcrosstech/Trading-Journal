@@ -3,7 +3,7 @@ import { useAuth } from '../auth/AuthContext'
 import type { InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
 import { markInstallmentPaid, unmarkInstallmentPaid } from '../lib/wealthQueries'
 import { categoryLabel, isDebt, isOpenIn, monthLabel } from '../lib/networth'
-import { balanceUpTo, daysBetween, dueDateIn, durationLabel, expectedPayment, hasPaymentPlan, payoff } from '../lib/installments'
+import { balanceUpTo, daysBetween, durationLabel, expectedPayment, hasPaymentPlan, paymentDueDate, payoff } from '../lib/installments'
 import { currency, dateFmt } from '../lib/format'
 import { parseAmount, useDialog, validators } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
@@ -15,8 +15,8 @@ import { Menu } from './ui/Menu'
 import { EmptyState } from './ui/EmptyState'
 
 /** Monthly payments on debts for the selected month: due date, amount, APR, balance, the
- * payoff estimate, and a paid / due soon / overdue status with Mark paid. Status words only
- * apply to the current month; past months show paid or not, future ones just the schedule. */
+ * payoff estimate, and a paid / due soon / overdue status with Mark paid. Fixed payments are
+ * due that month; a card's statement (the month's closing balance) is due the next month. */
 export function InstallmentsCard({
   month,
   today,
@@ -36,7 +36,6 @@ export function InstallmentsCard({
   const dialog = useDialog()
   const toast = useToast()
   const editPayment = usePaymentSetup(onChanged)
-  const currentMonth = `${today.slice(0, 7)}-01`
 
   const debts = accounts.filter((a) => isDebt(a.category) && isOpenIn(a, month))
   const withPayment = debts.filter(hasPaymentPlan)
@@ -44,7 +43,7 @@ export function InstallmentsCard({
 
   const rows = withPayment
     .map((a) => {
-      const due = dueDateIn(month, a.payment_day ?? 1)
+      const due = paymentDueDate(a, month)
       const paid = payments.find((p) => p.account_id === a.id && p.month === month) ?? null
       const balance = balanceUpTo(a, balances, month)
       const { amount: expected, fixed } = expectedPayment(a, balances, month)
@@ -70,7 +69,7 @@ export function InstallmentsCard({
       submitLabel: 'Mark paid',
       fields: [
         { name: 'amount', label: 'Amount paid', type: 'number', prefix: '$', defaultValue: String(r.expected), validate: validators.positive },
-        { name: 'on', label: 'Paid on', type: 'date', defaultValue: month === currentMonth ? today : r.due },
+        { name: 'on', label: 'Paid on', type: 'date', defaultValue: daysBetween(r.due, today) > 31 ? r.due : today },
       ],
     })
     if (!v) return
@@ -96,9 +95,8 @@ export function InstallmentsCard({
   function status(r: (typeof rows)[number]) {
     if (r.paid) return <Pill tone="green"><CheckCircle2 size={12} /> Paid {dateFmt(r.paid.paid_on)}</Pill>
     if (r.nothingDue) return <Pill>Nothing due</Pill>
-    if (month < currentMonth) return <Pill tone="red">Not marked paid</Pill>
-    if (month > currentMonth) return <Pill>Scheduled</Pill>
     const days = daysBetween(today, r.due)
+    if (days > 31) return <Pill>Scheduled</Pill>
     if (days < 0) return <Pill tone="red">Overdue {-days}d</Pill>
     if (days === 0) return <Pill tone="amber">Due today</Pill>
     if (days <= 7) return <Pill tone="amber">Due in {days}d</Pill>
@@ -151,7 +149,7 @@ export function InstallmentsCard({
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">
                     <div className={`font-medium ${r.nothingDue ? 'text-neutral-500' : 'text-white'}`}>{currency(r.expected)}</div>
-                    {!r.fixed && <div className="whitespace-nowrap text-xs text-neutral-500">statement balance</div>}
+                    {!r.fixed && <div className="whitespace-nowrap text-xs text-neutral-500">{monthLabel(month, 'short')} statement</div>}
                     {r.escrow > 0 && (
                       <div className="whitespace-nowrap text-xs text-neutral-500" title="Principal & interest · escrow (property tax + insurance)">
                         {currency(r.principalAndInterest)} P&amp;I · {currency(r.escrow)} escrow

@@ -11,13 +11,19 @@ export function balanceUpTo(a: NetworthAccount, balances: NetworthBalance[], mon
   return best ? Number(best.balance) : null
 }
 
-/** What's due in `month`. A fixed payment (mortgage, loans) is that amount. With only a due
- * day (credit cards), it's the statement balance: last month's closing balance, else the
- * latest one -- so a card at $0 has nothing due. */
+/** The payment for `month`. A fixed payment (mortgage, loans) is that amount. With only a
+ * due day (credit cards), it's that month's statement: the month's closing balance, paid the
+ * following month -- so a card at $0 has nothing due. */
 export function expectedPayment(a: NetworthAccount, balances: NetworthBalance[], month: string): { amount: number; fixed: boolean } {
   if ((a.payment_amount ?? 0) > 0) return { amount: Number(a.payment_amount), fixed: true }
-  const statement = balanceUpTo(a, balances, addMonths(month, -1)) ?? balanceUpTo(a, balances, month) ?? 0
-  return { amount: Math.max(statement, 0), fixed: false }
+  return { amount: Math.max(balanceUpTo(a, balances, month) ?? 0, 0), fixed: false }
+}
+
+/** When `month`'s payment is due: a fixed payment on its day that month; a card's statement
+ * on its day the following month (October's balance is due in November). */
+export function paymentDueDate(a: NetworthAccount, month: string): string {
+  const fixed = (a.payment_amount ?? 0) > 0
+  return dueDateIn(fixed ? month : addMonths(month, 1), a.payment_day ?? 1)
 }
 
 /** The due date (yyyy-mm-dd) of a payment in a given month (yyyy-mm-01). A due day past the

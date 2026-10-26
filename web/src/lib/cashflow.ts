@@ -1,6 +1,6 @@
 import type { InstallmentPayment, NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, PortfolioActivity, PortfolioDailyValue } from './database.types'
 import { addMonths, isDebt, isOpenIn, monthOf, monthTotals } from './networth'
-import { dueDateIn, expectedPayment, hasPaymentPlan } from './installments'
+import { expectedPayment, hasPaymentPlan, paymentDueDate } from './installments'
 
 /** Everyday money: what a month's change in these balances means you kept (or used). */
 export const CASH_CATEGORIES: NetworthCategory[] = ['cash', 'emergency_fund']
@@ -135,7 +135,7 @@ export function closeStatus(
       isDebt(a.category) &&
       hasPaymentPlan(a) &&
       expectedPayment(a, balances, month).amount > 0 &&
-      dueDateIn(month, a.payment_day ?? 1) < today &&
+      paymentDueDate(a, month) < today &&
       !payments.some((p) => p.account_id === a.id && p.month === month),
   )
   return missing.length === 0 && unpaid.length === 0 ? null : { month, missing, unpaid }

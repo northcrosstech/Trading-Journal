@@ -14,7 +14,7 @@ export function usePaymentSetup(onChanged: () => void) {
     async (a: NetworthAccount) => {
       const v = await dialog.form({
         title: `Payment details · ${a.name}`,
-        description: 'For a card, set just the due day: what\u2019s due is the statement balance (nothing when it\u2019s $0). Clear both to remove it. Balances still come from your statements.',
+        description: 'For a card, set just the due day: each month\u2019s closing balance is due on that day the next month (nothing when it\u2019s $0). Clear both to remove it. Balances still come from your statements.',
         submitLabel: 'Save',
         fields: [
           {
