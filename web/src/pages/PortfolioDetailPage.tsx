@@ -38,6 +38,10 @@ import { DividendsCard } from '../components/DividendsCard'
 import { GetPricesButton } from '../components/GetPricesButton'
 import { OptionsCard } from '../components/OptionsCard'
 import { ActivityTable } from '../components/ActivityTable'
+import { ResearchPills } from '../components/ResearchBits'
+import { ResearchDrawer } from '../components/ResearchDrawer'
+import { useResearch } from '../lib/useResearch'
+import type { Research } from '../lib/research'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -78,7 +82,7 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
   return (
     <tr className="border-b border-(--border) bg-(--accent-soft)/40 last:border-0">
       <td className="px-5 py-3 align-top font-semibold text-white">{h.symbol}</td>
-      <td colSpan={8} className="px-3 py-3">
+      <td colSpan={9} className="px-3 py-3">
         <div className="flex flex-wrap items-end gap-3" onKeyDown={onKeyDown}>
           <label className="flex w-40 flex-col gap-1">
             <span className="text-xs text-neutral-400" title="Only for funds with no public ticker, like many 401k funds">
@@ -107,7 +111,21 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
   )
 }
 
-function HoldingsTable({ views, total, dayLabel, onSaved }: { views: HoldingView[]; total: number; dayLabel: string; onSaved: () => void }) {
+function HoldingsTable({
+  views,
+  total,
+  dayLabel,
+  research,
+  onResearch,
+  onSaved,
+}: {
+  views: HoldingView[]
+  total: number
+  dayLabel: string
+  research: Map<string, Research>
+  onResearch: (symbol: string) => void
+  onSaved: () => void
+}) {
   const [editingId, setEditingId] = useState<string | null>(null)
   return (
     <div className="overflow-x-auto">
@@ -118,6 +136,7 @@ function HoldingsTable({ views, total, dayLabel, onSaved }: { views: HoldingView
             <th className="px-3 py-2.5 text-right">Qty</th>
             <th className="px-3 py-2.5 text-right">Avg cost</th>
             <th className="px-3 py-2.5 text-right">Price</th>
+            <th className="px-3 py-2.5" title="Fair value, how cheap it is, and the score — click for the breakdown">Fair value</th>
             <th className="px-3 py-2.5 text-right">Value</th>
             <th className="px-3 py-2.5 text-right">{dayLabel}</th>
             <th className="px-3 py-2.5 text-right">Gain</th>
@@ -157,6 +176,9 @@ function HoldingsTable({ views, total, dayLabel, onSaved }: { views: HoldingView
                       )}
                     </>
                   )}
+                </td>
+                <td className="px-3 py-3">
+                  <ResearchPills r={research.get(v.holding.symbol)} onOpen={() => onResearch(v.holding.symbol)} />
                 </td>
                 <td className="px-3 py-3 text-right font-medium tabular-nums text-white">{currency(v.value)}</td>
                 <td className={`px-3 py-3 text-right tabular-nums ${v.dayChange === null ? 'text-neutral-600' : toneClass(v.dayChange)}`}>
@@ -234,6 +256,11 @@ export function PortfolioDetailPage() {
   )
   const series = useMemo(() => (portfolioId ? seriesFor(values, portfolioId) : []), [values, portfolioId])
   const pending = useMemo(() => unpricedSymbols(holdings, openCsps, prices, openOptions), [holdings, openCsps, prices, openOptions])
+  // Fair value and score per holding, compared with the price the holdings table shows.
+  const researchPrices = useMemo(() => new Map((snap?.holdings ?? []).filter((v) => v.price !== null).map((v) => [v.holding.symbol, v.price as number])), [snap])
+  const holdingSymbols = useMemo(() => holdings.map((h) => h.symbol), [holdings])
+  const research = useResearch(holdingSymbols, researchPrices)
+  const [researchOpen, setResearchOpen] = useState<string | null>(null)
   const realized = useMemo(() => activity.reduce((s, a) => s + (a.voided_at === null && a.realized_gain !== null ? Number(a.realized_gain) : 0), 0), [activity])
 
   const allocation = useMemo(() => {
@@ -420,7 +447,7 @@ export function PortfolioDetailPage() {
                 Use “Add existing” for shares you already hold, or “Buy” for new purchases from this portfolio’s cash.
               </EmptyState>
             ) : (
-              <HoldingsTable views={snap.holdings} total={allocationTotal} dayLabel={dayChangeLabel(snap.asOf)} onSaved={load} />
+              <HoldingsTable views={snap.holdings} total={allocationTotal} dayLabel={dayChangeLabel(snap.asOf)} research={research.rows} onResearch={setResearchOpen} onSaved={load} />
             )}
           </Card>
           <OptionsCard options={options} csps={csps} prices={prices} onChanged={load} onAdd={() => setTrade('option')} />
@@ -450,6 +477,14 @@ export function PortfolioDetailPage() {
           <ActivityTable activity={activity} onChanged={load} />
         </Card>
       )}
+
+      <ResearchDrawer
+        r={researchOpen ? (research.rows.get(researchOpen) ?? null) : null}
+        macro={research.macro}
+        settings={research.settings}
+        onClose={() => setResearchOpen(null)}
+        onChanged={research.reload}
+      />
 
       <Drawer open={trade !== null} onClose={() => setTrade(null)} title={`Trade · ${p.name}`} subtitle={`Cash available ${currency(snap.cashAvailable)}`}>
         {trade !== null && (

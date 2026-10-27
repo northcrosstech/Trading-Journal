@@ -10,6 +10,7 @@ import { DialogProvider } from './components/ui/DialogProvider'
 import { ToastProvider } from './components/ui/ToastProvider'
 import { WealthOverviewPage } from './pages/WealthOverviewPage'
 import { CashFlowPage } from './pages/CashFlowPage'
+import { ResearchPage } from './pages/ResearchPage'
 import { TodayPage } from './pages/TodayPage'
 import { TradeLogPage } from './pages/TradeLogPage'
 import { TradeDetailPage } from './pages/TradeDetailPage'
@@ -64,6 +65,7 @@ function App() {
             <Route path="/wealth" element={<WealthOverviewPage />} />
             <Route path="/networth" element={<NetWorthPage />} />
             <Route path="/cashflow" element={<CashFlowPage />} />
+            <Route path="/research" element={<ResearchPage />} />
             <Route path="/portfolios" element={<PortfoliosPage />} />
             <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />

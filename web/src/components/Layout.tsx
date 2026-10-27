@@ -1,21 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import {
-  ArrowLeftRight,
-  BarChart3,
-  BookOpen,
-  CalendarCheck,
-  ClipboardCheck,
-  Landmark,
-  LayoutDashboard,
-  LineChart,
-  ListOrdered,
-  LogOut,
-  Menu,
-  PieChart,
-  Settings,
-  X,
-} from 'lucide-react'
+import { ArrowLeftRight, BarChart3, BookOpen, CalendarCheck, ClipboardCheck, Landmark, LayoutDashboard, LineChart, ListOrdered, LogOut, Menu, PieChart, Settings, Telescope, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
 import { SyncStatus } from './SyncStatus'
@@ -36,10 +21,11 @@ const NAV: Record<Workspace, { to: string; label: string; icon: typeof BookOpen;
     { to: '/portfolios', label: 'Portfolios', icon: PieChart },
     { to: '/networth', label: 'Net worth', icon: Landmark },
     { to: '/cashflow', label: 'Cash flow', icon: ArrowLeftRight },
+    { to: '/research', label: 'Research', icon: Telescope },
   ],
 }
 const HOME: Record<Workspace, string> = { trading: '/', wealth: '/wealth' }
-const WEALTH_PREFIXES = ['/wealth', '/portfolios', '/networth', '/cashflow']
+const WEALTH_PREFIXES = ['/wealth', '/portfolios', '/networth', '/cashflow', '/research']
 const SHARED_PREFIXES = ['/settings', '/accounts']
 const STORAGE_KEY = 'tj.workspace'
 

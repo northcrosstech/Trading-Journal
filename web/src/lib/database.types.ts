@@ -271,8 +271,38 @@ export type InstallmentPaymentRow = {
 export type WealthSettingsRow = {
   user_id: string
   close_from_month: string | null // yyyy-mm-01
+  /** Highest growth % fair value uses (default 30). Absent until migration 20261031010000_research. */
+  growth_cap?: number
+  /** Your own economy score (0-30) instead of the automatic one. */
+  economy_override?: number | null
   updated_at: string
 }
+
+/** Per-ticker fundamentals from Finnhub, shared like prices; written by the worker. */
+export type FundamentalsRow = {
+  symbol: string
+  name: string | null
+  eps_ttm: number | null
+  eps_growth_5y: number | null
+  eps_growth_3y: number | null
+  gross_margin: number | null
+  roe: number | null
+  net_margin: number | null
+  debt_to_equity: number | null
+  current_ratio: number | null
+  next_earnings_date: string | null
+  next_earnings_hour: string | null
+  next_eps_estimate: number | null
+  updated_at: string
+}
+
+/** FRED indicators: aaa_yield, treasury_10y, unemployment_rate, unemployment_12m_low. */
+export type MacroIndicatorRow = { key: string; value: number; as_of: string; updated_at: string }
+
+export type ResearchWatchlistRow = { id: string; user_id: string; symbol: string; created_at: string }
+
+export type ResearchOverrideField = 'eps' | 'growth' | 'valuation' | 'growth_score' | 'moat' | 'execution'
+export type ResearchOverrideRow = { user_id: string; symbol: string; field: ResearchOverrideField; value: number; updated_at: string }
 
 export type NetworthBalanceRow = {
   id: string
@@ -454,6 +484,10 @@ export type Database = {
       networth_balances: ReturnType<typeof table<NetworthBalanceRow>>
       installment_payments: ReturnType<typeof table<InstallmentPaymentRow>>
       wealth_settings: ReturnType<typeof table<WealthSettingsRow>>
+      fundamentals: ReturnType<typeof table<FundamentalsRow>>
+      macro_indicators: ReturnType<typeof table<MacroIndicatorRow>>
+      research_watchlist: ReturnType<typeof table<ResearchWatchlistRow>>
+      research_overrides: ReturnType<typeof table<ResearchOverrideRow>>
       portfolios: ReturnType<typeof table<PortfolioRow>>
       holdings: ReturnType<typeof table<HoldingRow>>
       csp_positions: ReturnType<typeof table<CspPositionRow>>

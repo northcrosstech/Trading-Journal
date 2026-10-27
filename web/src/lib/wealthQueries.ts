@@ -1,5 +1,9 @@
 import { supabase } from './supabase'
 import type {
+  FundamentalsRow,
+  MacroIndicatorRow,
+  ResearchOverrideField,
+  ResearchOverrideRow,
   AuditProblem,
   CspPosition,
   InstallmentPayment,
@@ -463,6 +467,102 @@ export async function markInstallmentPaid(userId: string, p: { accountId: string
 export async function unmarkInstallmentPaid(accountId: string, month: string) {
   const { error } = await supabase.from('installment_payments').delete().eq('account_id', accountId).eq('month', month)
   if (error) throw error
+}
+
+// ---------------------------------------------------------------------------
+// Research: fundamentals, economic indicators, watchlist, your overrides
+// (each read tolerates the tables not existing before the research migration)
+// ---------------------------------------------------------------------------
+
+const missingTable = (error: { code?: string; message: string }, name: string) => error.code === '42P01' || new RegExp(name).test(error.message)
+
+export async function fetchFundamentals(symbols: string[]): Promise<Map<string, FundamentalsRow>> {
+  const out = new Map<string, FundamentalsRow>()
+  if (symbols.length === 0) return out
+  const { data, error } = await supabase.from('fundamentals').select('*').in('symbol', symbols)
+  if (error) {
+    if (missingTable(error, 'fundamentals')) return out
+    throw error
+  }
+  for (const r of data ?? []) out.set(r.symbol, r)
+  return out
+}
+
+export async function fetchMacroIndicators(): Promise<MacroIndicatorRow[]> {
+  const { data, error } = await supabase.from('macro_indicators').select('*')
+  if (error) {
+    if (missingTable(error, 'macro_indicators')) return []
+    throw error
+  }
+  return data ?? []
+}
+
+export async function fetchWatchlist(): Promise<string[]> {
+  const { data, error } = await supabase.from('research_watchlist').select('symbol').order('symbol')
+  if (error) {
+    if (missingTable(error, 'research_watchlist')) return []
+    throw error
+  }
+  return (data ?? []).map((r) => r.symbol)
+}
+
+export async function addToWatchlist(userId: string, symbol: string) {
+  const { error } = await supabase.from('research_watchlist').upsert({ user_id: userId, symbol: symbol.trim().toUpperCase() }, { onConflict: 'user_id,symbol' })
+  if (error) throw error
+}
+
+export async function removeFromWatchlist(symbol: string) {
+  const { error } = await supabase.from('research_watchlist').delete().eq('symbol', symbol)
+  if (error) throw error
+}
+
+export async function fetchResearchOverrides(): Promise<ResearchOverrideRow[]> {
+  const { data, error } = await supabase.from('research_overrides').select('*')
+  if (error) {
+    if (missingTable(error, 'research_overrides')) return []
+    throw error
+  }
+  return data ?? []
+}
+
+/** Set your own number for a ticker's input or score part; null puts the automatic one back. */
+export async function setResearchOverride(userId: string, symbol: string, field: ResearchOverrideField, value: number | null) {
+  const { error } =
+    value === null
+      ? await supabase.from('research_overrides').delete().eq('symbol', symbol).eq('field', field)
+      : await supabase
+          .from('research_overrides')
+          .upsert({ user_id: userId, symbol, field, value, updated_at: new Date().toISOString() }, { onConflict: 'user_id,symbol,field' })
+  if (error) throw error
+}
+
+export type ResearchSettings = { growthCap: number; economyOverride: number | null }
+
+export async function fetchResearchSettings(): Promise<ResearchSettings> {
+  const { data, error } = await supabase.from('wealth_settings').select('growth_cap, economy_override').maybeSingle()
+  if (error) {
+    if (missingTable(error, 'wealth_settings') || /growth_cap|economy_override/.test(error.message)) return { growthCap: 30, economyOverride: null }
+    throw error
+  }
+  return { growthCap: data?.growth_cap != null ? Number(data.growth_cap) : 30, economyOverride: data?.economy_override != null ? Number(data.economy_override) : null }
+}
+
+export async function setResearchSettings(userId: string, patch: Partial<{ growth_cap: number; economy_override: number | null }>) {
+  const { error } = await supabase
+    .from('wealth_settings')
+    .upsert({ user_id: userId, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+  if (error) throw error
+}
+
+/** Ask the worker to fetch prices and research data for tickers that have none yet (the
+ * same request as Get prices now). Returns false when the request wasn't accepted. */
+export async function requestMarketData(): Promise<boolean> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  if (!session) return false
+  const res = await fetch('/api/trigger-sync?job=prices', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => null)
+  return !!res && (res.status === 202 || res.status === 409)
 }
 
 /** First month the month-end close applies to (null = not set, or the table isn't there yet). */

@@ -208,10 +208,16 @@ def run_pricing(
             .eq("status", "open")
         )
 
+        try:  # research watchlist tickers get a daily close too (table exists once migrated)
+            watched = {w["symbol"] for w in _all_rows(client.table("research_watchlist").select("symbol"))}
+        except Exception:  # noqa: BLE001
+            watched = set()
+
         symbols = sorted(
             {h["symbol"] for h in holdings if h.get("manual_price") is None}
             | {c["symbol"] for c in open_csps}
             | {o["symbol"] for o in open_options}
+            | watched
         )
         if only_new and symbols:
             already = {

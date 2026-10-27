@@ -47,6 +47,7 @@ from rate_limiter import RateLimiter
 from sync_trigger_server import start_http_server
 from transform import extract_orders, group_trades, normalize_orders, open_trade_warnings
 from prices import print_pricing_summary, run_pricing
+from research import print_research_summary, run_research
 
 load_dotenv()
 
@@ -341,6 +342,17 @@ def _scheduled_pricing_job() -> None:
         print(f"[{datetime.now().isoformat()}] skipping pricing -- {today} is not a trading day.")
         return
     print_pricing_summary(run_pricing(today))
+    # Fundamentals and economic data for fair value and scores (research.py).
+    print_research_summary(run_research(today))
+
+
+def _prices_now():
+    """The website's "Get prices now": prices for new tickers, then research data for
+    tickers that have none yet. Returns the pricing summary for the trigger server."""
+    today = datetime.now(MARKET_TZ).date()
+    summary = run_pricing(today, only_new=True)
+    print_research_summary(run_research(today, only_new=True))
+    return summary
 
 
 def main() -> None:
@@ -349,7 +361,15 @@ def main() -> None:
     parser.add_argument(
         "--prices-once", action="store_true", help="Fetch today's closing prices, value every portfolio, and exit"
     )
+    parser.add_argument(
+        "--research-once", action="store_true", help="Fetch fundamentals and economic data for fair value and scores, and exit"
+    )
     args = parser.parse_args()
+
+    if args.research_once:
+        rsummary = run_research(datetime.now(MARKET_TZ).date())
+        print_research_summary(rsummary)
+        sys.exit(0 if rsummary.error is None else 1)
 
     if args.prices_once:
         summary = run_pricing(datetime.now(MARKET_TZ).date())
@@ -375,7 +395,7 @@ def main() -> None:
         run_sync,
         _print_summary,
         port=int(os.environ.get("PORT", "8080")),
-        run_prices_fn=lambda: run_pricing(datetime.now(MARKET_TZ).date(), only_new=True),
+        run_prices_fn=_prices_now,
         print_prices_fn=print_pricing_summary,
     )
 
