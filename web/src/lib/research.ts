@@ -138,7 +138,7 @@ export function research(
   settings: { growthCap: number; economyOverride: number | null },
   today: string,
 ): Research {
-  const etf = isEtf(symbol)
+  const etf = isEtf(symbol) || ['ETP', 'Closed-End Fund'].includes(f?.security_type ?? '')
   const aaa = macro.aaa ?? FALLBACK_AAA
   const epsAuto = f?.eps_ttm !== null && f?.eps_ttm !== undefined ? Number(f.eps_ttm) : null
   const eps = overrides.eps !== undefined ? { value: overrides.eps, edited: true } : { value: epsAuto, edited: false }

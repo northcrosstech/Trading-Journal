@@ -275,6 +275,8 @@ export type WealthSettingsRow = {
   growth_cap?: number
   /** Your own economy score (0-30) instead of the automatic one. */
   economy_override?: number | null
+  /** How far off a target before a warning, in percentage points (default 5). */
+  allocation_tolerance?: number
   updated_at: string
 }
 
@@ -293,8 +295,15 @@ export type FundamentalsRow = {
   next_earnings_date: string | null
   next_earnings_hour: string | null
   next_eps_estimate: number | null
+  /** Finnhub's type (Common Stock, ETP, ADR, REIT...) and name, for stock / ETF / bond. */
+  security_type?: string | null
+  description?: string | null
   updated_at: string
 }
+
+/** Mix target for one pool: 'brokerage' or a retirement portfolio's id. Percentages add to 100. */
+export type AllocationTargetRow = { user_id: string; scope: string; etf: number; stock: number; bond: number; option: number; cash: number; updated_at: string }
+export type TickerTypeRow = { user_id: string; symbol: string; asset_type: 'stock' | 'etf' | 'bond'; updated_at: string }
 
 /** FRED indicators: aaa_yield, treasury_10y, unemployment_rate, unemployment_12m_low. */
 export type MacroIndicatorRow = { key: string; value: number; as_of: string; updated_at: string }
@@ -322,6 +331,8 @@ export type PortfolioRow = {
   kind: PortfolioKind
   cash: number
   archived: boolean
+  /** Brokerage only: % of all brokerage money. Absent until migration 20261101010000_allocation. */
+  target_pct?: number | null
   created_at: string
 }
 
@@ -488,6 +499,8 @@ export type Database = {
       macro_indicators: ReturnType<typeof table<MacroIndicatorRow>>
       research_watchlist: ReturnType<typeof table<ResearchWatchlistRow>>
       research_overrides: ReturnType<typeof table<ResearchOverrideRow>>
+      allocation_targets: ReturnType<typeof table<AllocationTargetRow>>
+      ticker_types: ReturnType<typeof table<TickerTypeRow>>
       portfolios: ReturnType<typeof table<PortfolioRow>>
       holdings: ReturnType<typeof table<HoldingRow>>
       csp_positions: ReturnType<typeof table<CspPositionRow>>

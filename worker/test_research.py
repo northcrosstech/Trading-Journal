@@ -32,6 +32,11 @@ def test_next_earnings_is_the_earliest_upcoming_report():
     assert pick_next_earnings({}, date(2026, 10, 27))["next_earnings_date"] is None
 
 
+def test_symbol_types():
+    rows = [{"symbol": "VOO", "type": "ETP", "description": "VANGUARD S&P 500 ETF"}, {"symbol": "TSM", "type": "ADR", "description": "TAIWAN SEMICONDUCTOR-SP ADR"}, {"type": "x"}]
+    assert research.symbol_types(rows) == {"VOO": ("ETP", "VANGUARD S&P 500 ETF"), "TSM": ("ADR", "TAIWAN SEMICONDUCTOR-SP ADR")}
+
+
 def test_fred_csv_skips_missing_values():
     text = "observation_date,BAMLC0A1CAAAEY\n2026-10-22,5.51\n2026-10-23,.\n2026-10-26,5.56\n"
     assert parse_fred_csv(text) == [(date(2026, 10, 22), 5.51), (date(2026, 10, 26), 5.56)]
@@ -89,11 +94,13 @@ def test_run_research_fetches_held_and_watched_tickers_and_macro(monkeypatch):
     calls = []
 
     def fake_finnhub(path, params, key, limiter):
-        calls.append((path, params["symbol"]))
+        calls.append((path, params.get("symbol")))
         if path == "stock/metric":
             return {"metric": {"epsTTM": 7.9}}
         if path == "stock/profile2":
             return {"name": "NVIDIA Corp"}
+        if path == "stock/symbol":
+            return [{"symbol": "NVDA", "type": "Common Stock", "description": "NVIDIA CORP"}, {"symbol": "GOOG", "type": "Common Stock", "description": "ALPHABET INC-CL C"}]
         return {"earningsCalendar": [{"date": "2026-11-25", "hour": "amc", "epsEstimate": 2.5}]}
 
     monkeypatch.setattr(research, "_finnhub", fake_finnhub)
@@ -104,6 +111,7 @@ def test_run_research_fetches_held_and_watched_tickers_and_macro(monkeypatch):
     saved = {r["symbol"]: r for r in db.writes["fundamentals"]}
     assert saved["NVDA"]["name"] == "NVIDIA Corp" and saved["NVDA"]["next_earnings_date"] == "2026-11-25"
     assert saved["GOOG"]["name"] == "Alphabet Inc"
+    assert saved["NVDA"]["security_type"] == "Common Stock" and saved["NVDA"]["description"] == "NVIDIA CORP"
     assert ("stock/profile2", "GOOG") not in calls  # name already known: no extra call
     assert {r["key"] for r in db.writes["macro_indicators"]} >= {"aaa_yield", "treasury_10y"}
 

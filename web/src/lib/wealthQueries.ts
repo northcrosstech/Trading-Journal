@@ -1,5 +1,7 @@
 import { supabase } from './supabase'
 import type {
+  AllocationTargetRow,
+  TickerTypeRow,
   FundamentalsRow,
   MacroIndicatorRow,
   ResearchOverrideField,
@@ -97,7 +99,7 @@ export async function createPortfolio(userId: string, fields: { name: string; ki
   return data
 }
 
-export async function updatePortfolio(id: string, patch: Partial<Pick<Portfolio, 'name' | 'kind' | 'archived'>>) {
+export async function updatePortfolio(id: string, patch: Partial<Pick<Portfolio, 'name' | 'kind' | 'archived' | 'target_pct'>>) {
   const { error } = await supabase.from('portfolios').update(patch).eq('id', id)
   if (error) throw error
 }
@@ -563,6 +565,62 @@ export async function requestMarketData(): Promise<boolean> {
   if (!session) return false
   const res = await fetch('/api/trigger-sync?job=prices', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => null)
   return !!res && (res.status === 202 || res.status === 409)
+}
+
+// ---------------------------------------------------------------------------
+// Allocation: mix targets per pool, ticker types, tolerance
+// ---------------------------------------------------------------------------
+
+export async function fetchAllocationTargets(): Promise<AllocationTargetRow[]> {
+  const { data, error } = await supabase.from('allocation_targets').select('*')
+  if (error) {
+    if (missingTable(error, 'allocation_targets')) return []
+    throw error
+  }
+  return data ?? []
+}
+
+/** Save a pool's mix target ('brokerage' or a retirement portfolio id); null removes it. */
+export async function saveAllocationTarget(userId: string, scope: string, t: { etf: number; stock: number; bond: number; option: number; cash: number } | null) {
+  const { error } =
+    t === null
+      ? await supabase.from('allocation_targets').delete().eq('scope', scope)
+      : await supabase.from('allocation_targets').upsert({ user_id: userId, scope, ...t, updated_at: new Date().toISOString() }, { onConflict: 'user_id,scope' })
+  if (error) throw error
+}
+
+export async function fetchTickerTypes(): Promise<TickerTypeRow[]> {
+  const { data, error } = await supabase.from('ticker_types').select('*')
+  if (error) {
+    if (missingTable(error, 'ticker_types')) return []
+    throw error
+  }
+  return data ?? []
+}
+
+/** Your type for a ticker; null goes back to the detected one. */
+export async function setTickerType(userId: string, symbol: string, type: 'stock' | 'etf' | 'bond' | null) {
+  const { error } =
+    type === null
+      ? await supabase.from('ticker_types').delete().eq('symbol', symbol)
+      : await supabase.from('ticker_types').upsert({ user_id: userId, symbol, asset_type: type, updated_at: new Date().toISOString() }, { onConflict: 'user_id,symbol' })
+  if (error) throw error
+}
+
+export async function fetchAllocationTolerance(): Promise<number> {
+  const { data, error } = await supabase.from('wealth_settings').select('allocation_tolerance').maybeSingle()
+  if (error) {
+    if (missingTable(error, 'wealth_settings') || /allocation_tolerance/.test(error.message)) return 5
+    throw error
+  }
+  return data?.allocation_tolerance != null ? Number(data.allocation_tolerance) : 5
+}
+
+export async function setAllocationTolerance(userId: string, tolerance: number) {
+  const { error } = await supabase
+    .from('wealth_settings')
+    .upsert({ user_id: userId, allocation_tolerance: tolerance, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+  if (error) throw error
 }
 
 /** First month the month-end close applies to (null = not set, or the table isn't there yet). */

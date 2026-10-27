@@ -109,6 +109,7 @@ export function useWealthPortfolios() {
     combined,
     series,
     allocation,
+    openOptions,
     error,
     load,
   }

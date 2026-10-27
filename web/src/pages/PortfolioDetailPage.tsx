@@ -40,6 +40,7 @@ import { OptionsCard } from '../components/OptionsCard'
 import { ActivityTable } from '../components/ActivityTable'
 import { ResearchPills } from '../components/ResearchBits'
 import { ResearchDrawer } from '../components/ResearchDrawer'
+import { AccountAllocationCard } from '../components/AllocationCards'
 import { useResearch } from '../lib/useResearch'
 import type { Research } from '../lib/research'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -464,6 +465,7 @@ export function PortfolioDetailPage() {
               <AllocationDonut allocation={allocation} centerLabel="Value" />
             </Card>
           </div>
+          <AccountAllocationCard portfolio={p} snap={snap} options={options} prices={prices} />
           <Card title="Returns">
             <ReturnsRow series={series} />
           </Card>

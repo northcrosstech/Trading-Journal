@@ -103,6 +103,12 @@ def pick_next_earnings(body: dict, today: date) -> dict:
     }
 
 
+def symbol_types(rows: list[dict]) -> dict[str, tuple[Optional[str], Optional[str]]]:
+    """Finnhub /stock/symbol list -> {symbol: (type, description)}, e.g. ('ETP', 'VANGUARD
+    TOTAL BOND MARKET'). The app turns these into stock / ETF / bond."""
+    return {r["symbol"]: (r.get("type") or None, r.get("description") or None) for r in rows or [] if r.get("symbol")}
+
+
 def parse_fred_csv(text: str) -> list[tuple[date, float]]:
     """FRED graph CSV (date,value; '.' for missing) -> [(date, value)] oldest first."""
     rows: list[tuple[date, float]] = []
@@ -207,6 +213,12 @@ def run_research(
             limiter = RateLimiter(min_interval_seconds=FINNHUB_INTERVAL_SECONDS)
             limiter._last_call = -FINNHUB_INTERVAL_SECONDS
             horizon = (today + timedelta(days=EARNINGS_LOOKAHEAD_DAYS)).isoformat()
+            # One call lists every US ticker with its type (Common Stock, ETP, ADR, REIT...).
+            try:
+                types = symbol_types(_finnhub("stock/symbol", {"exchange": "US"}, api_key, limiter))
+            except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                types = {}
+                summary.warnings.append(f"symbol list: request failed ({exc})")
             for s in symbols:
                 try:
                     row = {"symbol": s, **parse_metric(_finnhub("stock/metric", {"symbol": s, "metric": "all"}, api_key, limiter))}
@@ -217,6 +229,8 @@ def run_research(
                     if not name:
                         name = (_finnhub("stock/profile2", {"symbol": s}, api_key, limiter) or {}).get("name") or None
                     row["name"] = name
+                    if s in types:
+                        row["security_type"], row["description"] = types[s]
                     row["updated_at"] = datetime.now(timezone.utc).isoformat()
                     client.table("fundamentals").upsert(row, on_conflict="symbol").execute()
                     summary.fundamentals_saved += 1
