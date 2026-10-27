@@ -30,6 +30,8 @@ flowchart LR
 
     WB[[Webull OpenAPI]]
     TD[[Twelve Data]]
+    FH[[Finnhub]]
+    FR[[FRED]]
 
     U --> WEB
     WEB -- "reads & writes as you<br/>(public key + your session)" --> DB
@@ -40,9 +42,11 @@ flowchart LR
     WK -- "service-role key" --> DB
     WK -- "orders, fees" --> WB
     WK -- "daily closes" --> TD
+    WK -- "fundamentals, earnings, ticker types" --> FH
+    WK -- "AAA yield, 10y, unemployment" --> FR
 ```
 
-**In one sentence:** the website talks straight to the database as you, protected by row-level security. Anything needing a secret (charts data, triggering the worker) goes through a small Vercel function. The always-on worker on Fly.io pulls your Webull trades and the daily prices into the database.
+**In one sentence:** the website talks straight to the database as you, protected by row-level security. Anything needing a secret (charts data, triggering the worker) goes through a small Vercel function. The always-on worker on Fly.io pulls your Webull trades, the daily prices and the research data (fundamentals and economic numbers) into the database.
 
 ---
 
@@ -56,7 +60,7 @@ flowchart LR
 | Database | Postgres + row-level security | Supabase | `supabase/migrations/` | All data |
 | Auth | Supabase Auth | Supabase | `web/src/auth/` | Sign-in, password reset, sessions |
 | Storage | Supabase Storage (private buckets) | Supabase | `web/src/lib/queries.ts` | Trade screenshots |
-| Worker | Python 3, APScheduler, Webull SDK | Fly.io (`trading-journal-worker`, region `iad`, 1 machine always on, volume at `/data`) | `worker/` | Webull sync, fees, daily pricing, HTTP trigger endpoints. The `/data` volume keeps the Webull login token and fee cache across restarts |
+| Worker | Python 3, APScheduler, Webull SDK | Fly.io (`trading-journal-worker`, region `iad`, 1 machine always on, volume at `/data`) | `worker/` | Webull sync, fees, daily pricing, research data, HTTP trigger endpoints. The `/data` volume keeps the Webull login token and fee cache across restarts |
 
 > `web/api/_lib/` holds local-dev copies of the two functions (used by `vite.config.ts`).
 > Vercel can't bundle local imports into functions, so each deployed function is
@@ -72,24 +76,31 @@ flowchart LR
 | `/trades`, `/trades/:id` | Trade log; trade detail with chart | `trades`, `executions`, `options_detail` |
 | `/trades/new`, `/trades/:id/edit`, `/trades/import`, `/trades/import/robinhood` | Manual entry, CSV and Robinhood import | `trades`, `executions`, `options_detail` |
 | `/insights` | Stats and breakdowns | `trades` (+ review fields) |
-| `/portfolios`, `/portfolios/:id` | Portfolio tracker | `portfolios`, `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `prices`, `portfolio_daily_values` |
-| `/networth` | Net worth | `networth_accounts`, `networth_balances` (+ portfolio values) |
+| `/wealth` | Wealth overview: net worth, portfolios, month-end close banner | most wealth tables |
+| `/portfolios` | All portfolios, Health check, brokerage allocation | `portfolios`, `portfolio_daily_values`, `audit_summary`, `allocation_targets`, `ticker_types`, `fundamentals` |
+| `/portfolios/:id` | One portfolio: holdings (with fair value pills), activity, options, puts, dividends, performance and its own allocation | `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `prices`, `portfolio_daily_values`, `fundamentals` |
+| `/networth` | Net worth by month, accounts, monthly payments | `networth_accounts`, `networth_balances`, `installment_payments`, `wealth_settings` (+ portfolio values) |
+| `/cashflow` | What you kept each month, derived from balances | `networth_balances`, `portfolio_activity`, `portfolio_daily_values` |
+| `/research` | Fair value, score and next earnings for holdings and a watchlist | `fundamentals`, `macro_indicators`, `research_watchlist`, `research_overrides`, `wealth_settings` |
 | `/accounts`, `/settings` | Accounts; risk limits, setups, review checklist | `accounts`, `target_settings`, `playbooks` |
+
+The sidebar has two sides, **Trading** and **Wealth**. They share sign-in but never each other's data: day trades never feed portfolios or net worth.
 
 **Key website modules:**
 - **Data access:** `web/src/lib/queries.ts` for the trading journal, `wealthQueries.ts` for net worth and portfolios.
-- **Calculations:** `metrics.ts`, `insights.ts`, `whatIf.ts`, `portfolio.ts`, `networth.ts`, `dividends.ts`.
+- **Calculations:** trading `metrics.ts`, `insights.ts`, `whatIf.ts`; wealth `portfolio.ts`, `networth.ts`, `cashflow.ts`, `installments.ts`, `dividends.ts`, `research.ts`, `allocationPlan.ts`.
 - **Shared app-wide state:** `AuthContext`, `AccountContext` (the trading-account switcher), `ReviewChecklistProvider`.
 
 ### Worker files
 
 | File | Does |
 |---|---|
-| `sync.py` | Entry point. Starts the scheduler and the HTTP server. `--once` runs one sync; `--prices-once` runs pricing |
+| `sync.py` | Entry point. Starts the scheduler and the HTTP server. `--once` runs one sync; `--prices-once` runs pricing; `--research-once` runs research |
 | `transform.py` | Webull orders → fills → trades (grouping, P&L) |
 | `db_writer.py` | Writes trades via `upsert_trade_bundle`; reads seed fills; writes `sync_log` |
 | `fees.py`, `fee_rates.py` | Fee estimate formula; background fetch of real fees |
 | `prices.py` | Daily closes from Twelve Data; portfolio daily values |
+| `research.py` | Finnhub fundamentals, earnings dates and ticker types; FRED economic series |
 | `sync_trigger_server.py` | `POST /sync/trigger`, `POST /prices/trigger`, `GET /healthz` |
 | `market_calendar.py`, `rate_limiter.py` | US market holidays; request pacing |
 
@@ -101,8 +112,9 @@ flowchart LR
 |---|---|---|
 | Trade sync | Every 15 min, and once on startup. With `SYNC_MARKET_HOURS_ONLY=true` (set on Fly): only 9:00–17:00 New York time on trading days, plus up to 2 syncs in the hour after | Pulls Webull orders → `trades` / `executions`; writes `sync_log` |
 | Sync now | Sidebar button (60s cooldown) | Same as above, immediately |
-| Daily pricing | 16:45 New York time on trading days | Closes for every held ticker → `prices`; each portfolio's value → `portfolio_daily_values` |
-| Get prices now | Button on Portfolios when a ticker has no price (2-min cooldown) | Closes for never-priced tickers only; no daily value written |
+| Daily pricing | 16:45 New York time on trading days | Closes for every held and watchlist ticker → `prices`; each portfolio's value → `portfolio_daily_values` |
+| Daily research | Straight after daily pricing | Finnhub data for every held and watchlist ticker → `fundamentals`; FRED series → `macro_indicators` |
+| Get prices now | Button on Portfolios / Research when a ticker has no data (2-min cooldown) | Closes and research for new tickers only; no daily value written |
 
 The two trigger endpoints have separate locks and cooldowns, so a trade sync and a price update never block each other.
 
@@ -131,8 +143,11 @@ The two trigger endpoints have separate locks and cooldowns, so a trade sync and
 | `SYNC_TRIGGER_SECRET` | Vercel env + Fly secrets | Start a worker job |
 | Webull **app key / secret** | Fly secrets only | Read your Webull orders |
 | `TWELVEDATA_API_KEY` | Vercel env + Fly secrets | Market data |
+| `FINNHUB_API_KEY` | Fly secrets only | Fundamentals, earnings dates, ticker types |
 
-**Two users, one database.** Your friend's data is separated by `user_id` + row-level security. `prices` is the only shared table, and it holds public market data.
+**Two users, one database.** Your friend's data is separated by `user_id` + row-level security. The only shared tables are `prices`, `fundamentals` and `macro_indicators`, which hold public market data and are written only by the worker.
+
+**The portfolio ledger is locked.** Signed-in users can read their portfolio tables but can't insert, update or delete holdings, activity, options, puts or cash directly. Every change goes through a database function (`security definer`) that checks ownership and writes the ledger entry. The only direct edits allowed are a portfolio's name, type, archived flag and target %, a holding's manual price, and an option's or put's current price (mark). Activity is append-only: undo marks an entry voided rather than deleting it. Details in [DATA_FLOWS.md](DATA_FLOWS.md#7-rules-that-keep-the-data-consistent).
 
 > **⚠ Known gap:** the five `backup_*_20260711` tables have no row-level security and can
 > be read with the public key. See the end of [DATA_DICTIONARY.md](DATA_DICTIONARY.md)
@@ -161,6 +176,7 @@ Names only. The values live in each platform's dashboard or secrets store, never
 | `JOURNAL_ACCOUNT_ID` | Which `accounts` row synced trades belong to |
 | `SYNC_TRIGGER_SECRET` | Accepts Sync now / Get prices now |
 | `TWELVEDATA_API_KEY` | Daily pricing |
+| `FINNHUB_API_KEY` | Daily research (FRED needs no key) |
 | `SYNC_MARKET_HOURS_ONLY` | `true` limits trade syncs to market hours (see section 3) |
 | Optional tuning | `SYNC_INTERVAL_MINUTES`, `SYNC_MARKET_START_HOUR` / `_END_HOUR`, `SYNC_AFTER_CLOSE_*`, `SYNC_OVERLAP_DAYS`, `SYNC_TRIGGER_DEBOUNCE_SECONDS`, `PRICES_TRIGGER_DEBOUNCE_SECONDS`, `PRICING_HOUR`, `PRICING_MINUTE`, `WEBULL_*` paging / fee settings |
 
@@ -196,6 +212,8 @@ flowchart LR
 |---|---|---|
 | Supabase free | 500 MB database, ~5 GB transfer/month | Fine today. Every page loads all your trades (~2.7 KB each), which is why auto-refresh was kept cheap |
 | Twelve Data free | 800 lookups/day, 8/min; **no** options, dividends or fundamentals | Prices are batched 8 per minute; option prices and dividends are entered by hand |
+| Finnhub free | 60 calls/min; US fundamentals and earnings calendar, no prices history | Calls paced at 1.1 s; 2 calls per ticker (3 the first time, for its name) plus 1 call for the ticker-type list |
+| FRED | Public CSV download, no key | 3 series a day |
 | Webull OpenAPI | About 1 request per second for order endpoints | One shared rate limiter for order paging and fee fetching |
 | Fly.io | One small always-on machine | Sync and pricing share the process; jobs never overlap themselves |
 | Vercel Hobby | Serverless functions, auto-deploy from GitHub | Functions must be self-contained files |
@@ -205,7 +223,8 @@ flowchart LR
 ## 9. Known limitations
 
 - **Multi-leg Webull orders** (strangles, spreads) are skipped by the sync and logged in `sync_log`. Enter them by hand.
-- **`trade_key` doesn't include the account,** so the sync isn't safe for two accounts at the same broker yet (see `CLAUDE.md`).
+- **`trade_key` doesn't include the account,** so the sync isn't safe for two accounts at the same broker yet. Before adding one, change the unique key to `(user_id, account_id, trade_key)`; see the comment beside `upsert_trade_bundle` in `20260712010000_accounts_multi_broker.sql`.
 - **Portfolio prices are daily closes,** not live. Option prices are manual.
+- **Fair value needs positive earnings.** Funds (ETFs) and loss-making companies get no fair value or score.
 - **Each page loads every trade;** fine at hundreds of trades, worth narrowing at several thousand.
 - **Migrations are applied by hand** (there's no migration runner), so the database can drift from the repo if one is skipped. The dictionary's date stamp says when it was last checked against the live database.

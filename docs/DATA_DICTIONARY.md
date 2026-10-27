@@ -1,7 +1,8 @@
 # Data dictionary
 
 Every table, column and database function in the Supabase database, grouped by what it's
-for. Built from the live schema on 2026-10-22 plus the comments in `supabase/migrations/`.
+for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
+through `20261101010000_allocation.sql` (2026-10-27).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -33,9 +34,10 @@ for. Built from the live schema on 2026-10-22 plus the comments in `supabase/mig
 |---|---|
 | [Trading journal](#trading-journal) | `accounts`, `trades`, `executions`, `options_detail` |
 | [Review, planning & setups](#review-planning--setups) | `playbooks`, `trade_playbooks`, `daily_plans`, `daily_plan_playbooks`, `daily_journal`, `target_settings` |
-| [Net worth](#net-worth) | `networth_accounts`, `networth_balances` |
+| [Net worth](#net-worth) | `networth_accounts`, `networth_balances`, `installment_payments`, `wealth_settings` |
 | [Portfolios](#portfolios) | `portfolios`, `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `portfolio_daily_values`, `prices` |
-| [System](#system) | `sync_log` |
+| [Research & allocation](#research--allocation) | `fundamentals`, `macro_indicators`, `research_watchlist`, `research_overrides`, `allocation_targets`, `ticker_types` |
+| [System](#system) | `sync_log`, the `audit_summary` view |
 | [Legacy — not used by the app](#legacy--not-used-by-the-app) | `emotions`, `trade_emotions`, `playbook_rule_groups`, `playbook_rules`, `trade_rule_checks`, `daily_rules`, `daily_rule_checks`, `missed_trades`, five `backup_*_20260711` tables |
 
 ---
@@ -77,7 +79,7 @@ One **position** from first entry to final exit, built from one or more fills (`
 | `realized_pnl_net` | numeric | P&L after fees — what the app shows. |
 | `estimated_fee` / `actual_fee` | numeric | Fee estimated instantly from the fee formula / real fee fetched from Webull later. |
 | `fee_source` | text | `estimated` until every fill has a real fee, then `actual`. |
-| `trade_key` | text | Sync idempotency key: hash of contract + first fill's order id. Null for manual/imported trades. Not account-aware yet — see "Known limitations" in `CLAUDE.md`. |
+| `trade_key` | text | Sync idempotency key: hash of contract + first fill's order id. Null for manual/imported trades. Not account-aware yet — see Known limitations in ARCHITECTURE.md. |
 | `import_key` | text | Robinhood import's own dedup key. Null otherwise. |
 | `manually_closed` | boolean | True once you close a trade by hand (e.g. an option that expired worthless). The sync then stops overwriting its outcome fields. |
 | `notes` | text | The per-trade journal note. |
@@ -178,10 +180,14 @@ An account you track by hand (home, mortgage, checking, credit card…). **Writt
 | Column | Type | Meaning |
 |---|---|---|
 | `name` | text | Your nickname for it. Never store account numbers. |
-| `category` | text | Assets: `home` · `cash` · `401k` · `traditional_ira` · `roth_ira` · `brokerage` · `auto` · `misc_asset`. Debts (subtracted): `mortgage` · `auto_loan` · `credit_card` · `debt` · `other_debt`. |
+| `category` | text | Assets: `home` · `cash` · `emergency_fund` · `401k` · `traditional_ira` · `roth_ira` · `brokerage` · `auto` · `misc_asset`. Debts (subtracted): `mortgage` · `auto_loan` · `credit_card` · `debt` · `other_debt`. (The app also shows a **Margin loans** line, `margin`, but that comes from negative portfolio cash, never from an account.) |
 | `opened_month` | date | First month it appears in the monthly form. |
 | `closed_month` | date | From this month on it's gone from the form; history is kept. Null = open. |
 | `sort_order` | integer | Display order. |
+| `payment_amount` | numeric | Debts: the usual monthly payment, in full (including escrow). Null = no fixed payment. |
+| `payment_day` | integer | Debts: day of the month it's due (1–31; a short month uses its last day). A card with a due day but no fixed payment pays its statement: the month's closing balance, due the **following** month. |
+| `interest_rate` | numeric | Debts: APR in percent (e.g. `6.25`). Optional; drives the payoff estimate. |
+| `escrow_amount` | numeric | Mortgages: the part of `payment_amount` that goes to property tax and insurance. The payoff estimate uses `payment_amount − escrow_amount`. |
 
 ### `networth_balances`
 One balance per account per month. **Written by:** app. **Unique:** `(account_id, month)`.
@@ -194,22 +200,43 @@ One balance per account per month. **Written by:** app. **Unique:** `(account_id
 
 > Portfolios tagged Brokerage / 401k / IRA are **not** rows here — net worth reads their month-end value from `portfolio_daily_values`.
 
+### `installment_payments`
+One row per debt per month once you mark that month's payment paid. Payments don't change balances; balances still come from your statements. **Written by:** app. **Unique:** `(account_id, month)`.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `account_id` | uuid | → `networth_accounts.id`. |
+| `month` | date | The month the payment belongs to (for a card, the statement month, paid the next month). |
+| `amount` | numeric | What you paid. |
+| `paid_on` | date | When you marked it. |
+
+### `wealth_settings`
+Per-user Wealth preferences — **one row per user** (`user_id` is the primary key). Kept apart from the trading side's `target_settings`. **Written by:** app.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `close_from_month` | date | First month the month-end close checklist applies to. Earlier months are never asked to be closed. Null = no start set. |
+| `growth_cap` | numeric | Highest growth % fair value will use (default 30). |
+| `economy_override` | numeric | Your own economy score (0–30) instead of the automatic one. Null = automatic. |
+| `allocation_tolerance` | numeric | How far (± percentage points) an allocation can drift before it's flagged (default 5). |
+
 ---
 
 ## Portfolios
 
 ### `portfolios`
-An investment account you track (separate from the trading journal's `accounts`). **Written by:** app; `cash` changes only through functions.
+An investment account you track (separate from the trading journal's `accounts`). **Written by:** app for `name`, `kind`, `archived` and `target_pct` only; everything else through functions.
 
 | Column | Type | Meaning |
 |---|---|---|
 | `name` | text | e.g. "Long Term". |
-| `kind` | text | `brokerage` · `401k` · `traditional_ira` · `roth_ira` — which net-worth line it fills. |
-| `cash` | numeric | Cash in the portfolio. Moved by deposits, withdrawals, dividends, buys, sells and options. |
+| `kind` | text | `brokerage` · `401k` · `traditional_ira` · `roth_ira` — which net-worth line it fills. The three retirement kinds are never part of the brokerage allocation split. |
+| `cash` | numeric | Cash in the portfolio. Moved by deposits, withdrawals, dividends, buys, sells, options and Set balance. **Negative = margin used**, shown in net worth as a Margin loans debt. |
 | `archived` | boolean | Archived portfolios aren't priced and leave net worth. |
+| `target_pct` | numeric | Brokerage only: this portfolio's target share of all brokerage money (0–100). Null = no target. |
 
 ### `holdings`
-Shares currently held. **Written by:** functions (buy/sell/transfer/assignment) and app (Edit corrections). **Unique:** `(portfolio_id, symbol)`.
+Shares currently held. **Written by:** functions only (buy, sell, transfer, split, assignment, undo); the app may set `manual_price`. Shares and average cost always equal what Activity adds up to. **Unique:** `(portfolio_id, symbol)`.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -220,7 +247,7 @@ Shares currently held. **Written by:** functions (buy/sell/transfer/assignment) 
 | `manual_price` | numeric | Price to use instead of the daily close — for funds with no public ticker. Null = use `prices`. |
 
 ### `portfolio_activity`
-Every money/position event — the portfolio's ledger. **Written by:** functions only.
+Every money/position event — the portfolio's ledger. **Append-only:** a trigger rejects any update or delete except an undo (setting `voided_at`) or an edit (setting `replaced_by`) made by the functions. **Written by:** functions only.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -232,6 +259,8 @@ Every money/position event — the portfolio's ledger. **Written by:** functions
 | `realized_gain` | numeric | Gain/loss locked in by this event, if any. |
 | `csp_id` / `option_id` | uuid | → the put / option this row belongs to. |
 | `created_at` | timestamptz | When it was recorded — the worker uses this to assign money in/out to the right day. |
+| `voided_at` | timestamptz | Set when the entry is undone. Voided entries stay as history but count for nothing. |
+| `replaced_by` | uuid | On an edited entry: → the entry that replaced it (the original is also voided). |
 
 **Activity kinds**
 
@@ -239,6 +268,8 @@ Every money/position event — the portfolio's ledger. **Written by:** functions
 |---|---|---|---|---|
 | `deposit` / `withdrawal` | Deposit / Withdrawal | ± amount | ± amount | — |
 | `dividend` | Dividend | + amount | 0 (it's earnings) | — |
+| `cash_adjust` | Balance set | ± difference | ± difference for a setup or correction; 0 for margin interest or fees (a real cost) | — |
+| `split` | Split | 0 | 0 | — (`price` = ratio, `quantity` = shares after; cost ÷ ratio) |
 | `buy` | Buy | − cost | 0 | — |
 | `sell` | Sell | + proceeds | 0 | (price − avg cost) × qty |
 | `transfer_in` | Added existing / transfer in | 0 | + value | — |
@@ -317,6 +348,54 @@ Daily closing prices — **shared by all users** (public market data). **Written
 
 ---
 
+## Research & allocation
+
+### `fundamentals`
+Company numbers per ticker — **shared by all users** like `prices`. **Written by:** worker (Finnhub, daily). Readable by any signed-in user. Primary key `symbol`.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `name` | text | Company name. |
+| `eps_ttm` | numeric | Earnings per share, last 12 months. |
+| `eps_growth_5y` / `eps_growth_3y` | numeric | EPS growth, % per year. Fair value uses the lower of the two. |
+| `gross_margin` / `net_margin` / `roe` | numeric | %, last 12 months. |
+| `debt_to_equity` / `current_ratio` | numeric | Balance-sheet strength. |
+| `next_earnings_date` / `next_earnings_hour` / `next_eps_estimate` | date / text / numeric | Next report (`bmo` before open, `amc` after close) and the EPS expected. |
+| `security_type` / `description` | text | Finnhub's type (`Common Stock`, `ETP`, `ADR`, `REIT`, `Closed-End Fund`…) and listed name. Used to detect stock / ETF / bond. |
+
+### `macro_indicators`
+Economic numbers — **shared**. **Written by:** worker (FRED, daily). Primary key `key`. Each row has a `value` and `as_of` (the date of the reading).
+
+| `key` | Meaning |
+|---|---|
+| `aaa_yield` | AAA corporate bond yield % (FRED `BAMLC0A1CAAAEY`): the yield in the fair value formula. |
+| `treasury_10y` | 10-year Treasury yield % (`DGS10`). |
+| `unemployment_rate` / `unemployment_12m_low` | Unemployment % (`UNRATE`) and its low over the last 12 months. |
+
+### `research_watchlist`
+Tickers to research beyond what you hold. They also get a daily close. **Written by:** app. **Unique:** `(user_id, symbol)`.
+
+### `research_overrides`
+A number you set in place of an automatic one. **Written by:** app. Primary key `(user_id, symbol, field)`.
+
+| Column | Meaning |
+|---|---|
+| `field` | `eps` · `growth` (fair value inputs) or `valuation` · `growth_score` · `moat` · `execution` (score parts). |
+| `value` | Your number. Delete the row to go back to automatic. |
+
+### `allocation_targets`
+Target mix by type for one pool. **Written by:** app. Primary key `(user_id, scope)`. The five % columns must add up to 100.
+
+| Column | Meaning |
+|---|---|
+| `scope` | `brokerage` (all brokerage portfolios together) or a retirement portfolio's id (that account alone). |
+| `etf` / `stock` / `bond` / `option` / `cash` | Target %. |
+
+### `ticker_types`
+Your type for a ticker when the detected one is wrong. **Written by:** app. Primary key `(user_id, symbol)`. `asset_type` is `stock`, `etf` or `bond`.
+
+---
+
 ## System
 
 ### `sync_log`
@@ -330,11 +409,23 @@ One row per Webull sync run — the audit trail, and the source of "Synced 2m ag
 | `warnings_count` | integer | Number of warnings. |
 | `message` | text | Error, or the first 10 warnings joined by `; ` (e.g. skipped multi-leg orders). |
 
+### `audit_summary` (view)
+The reconciliation audit behind the **Health check** card: one row per problem, empty when everything reconciles. Runs as the caller, so each user sees only their own rows (the SQL editor sees everyone's).
+
+| Check | Flags |
+|---|---|
+| `shares` / `avg_cost` | A holding whose shares or average cost differ from what Activity adds up to (`audit_rebuild_holdings()`). |
+| `cash` | Portfolio cash ≠ the sum of live Activity cash changes. |
+| `position` | An option or put without exactly one opening entry, or with the wrong closing entries for its status. |
+| `covered_call` | Open covered calls need more shares than are held. |
+| `price` | A ticker that priced before is older than the last daily run (delisted or renamed?). |
+| `daily_value` | A portfolio missed a daily run the others got, or nothing has been saved for 4+ days. |
+
 ---
 
 ## Database functions
 
-All run as the calling user (so RLS applies) unless marked otherwise. Each one saves completely or not at all.
+Trading functions run as the calling user (so RLS applies) unless marked otherwise; portfolio functions run as the owner and check ownership themselves. Each one saves completely or not at all.
 
 | Function | Called by | What it does |
 |---|---|---|
@@ -345,7 +436,16 @@ All run as the calling user (so RLS applies) unless marked otherwise. Each one s
 | `portfolio_cash` | Cash tab | Deposit / withdrawal / dividend. |
 | `csp_open` / `csp_resolve` | Cash-secured puts | Sell a put; resolve as expired / closed / assigned. |
 | `option_open` / `option_close` | Options card | Buy call/put or sell covered call; resolve as closed / expired / exercised / assigned. |
-| `_own_portfolio` / `_covered_shares` | Other functions | Internal helpers: ownership check; shares promised to open covered calls. |
+| `portfolio_set_cash` | Set balance | Sets cash to the broker's number (negative for margin) as a `cash_adjust` entry. |
+| `portfolio_split` | Split | Multiplies shares by the ratio and divides average cost by it. |
+| `portfolio_entry_edit` | Activity → Edit | Voids a buy / sell / add existing / cash entry and records the corrected one, linked by `replaced_by`. |
+| `portfolio_entry_delete` | Activity → Undo | Voids an entry and reverses its effect. An entry that changed a holding can only be undone while it's the newest one for that ticker. |
+| `option_edit` / `csp_edit` | Options / puts → Edit | Corrects an open option or put. |
+| `position_undo_last` | Options / puts → Undo | Reopens a resolved position, or removes an open one. |
+| `audit_rebuild_holdings` | `audit_summary` | Replays live Activity and returns the shares and cost each holding should have. Read-only. |
+| `_own_portfolio` / `_covered_shares` / `_holding_unadd` / `_holding_readd` | Other functions | Internal helpers: ownership check; shares promised to open covered calls; reversing a share change. |
+
+Since the ledger lock (`20261028020000_ledger_lockdown.sql`) every portfolio function is **security definer** with a fixed `search_path`, and checks that the portfolio belongs to the caller.
 
 ## Storage buckets
 

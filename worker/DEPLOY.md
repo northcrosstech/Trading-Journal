@@ -88,6 +88,21 @@ holdings at their last stored price (or average cost). To run it once by hand:
 fly ssh console -C "python sync.py --prices-once"
 ```
 
+### Daily research data
+
+Right after pricing, the same job refreshes the Research page's data (`research.py`):
+Finnhub fundamentals, earnings dates and ticker types for every held and watchlist
+ticker, plus the AAA corporate yield, 10-year Treasury and unemployment from FRED (no
+key needed). It needs a free Finnhub key:
+```
+fly secrets set FINNHUB_API_KEY=<key>
+```
+Without it, research logs "FINNHUB_API_KEY is not set" and only the FRED numbers update.
+To run it once by hand:
+```
+fly ssh console -C "python sync.py --research-once"
+```
+
 ## Deploy
 
 ```

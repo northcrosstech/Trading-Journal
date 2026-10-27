@@ -10,9 +10,10 @@ screen are derived from it. Table and column details are in
 2. [Trades coming in](#2-trades-coming-in)
 3. [Reviewing a trade](#3-reviewing-a-trade)
 4. [Portfolio actions](#4-portfolio-actions)
-5. [Daily pricing](#5-daily-pricing)
+5. [Daily pricing and research](#5-daily-pricing-and-research)
 6. [How the numbers are derived](#6-how-the-numbers-are-derived)
 7. [Rules that keep the data consistent](#7-rules-that-keep-the-data-consistent)
+8. [The month-end close](#8-the-month-end-close)
 
 ---
 
@@ -42,6 +43,7 @@ Not linked by keys, but tied by **date** and **user**:
 ```mermaid
 erDiagram
     networth_accounts ||--o{ networth_balances : "one per month"
+    networth_accounts ||--o{ installment_payments : "marked paid"
     portfolios ||--o{ holdings : "shares"
     portfolios ||--o{ portfolio_activity : "ledger"
     portfolios ||--o{ csp_positions : "sold puts"
@@ -49,11 +51,17 @@ erDiagram
     portfolios ||--o{ portfolio_daily_values : "value at each close"
     csp_positions ||--o{ portfolio_activity : "events"
     option_positions ||--o{ portfolio_activity : "events"
+    portfolio_activity ||--o| portfolio_activity : "replaced_by (edits)"
     prices }o--o{ holdings : "by symbol"
     dividend_info }o--o{ holdings : "by symbol (per user)"
+    fundamentals }o--o{ holdings : "by symbol"
+    ticker_types }o--o{ holdings : "by symbol (per user)"
+    portfolios ||--o| allocation_targets : "scope = id (retirement)"
 ```
 
-- **`prices` and `dividend_info` join to holdings by `symbol`,** not by a key. `prices` is shared by all users; `dividend_info` is per user.
+- **`prices`, `fundamentals`, `dividend_info` and `ticker_types` join to holdings by `symbol`,** not by a key. `prices` and `fundamentals` are shared by all users; the other two are per user.
+- **`allocation_targets`** has one `brokerage` row for all brokerage portfolios together, plus one row per retirement portfolio (scope = its id). `portfolios.target_pct` holds the split between brokerage portfolios.
+- **`wealth_settings`** holds one row of per-user Wealth settings: close start month, growth cap, economy override, allocation tolerance.
 - **Net worth reads portfolios indirectly:** each active portfolio's latest `portfolio_daily_values` row in a month becomes a line under its `kind`.
 
 ---
@@ -117,7 +125,7 @@ flowchart LR
 
 ## 4. Portfolio actions
 
-Every action is a **database function**, so the holding, the cash and the ledger change together or not at all. The page never edits `cash` directly.
+Every action is a **database function**, so the holding, the cash and the ledger change together or not at all. The page can't edit `cash`, shares or average cost directly: the database refuses it.
 
 ```mermaid
 flowchart TB
@@ -129,10 +137,12 @@ flowchart TB
       cash[Deposit / Withdraw / Dividend] --> f4[portfolio_cash]
       csp[Sell put / resolve] --> f5[csp_open / csp_resolve]
       opt[Buy call/put, covered call / resolve] --> f6[option_open / option_close]
+      bal[Set balance] --> f7[portfolio_set_cash]
+      spl[Split] --> f8[portfolio_split]
     end
-    f1 & f2 & f3 & f5 & f6 --> H[(holdings)]
-    f1 & f2 & f4 & f5 & f6 --> P[(portfolios.cash)]
-    f1 & f2 & f3 & f4 & f5 & f6 --> L[(portfolio_activity)]
+    f1 & f2 & f3 & f5 & f6 & f8 --> H[(holdings)]
+    f1 & f2 & f4 & f5 & f6 & f7 --> P[(portfolios.cash)]
+    f1 & f2 & f3 & f4 & f5 & f6 & f7 & f8 --> L[(portfolio_activity)]
     f5 --> C[(csp_positions)]
     f6 --> O[(option_positions)]
 ```
@@ -148,11 +158,30 @@ flowchart TB
 | Sell at a profit | + proceeds | 0 | **counts:** earned |
 | Transfer to another portfolio | 0 | − here, + there | none on either side, nets to 0 combined |
 
-That's why "Add existing" and "Deposit" are the right way to bring in things you already owned. Buy only works when the portfolio has the cash.
+That's why "Add existing" and "Deposit" are the right way to bring in things you already owned.
+
+**Set balance** brings cash in line with the broker, including a negative balance for margin used. As a setup or correction it counts as money in or out (no effect on returns). Ticked as interest or fees, it's a real cost and lowers returns.
+
+### Fixing mistakes: edit and undo
+
+Activity is **append-only**. Nothing is ever deleted or changed in place:
+
+```mermaid
+flowchart LR
+    E[Entry] -- Undo --> V[voided_at = now<br/>effect reversed]
+    E -- Edit --> V2[original voided<br/>replaced_by → new entry]
+    V2 --> N[New entry with<br/>corrected values]
+```
+
+- **Undo** (`portfolio_entry_delete`) reverses exactly what the entry did to cash, shares, average cost or option status, then marks it voided.
+- **Edit** (`portfolio_entry_edit`, `option_edit`, `csp_edit`) is undo plus the corrected entry, in one save.
+- **Order matters for shares:** an entry that changed a holding can only be undone while it's the newest entry for that ticker in that portfolio. Undo newer ones first.
+- **Transfers between portfolios** can't be undone; transfer the shares back instead.
+- The Activity table hides voided entries; "Show undone or edited entries" brings them back as history.
 
 ---
 
-## 5. Daily pricing
+## 5. Daily pricing and research
 
 ```mermaid
 sequenceDiagram
@@ -169,7 +198,14 @@ sequenceDiagram
     W->>DB: upsert prices (symbol, date, close)
     Note over W: button run stops here
     W->>DB: per portfolio: value_portfolio → upsert portfolio_daily_values
+    Note over W: then research (button run: new tickers only)
+    W->>W: Finnhub: ticker-type list, then per ticker metrics + next earnings (1.1 s apart)
+    W->>DB: upsert fundamentals
+    W->>W: FRED: AAA yield, 10-year Treasury, unemployment
+    W->>DB: upsert macro_indicators
 ```
+
+Tickers priced and researched = everything held (no manual price) + open puts' and options' stocks + the research watchlist.
 
 **How a day's value is calculated** (worker/prices.py `value_portfolio`):
 
@@ -179,7 +215,8 @@ csp_liability  = Σ open puts:   (mark, else max(0, strike − stock)) × 100 ×
 options_value  = Σ long options: (mark, else price paid) × 100 × contracts
                − Σ covered calls: (mark, else max(0, stock − strike)) × 100 × contracts
 total_value    = holdings_value + cash − csp_liability + options_value
-net_flow       = Σ external_flow recorded since the previous day's computed_at
+net_flow       = Σ external_flow of entries recorded since the previous day's computed_at
+               − Σ external_flow of entries undone since then
 ```
 
 Prices are **closes**, not live: during market hours the latest close is the previous day's.
@@ -204,7 +241,16 @@ Nothing below is stored. The website calculates it from the tables each time a p
 | Allocation / weight | Each position ÷ (shares + long options + positive cash) | portfolio pages |
 | Dividend income | annual $/share × shares; per payment = ÷ payments per year | `dividends.ts` |
 | Dividend calendar | Past months = recorded `dividend` activity; this month on = expected | `dividends.ts` `dividendCalendar` |
-| Net worth (month) | Σ assets − Σ debts for accounts open that month (missing month → last earlier balance, "carried") + each portfolio's last daily value in or before that month | `networth.ts` `monthTotals` |
+| Net worth (month) | Σ assets − Σ debts for accounts open that month (missing month → last earlier balance, "carried") + each portfolio's last daily value in or before that month. Negative portfolio cash becomes a separate **Margin loans** debt | `networth.ts` `monthTotals` |
+| Month Net worth opens on | Current month; on the 1st–5th, last month while it isn't closed (section 8) | `cashflow.ts` `netWorthOpenMonth` |
+| Cash flow: what you kept | Cash saved (change in cash + emergency fund) + invested (deposits − withdrawals) + debt paid down. Investment growth and other changes reconcile it to the net worth change | `cashflow.ts` `monthCashFlow` |
+| Payment due | Fixed payment: that amount, on its day that month. Card with only a due day: that month's closing balance, due on its day **next** month | `installments.ts` `expectedPayment`, `paymentDueDate` |
+| Payoff estimate | Months n = −ln(1 − r·B/P) ÷ ln(1 + r), r = APR ÷ 12, P = payment − escrow | `installments.ts` `payoff` |
+| Fair value | EPS × (7 + g) × 4.4 ÷ AAA yield. g = lower of 5-year and 3-year EPS growth, floored at 0, capped (default 30). "Buy below" = 85% of fair value | `research.ts` `fairValue` |
+| Score (out of 100) | Valuation 20 (price ÷ fair value) + Growth 20 + Moat 20 (gross margin + return on equity) + Execution 10 (profitable, debt, current ratio) + Economy 30 (less for rising unemployment and a high 10-year yield). 80+ Strong, 70–79 Good, 60–69 Fair, under 60 Weak. Overrides replace any part | `research.ts` `research` |
+| Ticker type | Your `ticker_types` choice; else Finnhub type: ETP / closed-end fund → ETF (bond if its name says bond, treasury or T-bill), everything else → stock; else built-in lists | `allocationPlan.ts` `classify` |
+| Allocation mix | Holdings by type + long options + positive cash, per pool (brokerage portfolios together; each retirement account alone). Margin and sold options are left out | `allocationPlan.ts` `mixOf` |
+| On / over / under target | Actual % − target %, within ± tolerance = on target. Add / trim $ = (target % − actual %) × pool total | `allocationPlan.ts` `compareToTargets` |
 
 ---
 
@@ -222,6 +268,29 @@ Nothing below is stored. The website calculates it from the tables each time a p
 | Can't sell more shares than held | `portfolio_sell` / `portfolio_transfer` |
 | Can't sell or move shares covering open calls | `_covered_shares` check in sell / transfer / covered call |
 | Each covered call needs 100 uncovered shares | `option_open` |
-| Cash moves only with a ledger row | all portfolio functions |
+| Cash moves only with a ledger row | all portfolio functions; direct writes revoked from signed-in users |
+| Activity is never changed or deleted, only voided or replaced | `portfolio_activity_append_only` trigger |
+| Shares and average cost come only from Activity | holdings writes revoked; `audit_summary` flags any drift |
+| A mix target adds up to 100% | check on `allocation_targets` |
 | One closing price per ticker per day | `prices` primary key `(symbol, price_date)` |
 | One value per portfolio per day | `portfolio_daily_values` primary key `(portfolio_id, value_date)` |
+
+---
+
+## 8. The month-end close
+
+Net worth runs on **month-end balances**, so each month has to be closed: every open account gets its balance as of the last day, and every due payment is marked paid.
+
+```mermaid
+flowchart LR
+    A[1st of the month] --> B{Last month closed?<br/>all balances entered<br/>+ due payments paid}
+    B -- no --> C[Close banner on Overview,<br/>Net worth and Cash flow]
+    C --> D[Enter balances / mark paid]
+    D --> B
+    B -- yes --> E[Banner gone;<br/>Net worth opens on this month]
+```
+
+- **Which month Net worth opens on:** the current month from the 6th onward. On the 1st–5th it stays on last month until that month is closed, and the banner says so. After the 5th, an unclosed month keeps its banner with an **Open** button.
+- **Where closing starts:** months before `wealth_settings.close_from_month` are never asked to be closed ("Start from this month" on the banner).
+- **Balances carried forward:** a month with no balance entered uses the last earlier one, marked "carried", so totals never drop to zero. Cash flow marks a month incomplete while it leans on carried balances.
+- Code: `cashflow.ts` `closeStatus`, `CloseMonthBanner.tsx`.
