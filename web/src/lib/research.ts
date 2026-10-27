@@ -127,7 +127,8 @@ export type Research = {
   name: string | null
   kind: 'stock' | 'etf' | 'no_data'
   price: number | null
-  eps: { value: number | null; edited: boolean }
+  /** foreign: the company reports in another currency, so EPS is price / P/E instead. */
+  eps: { value: number | null; edited: boolean; foreign: { currency: string; pe: number | null } | null }
   growth: {
     value: number | null
     edited: boolean
@@ -161,8 +162,14 @@ export function research(
 ): Research {
   const etf = isEtf(symbol) || ['ETP', 'Closed-End Fund'].includes(f?.security_type ?? '')
   const aaa = macro.aaa ?? FALLBACK_AAA
-  const epsAuto = f?.eps_ttm !== null && f?.eps_ttm !== undefined ? Number(f.eps_ttm) : null
-  const eps = overrides.eps !== undefined ? { value: overrides.eps, edited: true } : { value: epsAuto, edited: false }
+  const epsRaw = f?.eps_ttm !== null && f?.eps_ttm !== undefined ? Number(f.eps_ttm) : null
+  // A company reporting in another currency (TSM: Taiwan dollars per ordinary share, 5 to an
+  // ADR) has an EPS that isn't $ per share held; its P/E is, so EPS = price / P/E.
+  const currency = f?.reporting_currency ?? null
+  const peTtm = f?.pe_ttm !== null && f?.pe_ttm !== undefined ? Number(f.pe_ttm) : null
+  const foreign = currency !== null && currency !== 'USD' ? { currency, pe: peTtm } : null
+  const epsAuto = foreign ? (price !== null && peTtm !== null && peTtm > 0 ? price / peTtm : null) : epsRaw
+  const eps = overrides.eps !== undefined ? { value: overrides.eps, edited: true, foreign } : { value: epsAuto, edited: false, foreign }
   const auto = growthUsed(f, settings.growthCap)
   const forecast =
     f?.eps_growth_forecast !== null && f?.eps_growth_forecast !== undefined
@@ -210,7 +217,10 @@ export function research(
   let earnings: Research['earnings'] = null
   if (f?.next_earnings_date) {
     const days = Math.round((Date.parse(`${f.next_earnings_date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000)
-    if (days >= 0) earnings = { date: f.next_earnings_date, hour: f.next_earnings_hour, estimate: num(f.next_eps_estimate), days }
+    // Same currency and share basis as the reported EPS, so scale it the same way.
+    const estimate = num(f.next_eps_estimate)
+    const scaled = foreign ? (estimate !== null && epsAuto !== null && epsRaw ? (estimate * epsAuto) / epsRaw : null) : estimate
+    if (days >= 0) earnings = { date: f.next_earnings_date, hour: f.next_earnings_hour, estimate: scaled, days }
   }
 
   return {

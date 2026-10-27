@@ -87,7 +87,7 @@ def test_run_research_fetches_held_and_watched_tickers_and_macro(monkeypatch):
         {
             "holdings": [{"symbol": "NVDA", "manual_price": None}, {"symbol": "FUND", "manual_price": 10}],
             "research_watchlist": [{"symbol": "GOOG"}],
-            "fundamentals": [{"symbol": "GOOG", "name": "Alphabet Inc"}],
+            "fundamentals": [{"symbol": "GOOG", "name": "Alphabet Inc", "reporting_currency": "USD"}],
             "macro_indicators": [],
         }
     )
@@ -98,7 +98,7 @@ def test_run_research_fetches_held_and_watched_tickers_and_macro(monkeypatch):
         if path == "stock/metric":
             return {"metric": {"epsTTM": 7.9}}
         if path == "stock/profile2":
-            return {"name": "NVIDIA Corp"}
+            return {"name": "NVIDIA Corp", "currency": "USD"}
         if path == "stock/symbol":
             return [{"symbol": "NVDA", "type": "Common Stock", "description": "NVIDIA CORP"}, {"symbol": "GOOG", "type": "Common Stock", "description": "ALPHABET INC-CL C"}]
         return {"earningsCalendar": [{"date": "2026-11-25", "hour": "amc", "epsEstimate": 2.5}]}
@@ -112,7 +112,8 @@ def test_run_research_fetches_held_and_watched_tickers_and_macro(monkeypatch):
     assert saved["NVDA"]["name"] == "NVIDIA Corp" and saved["NVDA"]["next_earnings_date"] == "2026-11-25"
     assert saved["GOOG"]["name"] == "Alphabet Inc"
     assert saved["NVDA"]["security_type"] == "Common Stock" and saved["NVDA"]["description"] == "NVIDIA CORP"
-    assert ("stock/profile2", "GOOG") not in calls  # name already known: no extra call
+    assert ("stock/profile2", "GOOG") not in calls  # name and currency already known: no extra call
+    assert saved["NVDA"]["reporting_currency"] == "USD" and saved["GOOG"]["reporting_currency"] == "USD"
     assert {r["key"] for r in db.writes["macro_indicators"]} >= {"aaa_yield", "treasury_10y"}
 
     # only_new: GOOG already has fundamentals, so only NVDA is fetched
@@ -179,4 +180,4 @@ def test_run_research_adds_forecast_and_survives_missing_columns(monkeypatch):
     s2 = research.run_research(date(2026, 10, 27), client=old, api_key="k", only_new=True, fmp_key="f")
     assert s2.error is None and s2.fundamentals_saved == 1
     assert "eps_growth_forecast" not in old.writes["fundamentals"][0]
-    assert any("growth_forecast migration" in w for w in s2.warnings)
+    assert any("eps_growth_forecast" in w and "migration" in w for w in s2.warnings)

@@ -153,7 +153,7 @@ either one for the full breakdown and "How this is calculated".
 
 > EPS × (7 + growth) × 4.4 ÷ today's AAA corporate bond yield
 
-- **EPS** is earnings per share over the last 12 months.
+- **EPS** is earnings per share over the last 12 months. For a company that reports in another currency (TSM reports in Taiwan dollars), it's worked out as price ÷ P/E so it's in dollars per share you hold.
 - **Growth** is what analysts expect earnings to grow per year, from next fiscal year to up to 5 years out. Without a forecast (smaller companies, or no estimates yet), it falls back to the lower of the past 5-year and 3-year growth. Either way it's capped at 30% (you can change the cap), and negative growth counts as 0. The breakdown says which one was used.
 - **Higher bond yields mean lower fair values.** Money is worth more elsewhere.
 - **Reading it:** under 85% of fair value is *cheap*, 85–105% *fair*, 105–130% *pricey*, over 130% *expensive*. "Buy below" is 85% of fair value.

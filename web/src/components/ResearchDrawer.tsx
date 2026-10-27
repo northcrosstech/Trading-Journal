@@ -150,7 +150,14 @@ export function ResearchDrawer({
               {r.fair !== null && <span className="text-neutral-500"> = {currency(r.fair)}</span>}
             </div>
             <dl className="mt-2 grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1.5">
-              <dt className="text-neutral-400">EPS, last 12 months</dt>
+              <dt className="text-neutral-400">
+                EPS, last 12 months
+                {r.eps.foreign && !r.eps.edited && (
+                  <span className="block text-xs text-neutral-600">
+                    reports in {r.eps.foreign.currency}, so price ÷ P/E {fmt(r.eps.foreign.pe, 1)}
+                  </span>
+                )}
+              </dt>
               <dd className="text-right tabular-nums text-neutral-100">
                 {fmt(r.eps.value)} {r.eps.edited && <Pill tone="violet">edited</Pill>}
               </dd>

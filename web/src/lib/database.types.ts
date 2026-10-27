@@ -301,6 +301,10 @@ export type FundamentalsRow = {
   forecast_from_year?: number | null
   forecast_to_year?: number | null
   forecast_analysts?: number | null
+  /** P/E, last 12 months, and the currency the company reports in (TSM: TWD). Optional
+   * until the foreign_eps migration has run. */
+  pe_ttm?: number | null
+  reporting_currency?: string | null
   /** Finnhub's type (Common Stock, ETP, ADR, REIT...) and name, for stock / ETF / bond. */
   security_type?: string | null
   description?: string | null

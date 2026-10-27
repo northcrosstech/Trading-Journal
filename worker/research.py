@@ -49,6 +49,8 @@ FMP_INTERVAL_SECONDS = 0.5
 FORECAST_MAX_YEARS = 5  # the last forecast year used is at most this far past the current one
 FORECAST_MIN_ANALYSTS = 3  # thinner far-out estimates are ignored
 FORECAST_COLUMNS = ("eps_growth_forecast", "forecast_from_year", "forecast_to_year", "forecast_analysts")
+# Columns added by later migrations: if the database doesn't have them yet, the rest still saves.
+OPTIONAL_COLUMNS = FORECAST_COLUMNS + ("pe_ttm", "reporting_currency")
 
 # Finnhub /stock/metric field -> fundamentals column
 METRIC_FIELDS = {
@@ -60,6 +62,7 @@ METRIC_FIELDS = {
     "netProfitMarginTTM": "net_margin",
     "totalDebt/totalEquityQuarterly": "debt_to_equity",
     "currentRatioQuarterly": "current_ratio",
+    "peTTM": "pe_ttm",
 }
 
 
@@ -259,7 +262,7 @@ def run_research(
             client = get_client()
 
         symbols = research_symbols(client)
-        known = {r["symbol"]: r for r in _all_rows(client.table("fundamentals").select("symbol,name"))}
+        known = {r["symbol"]: r for r in _all_rows(client.table("fundamentals").select("*"))}
         if only_new:
             symbols = [s for s in symbols if s not in known]
         summary.symbols_requested = len(symbols)
@@ -272,7 +275,7 @@ def run_research(
             fmp_limiter = RateLimiter(min_interval_seconds=FMP_INTERVAL_SECONDS)
             if not fmp_key:
                 summary.warnings.append("FMP_API_KEY is not set -- fair value uses past growth")
-            forecast_columns = True  # false once the database turns out not to have them yet
+            missing: set[str] = set()  # optional columns the database turns out not to have yet
             horizon = (today + timedelta(days=EARNINGS_LOOKAHEAD_DAYS)).isoformat()
             # One call lists every US ticker with its type (Common Stock, ETP, ADR, REIT...).
             try:
@@ -286,27 +289,33 @@ def run_research(
                     row.update(pick_next_earnings(
                         _finnhub("calendar/earnings", {"symbol": s, "from": today.isoformat(), "to": horizon}, api_key, limiter), today
                     ))
-                    name = (known.get(s) or {}).get("name")
-                    if not name:
-                        name = (_finnhub("stock/profile2", {"symbol": s}, api_key, limiter) or {}).get("name") or None
-                    row["name"] = name
+                    # Name and reporting currency (TSM reports in TWD) from the profile, fetched
+                    # until both are stored.
+                    prev = known.get(s) or {}
+                    row["name"], row["reporting_currency"] = prev.get("name"), prev.get("reporting_currency")
+                    if not row["name"] or (not row["reporting_currency"] and "reporting_currency" not in missing):
+                        profile = _finnhub("stock/profile2", {"symbol": s}, api_key, limiter) or {}
+                        row["name"] = row["name"] or profile.get("name") or None
+                        row["reporting_currency"] = profile.get("currency") or None
                     if s in types:
                         row["security_type"], row["description"] = types[s]
-                    if fmp_key and forecast_columns:
+                    if fmp_key and not missing.intersection(FORECAST_COLUMNS):
                         try:
                             row.update(forecast_growth(_fmp("analyst-estimates", {"symbol": s, "period": "annual", "limit": 10}, fmp_key, fmp_limiter), today))
                         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
                             summary.warnings.append(f"{s}: forecast request failed ({exc})")
                     row["updated_at"] = datetime.now(timezone.utc).isoformat()
-                    try:
-                        client.table("fundamentals").upsert(row, on_conflict="symbol").execute()
-                    except Exception as exc:  # noqa: BLE001
-                        if not forecast_columns or "forecast" not in str(exc):
-                            raise
-                        # 20261102010000_growth_forecast.sql not run yet: save the rest
-                        forecast_columns = False
-                        summary.warnings.append("forecast columns missing -- run the growth_forecast migration")
-                        client.table("fundamentals").upsert({k: v for k, v in row.items() if k not in FORECAST_COLUMNS}, on_conflict="symbol").execute()
+                    while True:
+                        try:
+                            client.table("fundamentals").upsert({k: v for k, v in row.items() if k not in missing}, on_conflict="symbol").execute()
+                            break
+                        except Exception as exc:  # noqa: BLE001
+                            # A newer research migration not run yet: drop the columns it adds, save the rest
+                            absent = {c for c in OPTIONAL_COLUMNS if c in str(exc) and c not in missing}
+                            if not absent:
+                                raise
+                            missing |= absent
+                            summary.warnings.append(f"columns missing ({', '.join(sorted(absent))}) -- run the newest research migration")
                     summary.fundamentals_saved += 1
                 except (urllib.error.URLError, TimeoutError, ValueError) as exc:
                     summary.warnings.append(f"{s}: request failed ({exc})")

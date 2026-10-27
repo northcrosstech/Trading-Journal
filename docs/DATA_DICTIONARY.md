@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261102010000_growth_forecast.sql` (2026-10-27).
+through `20261103010000_foreign_eps.sql` (2026-10-27).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -356,7 +356,9 @@ Company numbers per ticker — **shared by all users** like `prices`. **Written 
 | Column | Type | Meaning |
 |---|---|---|
 | `name` | text | Company name. |
-| `eps_ttm` | numeric | Earnings per share, last 12 months. |
+| `eps_ttm` | numeric | Earnings per share, last 12 months, **in the reporting currency** and per ordinary share. |
+| `pe_ttm` | numeric | Price ÷ earnings, last 12 months. Currency-neutral, so for a company reporting in another currency the app uses price ÷ `pe_ttm` as EPS. |
+| `reporting_currency` | text | Currency the company reports in (`USD`, `TWD` for TSM, `EUR`…). |
 | `eps_growth_5y` / `eps_growth_3y` | numeric | Past EPS growth, % per year. Without a forecast, fair value uses the lower of the two. |
 | `eps_growth_forecast` | numeric | Analysts' expected EPS growth, % per year (Financial Modeling Prep), from `forecast_from_year` to `forecast_to_year`. Measured from next fiscal year (the current one can carry one-off gains) to the furthest year within 5 that 3+ analysts estimate. Fair value uses this first. |
 | `forecast_from_year` / `forecast_to_year` / `forecast_analysts` | int | The fiscal years the forecast growth spans, and the analysts behind the last year. |
