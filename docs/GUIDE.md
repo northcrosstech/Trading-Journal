@@ -154,7 +154,7 @@ either one for the full breakdown and "How this is calculated".
 > EPS × (7 + growth) × 4.4 ÷ today's AAA corporate bond yield
 
 - **EPS** is earnings per share over the last 12 months.
-- **Growth** is the lower of the 5-year and 3-year EPS growth, capped at 30% (you can change the cap). Negative growth counts as 0.
+- **Growth** is what analysts expect earnings to grow per year, from next fiscal year to up to 5 years out. Without a forecast (smaller companies, or no estimates yet), it falls back to the lower of the past 5-year and 3-year growth. Either way it's capped at 30% (you can change the cap), and negative growth counts as 0. The breakdown says which one was used.
 - **Higher bond yields mean lower fair values.** Money is worth more elsewhere.
 - **Reading it:** under 85% of fair value is *cheap*, 85–105% *fair*, 105–130% *pricey*, over 130% *expensive*. "Buy below" is 85% of fair value.
 
@@ -172,7 +172,7 @@ either one for the full breakdown and "How this is calculated".
 
 - **Override any part** (EPS, growth or a score part) from the breakdown. Clear it to go back to automatic.
 - **ETFs and loss-making companies** get no fair value or score, because there are no positive earnings to value.
-- **Everything is automatic:** company data from Finnhub and economic numbers from FRED, refreshed daily. A new ticker fills in with "Get prices now", or at 4:45 PM.
+- **Everything is automatic:** company data from Finnhub, analysts' forecasts from Financial Modeling Prep and economic numbers from FRED, refreshed daily. A new ticker fills in with "Get prices now", or at 4:45 PM.
 
 ---
 

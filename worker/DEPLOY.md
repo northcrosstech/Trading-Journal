@@ -98,6 +98,13 @@ key needed). It needs a free Finnhub key:
 fly secrets set FINNHUB_API_KEY=<key>
 ```
 Without it, research logs "FINNHUB_API_KEY is not set" and only the FRED numbers update.
+
+Forecast growth for fair value comes from Financial Modeling Prep's free analyst
+estimates (250 calls a day, 1 per ticker):
+```
+fly secrets set FMP_API_KEY=<key>
+```
+Without it, fair value falls back to past EPS growth.
 To run it once by hand:
 ```
 fly ssh console -C "python sync.py --research-once"

@@ -110,7 +110,7 @@ export function ResearchDrawer({
 
   async function editGrowthCap() {
     if (!user) return
-    const v = await editNumber({ title: 'Growth cap (all stocks)', label: 'Highest growth % used', current: settings.growthCap, hint: 'Past growth can be extreme; fair value never uses more than this. Blank = 30%.', min: 1, max: 100 })
+    const v = await editNumber({ title: 'Growth cap (all stocks)', label: 'Highest growth % used', current: settings.growthCap, hint: 'Growth forecasts can be extreme; fair value never uses more than this. Blank = 30%.', min: 1, max: 100 })
     if (v === undefined) return
     save(setResearchSettings(user.id, { growth_cap: v ?? 30 }), `Growth cap set to ${v ?? 30}%`)
   }
@@ -162,7 +162,9 @@ export function ResearchDrawer({
                 <span className="block text-xs text-neutral-600">
                   {r.growth.edited
                     ? 'your number'
-                    : `5y ${fmt(r.growth.raw5y, 1)}% · 3y ${fmt(r.growth.raw3y, 1)}% → lower one${r.growth.capped ? `, capped at ${settings.growthCap}%` : ''}`}
+                    : r.growth.from === 'forecast' && r.growth.forecast
+                      ? `analysts' forecast${r.growth.forecast.fromYear && r.growth.forecast.toYear ? `, ${r.growth.forecast.fromYear}–${r.growth.forecast.toYear}` : ''}${r.growth.forecast.analysts ? ` (${r.growth.forecast.analysts} analysts)` : ''}${r.growth.capped ? `, capped at ${settings.growthCap}%` : ''}`
+                      : `no forecast · past 5y ${fmt(r.growth.raw5y, 1)}% · 3y ${fmt(r.growth.raw3y, 1)}% → lower one${r.growth.capped ? `, capped at ${settings.growthCap}%` : ''}`}
                 </span>
               </dt>
               <dd className="text-right tabular-nums text-neutral-100">
@@ -260,7 +262,7 @@ export function ResearchDrawer({
                   <p className="mt-1 font-mono text-neutral-300">EPS × (7 + growth) × 4.4 ÷ AAA yield</p>
                   <ul className="mt-1 list-disc pl-4">
                     <li>7 = the P/E a company with no growth deserves.</li>
-                    <li>Growth = the lower of past 5-year and 3-year EPS growth, capped at {settings.growthCap}% <button className="text-(--accent-text) hover:underline" onClick={editGrowthCap}>change</button>.</li>
+                    <li>Growth = analysts' forecast EPS growth per year, from next fiscal year to up to 5 years out. Without a forecast, the lower of past 5-year and 3-year EPS growth. Capped at {settings.growthCap}% <button className="text-(--accent-text) hover:underline" onClick={editGrowthCap}>change</button>.</li>
                     <li>4.4 = the AAA yield when the formula was written; today's AAA yield comes from FRED daily. Higher rates mean a lower fair value.</li>
                     <li>Buy below = 85% of fair value (a 15% margin of safety).</li>
                   </ul>

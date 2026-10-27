@@ -120,3 +120,63 @@ def test_run_research_fetches_held_and_watched_tickers_and_macro(monkeypatch):
     s2 = research.run_research(date(2026, 10, 27), client=db2, api_key="k", only_new=True)
     assert s2.symbols_requested == 1
     assert "macro_indicators" not in db2.writes  # already stored
+
+
+def _est(rows):
+    """[(fiscal year end, eps, analysts)] -> FMP analyst-estimates rows."""
+    return [{"date": d, "epsAvg": e, "numAnalystsEps": n} for d, e, n in rows]
+
+
+def test_forecast_growth_on_real_estimates():
+    today = date(2026, 10, 27)
+    googl = _est([("2025-12-31", 10.64, 37), ("2026-12-31", 20.60, 41), ("2027-12-31", 15.34, 40), ("2028-12-31", 18.36, 38), ("2029-12-31", 21.58, 27), ("2030-12-31", 25.69, 33)])
+    g = research.forecast_growth(googl, today)
+    # 2026 carries one-off gains, so growth runs 2027 -> 2030
+    assert (g["forecast_from_year"], g["forecast_to_year"], g["forecast_analysts"]) == (2027, 2030, 33)
+    assert g["eps_growth_forecast"] == pytest.approx(18.75, abs=0.01)
+    # NVDA's fiscal year ends in January: FY2027 (Jan 2027) is the current one
+    nvda = _est([("2026-01-25", 4.69, 30), ("2027-01-31", 9.29, 33), ("2028-01-30", 15.81, 32), ("2029-01-28", 21.38, 20), ("2030-01-27", 25.6, 9), ("2031-01-26", 26.6, 10)])
+    n = research.forecast_growth(nvda, today)
+    assert (n["forecast_from_year"], n["forecast_to_year"]) == (2028, 2031)
+    # AAPL: 2029 and 2030 have under 3 analysts, leaving too few years to skip the current one
+    aapl = _est([("2026-09-26", 8.84, 29), ("2027-09-25", 9.59, 30), ("2028-09-30", 10.61, 21), ("2029-09-29", 11.97, 2), ("2030-09-28", 12.11, 1)])
+    a = research.forecast_growth(aapl, today)
+    assert (a["forecast_from_year"], a["forecast_to_year"]) == (2027, 2028)
+    assert a["eps_growth_forecast"] == pytest.approx(10.64, abs=0.01)
+
+
+def test_forecast_growth_needs_positive_future_years():
+    today = date(2026, 10, 27)
+    assert research.forecast_growth([], today)["eps_growth_forecast"] is None
+    assert research.forecast_growth(_est([("2026-12-31", 1.0, 5)]), today)["eps_growth_forecast"] is None
+    # losing money now: no growth rate from a negative base
+    assert research.forecast_growth(_est([("2026-12-31", -1.0, 5), ("2027-12-31", 0.5, 5)]), today)["eps_growth_forecast"] is None
+
+
+def test_run_research_adds_forecast_and_survives_missing_columns(monkeypatch):
+    data = {"holdings": [{"symbol": "GOOGL", "manual_price": None}], "research_watchlist": [], "fundamentals": [], "macro_indicators": [{"key": "aaa_yield"}]}
+    monkeypatch.setattr(research, "_finnhub", lambda path, params, key, limiter: [] if path == "stock/symbol" else {"metric": {"epsTTM": 10.6}} if path == "stock/metric" else {})
+    monkeypatch.setattr(research, "_fmp", lambda path, params, key, limiter: _est([("2026-12-31", 20.6, 41), ("2027-12-31", 15.34, 40), ("2030-12-31", 25.69, 33)]))
+    db = _Db(data)
+    s = research.run_research(date(2026, 10, 27), client=db, api_key="k", only_new=True, fmp_key="f")
+    assert s.error is None and db.writes["fundamentals"][0]["forecast_to_year"] == 2030
+
+    class _OldDb(_Db):  # database before the growth_forecast migration
+        def table(self, name):
+            q = _Q(self, name)
+            if name == "fundamentals":
+                real = q.upsert
+
+                def upsert(row, **kw):
+                    if "eps_growth_forecast" in row:
+                        raise RuntimeError("Could not find the 'eps_growth_forecast' column of 'fundamentals'")
+                    return real(row, **kw)
+
+                q.upsert = upsert
+            return q
+
+    old = _OldDb(data)
+    s2 = research.run_research(date(2026, 10, 27), client=old, api_key="k", only_new=True, fmp_key="f")
+    assert s2.error is None and s2.fundamentals_saved == 1
+    assert "eps_growth_forecast" not in old.writes["fundamentals"][0]
+    assert any("growth_forecast migration" in w for w in s2.warnings)

@@ -17,7 +17,20 @@ export function fairValue(eps: number | null, growth: number | null, aaa: number
   return (eps * (NO_GROWTH_PE + Math.max(growth, 0)) * BASE_YIELD) / aaa
 }
 
-/** Conservative growth: the lower of the 5-year and 3-year EPS growth, capped. */
+export type GrowthSource = 'forecast' | '5y' | '3y'
+
+/** Growth for fair value: analysts' forecast EPS growth when there is one, capped. Without
+ * one, the lower of past 5-year and 3-year EPS growth, capped. */
+export function growthUsed(
+  f: Pick<FundamentalsRow, 'eps_growth_5y' | 'eps_growth_3y' | 'eps_growth_forecast'> | null,
+  cap: number,
+): { value: number | null; capped: boolean; from: GrowthSource | null } {
+  const fc = f?.eps_growth_forecast ?? null
+  if (fc !== null) return { value: Math.min(Number(fc), cap), capped: Number(fc) > cap, from: 'forecast' }
+  return conservativeGrowth(f, cap)
+}
+
+/** Conservative past growth: the lower of the 5-year and 3-year EPS growth, capped. */
 export function conservativeGrowth(f: Pick<FundamentalsRow, 'eps_growth_5y' | 'eps_growth_3y'> | null, cap: number): { value: number | null; capped: boolean; from: '5y' | '3y' | null } {
   const g5 = f?.eps_growth_5y ?? null
   const g3 = f?.eps_growth_3y ?? null
@@ -40,7 +53,7 @@ export function valuationPoints(pctOfFair: number): number {
   return pts
 }
 
-/** Growth (20): conservative EPS growth % per year. */
+/** Growth (20): the growth fair value uses (forecast, else past), % per year. */
 export const GROWTH_TABLE: [number, number][] = [[40, 20], [30, 18], [20, 16], [15, 15], [10, 13], [5, 11], [0, 8]]
 export function growthPoints(growth: number): number {
   for (const [from, p] of GROWTH_TABLE) if (growth >= from) return p
@@ -115,7 +128,15 @@ export type Research = {
   kind: 'stock' | 'etf' | 'no_data'
   price: number | null
   eps: { value: number | null; edited: boolean }
-  growth: { value: number | null; edited: boolean; capped: boolean; from: '5y' | '3y' | null; raw5y: number | null; raw3y: number | null }
+  growth: {
+    value: number | null
+    edited: boolean
+    capped: boolean
+    from: GrowthSource | null
+    raw5y: number | null
+    raw3y: number | null
+    forecast: { value: number; fromYear: number | null; toYear: number | null; analysts: number | null } | null
+  }
   aaa: number
   fair: number | null
   pct: number | null // price / fair value
@@ -142,11 +163,16 @@ export function research(
   const aaa = macro.aaa ?? FALLBACK_AAA
   const epsAuto = f?.eps_ttm !== null && f?.eps_ttm !== undefined ? Number(f.eps_ttm) : null
   const eps = overrides.eps !== undefined ? { value: overrides.eps, edited: true } : { value: epsAuto, edited: false }
-  const auto = conservativeGrowth(f, settings.growthCap)
+  const auto = growthUsed(f, settings.growthCap)
+  const forecast =
+    f?.eps_growth_forecast !== null && f?.eps_growth_forecast !== undefined
+      ? { value: Number(f.eps_growth_forecast), fromYear: f.forecast_from_year ?? null, toYear: f.forecast_to_year ?? null, analysts: f.forecast_analysts ?? null }
+      : null
+  const known = { raw5y: f?.eps_growth_5y ?? null, raw3y: f?.eps_growth_3y ?? null, forecast }
   const growth =
     overrides.growth !== undefined
-      ? { value: overrides.growth, edited: true, capped: false, from: null, raw5y: f?.eps_growth_5y ?? null, raw3y: f?.eps_growth_3y ?? null }
-      : { ...auto, edited: false, raw5y: f?.eps_growth_5y ?? null, raw3y: f?.eps_growth_3y ?? null }
+      ? { value: overrides.growth, edited: true, capped: false, from: null, ...known }
+      : { ...auto, edited: false, ...known }
   const fair = etf && overrides.eps === undefined ? null : fairValue(eps.value, growth.value, aaa)
   const pct = fair !== null && price !== null ? price / fair : null
 

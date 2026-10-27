@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261101010000_allocation.sql` (2026-10-27).
+through `20261102010000_growth_forecast.sql` (2026-10-27).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -351,13 +351,15 @@ Daily closing prices — **shared by all users** (public market data). **Written
 ## Research & allocation
 
 ### `fundamentals`
-Company numbers per ticker — **shared by all users** like `prices`. **Written by:** worker (Finnhub, daily). Readable by any signed-in user. Primary key `symbol`.
+Company numbers per ticker — **shared by all users** like `prices`. **Written by:** worker (Finnhub and Financial Modeling Prep, daily). Readable by any signed-in user. Primary key `symbol`.
 
 | Column | Type | Meaning |
 |---|---|---|
 | `name` | text | Company name. |
 | `eps_ttm` | numeric | Earnings per share, last 12 months. |
-| `eps_growth_5y` / `eps_growth_3y` | numeric | EPS growth, % per year. Fair value uses the lower of the two. |
+| `eps_growth_5y` / `eps_growth_3y` | numeric | Past EPS growth, % per year. Without a forecast, fair value uses the lower of the two. |
+| `eps_growth_forecast` | numeric | Analysts' expected EPS growth, % per year (Financial Modeling Prep), from `forecast_from_year` to `forecast_to_year`. Measured from next fiscal year (the current one can carry one-off gains) to the furthest year within 5 that 3+ analysts estimate. Fair value uses this first. |
+| `forecast_from_year` / `forecast_to_year` / `forecast_analysts` | int | The fiscal years the forecast growth spans, and the analysts behind the last year. |
 | `gross_margin` / `net_margin` / `roe` | numeric | %, last 12 months. |
 | `debt_to_equity` / `current_ratio` | numeric | Balance-sheet strength. |
 | `next_earnings_date` / `next_earnings_hour` / `next_eps_estimate` | date / text / numeric | Next report (`bmo` before open, `amc` after close) and the EPS expected. |

@@ -1,18 +1,20 @@
 """
-Research data for fair value and scores: per-ticker fundamentals from Finnhub and a few
-economic indicators from FRED, refreshed once a trading day after pricing.
+Research data for fair value and scores: per-ticker fundamentals from Finnhub, analysts'
+EPS forecasts from Financial Modeling Prep, and a few economic indicators from FRED,
+refreshed once a trading day after pricing.
 
   fundamentals      -- EPS (trailing 12 months), 5y/3y EPS growth, gross/net margin,
                        return on equity, debt-to-equity, current ratio, next earnings date
-                       and estimate. One row per ticker held in any portfolio or on anyone's
-                       research watchlist; shared like `prices`.
+                       and estimate, and forecast EPS growth (from FMP's annual estimates).
+                       One row per ticker held in any portfolio or on anyone's research
+                       watchlist; shared like `prices`.
   macro_indicators  -- AAA corporate bond effective yield (the yield the fair-value formula
                        divides by), 10-year Treasury yield, unemployment rate and its
                        12-month low (for the economy score).
 
 Finnhub's free plan allows 60 calls a minute; each ticker costs 2-3 calls (metrics, earnings
-calendar, and the company name the first time), paced just under the limit. FRED's CSV
-downloads need no key.
+calendar, and the company name the first time), paced just under the limit. FMP's free plan
+allows 250 calls a day; each ticker costs 1. FRED's CSV downloads need no key.
 
 Run after pricing from sync.py, or by hand:  python sync.py --research-once
 """
@@ -41,6 +43,12 @@ FRED_SERIES = {
     "unemployment_rate": "UNRATE",  # monthly
 }
 EARNINGS_LOOKAHEAD_DAYS = 120
+FMP_API_KEY = os.environ.get("FMP_API_KEY")
+FMP_URL = "https://financialmodelingprep.com/stable/"
+FMP_INTERVAL_SECONDS = 0.5
+FORECAST_MAX_YEARS = 5  # the last forecast year used is at most this far past the current one
+FORECAST_MIN_ANALYSTS = 3  # thinner far-out estimates are ignored
+FORECAST_COLUMNS = ("eps_growth_forecast", "forecast_from_year", "forecast_to_year", "forecast_analysts")
 
 # Finnhub /stock/metric field -> fundamentals column
 METRIC_FIELDS = {
@@ -109,6 +117,44 @@ def symbol_types(rows: list[dict]) -> dict[str, tuple[Optional[str], Optional[st
     return {r["symbol"]: (r.get("type") or None, r.get("description") or None) for r in rows or [] if r.get("symbol")}
 
 
+def forecast_growth(rows: list[dict], today: date) -> dict:
+    """FMP annual analyst estimates -> expected EPS growth % per year.
+
+    Measured from next fiscal year to the furthest year (within FORECAST_MAX_YEARS of the
+    current one) that at least FORECAST_MIN_ANALYSTS analysts estimate. The current year is
+    skipped as the starting point when possible: it mixes reported quarters with forecasts
+    and can carry one-off gains (GOOGL's 2026), which would skew the rate. With too few
+    years for that, it starts from the current year instead."""
+    empty = {c: None for c in FORECAST_COLUMNS}
+    years: list[tuple[int, float, int]] = []  # (fiscal year, EPS estimate, analysts), future years only
+    for r in rows or []:
+        try:
+            end = date.fromisoformat((r.get("date") or "")[:10])
+        except ValueError:
+            continue
+        eps = _number(r.get("epsAvg"))
+        if end > today and eps is not None:
+            years.append((end.year, eps, int(_number(r.get("numAnalystsEps")) or 0)))
+    years.sort()
+    if len(years) < 2:
+        return empty
+    current = years[0][0]
+    ends = [y for y in years if y[0] <= current + FORECAST_MAX_YEARS and y[2] >= FORECAST_MIN_ANALYSTS and y[1] > 0]
+    if not ends:
+        return empty
+    last = ends[-1]
+    start = years[1] if len(years) > 1 and last[0] - years[1][0] >= 2 else years[0]
+    span = last[0] - start[0]
+    if span < 1 or start[1] <= 0:
+        return empty
+    return {
+        "eps_growth_forecast": round(((last[1] / start[1]) ** (1 / span) - 1) * 100, 2),
+        "forecast_from_year": start[0],
+        "forecast_to_year": last[0],
+        "forecast_analysts": last[2],
+    }
+
+
 def parse_fred_csv(text: str) -> list[tuple[date, float]]:
     """FRED graph CSV (date,value; '.' for missing) -> [(date, value)] oldest first."""
     rows: list[tuple[date, float]] = []
@@ -161,6 +207,13 @@ def _finnhub(path: str, params: dict, api_key: str, limiter: RateLimiter) -> dic
     return {}
 
 
+def _fmp(path: str, params: dict, api_key: str, limiter: RateLimiter):
+    limiter.wait()
+    query = urllib.parse.urlencode({**params, "apikey": api_key})
+    with urllib.request.urlopen(f"{FMP_URL}{path}?{query}", timeout=20) as res:
+        return json.loads(res.read().decode("utf-8"))
+
+
 def _fred(series_id: str) -> list[tuple[date, float]]:
     with urllib.request.urlopen(FRED_CSV_URL + series_id, timeout=30) as res:
         return parse_fred_csv(res.read().decode())
@@ -188,7 +241,11 @@ def research_symbols(client) -> list[str]:
 
 
 def run_research(
-    today: date, client=None, api_key: Optional[str] = FINNHUB_API_KEY, only_new: bool = False
+    today: date,
+    client=None,
+    api_key: Optional[str] = FINNHUB_API_KEY,
+    only_new: bool = False,
+    fmp_key: Optional[str] = FMP_API_KEY,
 ) -> ResearchSummary:
     """Never raises -- failures land in summary.error so the scheduler keeps running.
 
@@ -212,6 +269,10 @@ def run_research(
         elif symbols:
             limiter = RateLimiter(min_interval_seconds=FINNHUB_INTERVAL_SECONDS)
             limiter._last_call = -FINNHUB_INTERVAL_SECONDS
+            fmp_limiter = RateLimiter(min_interval_seconds=FMP_INTERVAL_SECONDS)
+            if not fmp_key:
+                summary.warnings.append("FMP_API_KEY is not set -- fair value uses past growth")
+            forecast_columns = True  # false once the database turns out not to have them yet
             horizon = (today + timedelta(days=EARNINGS_LOOKAHEAD_DAYS)).isoformat()
             # One call lists every US ticker with its type (Common Stock, ETP, ADR, REIT...).
             try:
@@ -231,8 +292,21 @@ def run_research(
                     row["name"] = name
                     if s in types:
                         row["security_type"], row["description"] = types[s]
+                    if fmp_key and forecast_columns:
+                        try:
+                            row.update(forecast_growth(_fmp("analyst-estimates", {"symbol": s, "period": "annual", "limit": 10}, fmp_key, fmp_limiter), today))
+                        except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                            summary.warnings.append(f"{s}: forecast request failed ({exc})")
                     row["updated_at"] = datetime.now(timezone.utc).isoformat()
-                    client.table("fundamentals").upsert(row, on_conflict="symbol").execute()
+                    try:
+                        client.table("fundamentals").upsert(row, on_conflict="symbol").execute()
+                    except Exception as exc:  # noqa: BLE001
+                        if not forecast_columns or "forecast" not in str(exc):
+                            raise
+                        # 20261102010000_growth_forecast.sql not run yet: save the rest
+                        forecast_columns = False
+                        summary.warnings.append("forecast columns missing -- run the growth_forecast migration")
+                        client.table("fundamentals").upsert({k: v for k, v in row.items() if k not in FORECAST_COLUMNS}, on_conflict="symbol").execute()
                     summary.fundamentals_saved += 1
                 except (urllib.error.URLError, TimeoutError, ValueError) as exc:
                     summary.warnings.append(f"{s}: request failed ({exc})")

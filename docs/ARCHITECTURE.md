@@ -32,6 +32,7 @@ flowchart LR
     TD[[Twelve Data]]
     FH[[Finnhub]]
     FR[[FRED]]
+    FM[[Financial Modeling Prep]]
 
     U --> WEB
     WEB -- "reads & writes as you<br/>(public key + your session)" --> DB
@@ -44,6 +45,7 @@ flowchart LR
     WK -- "daily closes" --> TD
     WK -- "fundamentals, earnings, ticker types" --> FH
     WK -- "AAA yield, 10y, unemployment" --> FR
+    WK -- "analyst EPS estimates" --> FM
 ```
 
 **In one sentence:** the website talks straight to the database as you, protected by row-level security. Anything needing a secret (charts data, triggering the worker) goes through a small Vercel function. The always-on worker on Fly.io pulls your Webull trades, the daily prices and the research data (fundamentals and economic numbers) into the database.
@@ -100,7 +102,7 @@ The sidebar has two sides, **Trading** and **Wealth**. They share sign-in but ne
 | `db_writer.py` | Writes trades via `upsert_trade_bundle`; reads seed fills; writes `sync_log` |
 | `fees.py`, `fee_rates.py` | Fee estimate formula; background fetch of real fees |
 | `prices.py` | Daily closes from Twelve Data; portfolio daily values |
-| `research.py` | Finnhub fundamentals, earnings dates and ticker types; FRED economic series |
+| `research.py` | Finnhub fundamentals, earnings dates and ticker types; FMP forecast growth; FRED economic series |
 | `sync_trigger_server.py` | `POST /sync/trigger`, `POST /prices/trigger`, `GET /healthz` |
 | `market_calendar.py`, `rate_limiter.py` | US market holidays; request pacing |
 
@@ -144,6 +146,7 @@ The two trigger endpoints have separate locks and cooldowns, so a trade sync and
 | Webull **app key / secret** | Fly secrets only | Read your Webull orders |
 | `TWELVEDATA_API_KEY` | Vercel env + Fly secrets | Market data |
 | `FINNHUB_API_KEY` | Fly secrets only | Fundamentals, earnings dates, ticker types |
+| `FMP_API_KEY` | Fly secrets only | Analyst EPS estimates (forecast growth) |
 
 **Two users, one database.** Your friend's data is separated by `user_id` + row-level security. The only shared tables are `prices`, `fundamentals` and `macro_indicators`, which hold public market data and are written only by the worker.
 
@@ -177,6 +180,7 @@ Names only. The values live in each platform's dashboard or secrets store, never
 | `SYNC_TRIGGER_SECRET` | Accepts Sync now / Get prices now |
 | `TWELVEDATA_API_KEY` | Daily pricing |
 | `FINNHUB_API_KEY` | Daily research (FRED needs no key) |
+| `FMP_API_KEY` | Forecast growth for fair value; without it, past growth is used |
 | `SYNC_MARKET_HOURS_ONLY` | `true` limits trade syncs to market hours (see section 3) |
 | Optional tuning | `SYNC_INTERVAL_MINUTES`, `SYNC_MARKET_START_HOUR` / `_END_HOUR`, `SYNC_AFTER_CLOSE_*`, `SYNC_OVERLAP_DAYS`, `SYNC_TRIGGER_DEBOUNCE_SECONDS`, `PRICES_TRIGGER_DEBOUNCE_SECONDS`, `PRICING_HOUR`, `PRICING_MINUTE`, `WEBULL_*` paging / fee settings |
 
@@ -213,6 +217,7 @@ flowchart LR
 | Supabase free | 500 MB database, ~5 GB transfer/month | Fine today. Every page loads all your trades (~2.7 KB each), which is why auto-refresh was kept cheap |
 | Twelve Data free | 800 lookups/day, 8/min; **no** options, dividends or fundamentals | Prices are batched 8 per minute; option prices and dividends are entered by hand |
 | Finnhub free | 60 calls/min; US fundamentals and earnings calendar, no prices history | Calls paced at 1.1 s; 2 calls per ticker (3 the first time, for its name) plus 1 call for the ticker-type list |
+| Financial Modeling Prep free | 250 calls/day | 1 call per ticker a day, so up to ~250 researched tickers |
 | FRED | Public CSV download, no key | 3 series a day |
 | Webull OpenAPI | About 1 request per second for order endpoints | One shared rate limiter for order paging and fee fetching |
 | Fly.io | One small always-on machine | Sync and pricing share the process; jobs never overlap themselves |

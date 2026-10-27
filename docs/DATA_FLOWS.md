@@ -200,6 +200,7 @@ sequenceDiagram
     W->>DB: per portfolio: value_portfolio → upsert portfolio_daily_values
     Note over W: then research (button run: new tickers only)
     W->>W: Finnhub: ticker-type list, then per ticker metrics + next earnings (1.1 s apart)
+    W->>W: FMP: per ticker annual EPS estimates → forecast growth
     W->>DB: upsert fundamentals
     W->>W: FRED: AAA yield, 10-year Treasury, unemployment
     W->>DB: upsert macro_indicators
@@ -246,7 +247,7 @@ Nothing below is stored. The website calculates it from the tables each time a p
 | Cash flow: what you kept | Cash saved (change in cash + emergency fund) + invested (deposits − withdrawals) + debt paid down. Investment growth and other changes reconcile it to the net worth change | `cashflow.ts` `monthCashFlow` |
 | Payment due | Fixed payment: that amount, on its day that month. Card with only a due day: that month's closing balance, due on its day **next** month | `installments.ts` `expectedPayment`, `paymentDueDate` |
 | Payoff estimate | Months n = −ln(1 − r·B/P) ÷ ln(1 + r), r = APR ÷ 12, P = payment − escrow | `installments.ts` `payoff` |
-| Fair value | EPS × (7 + g) × 4.4 ÷ AAA yield. g = lower of 5-year and 3-year EPS growth, floored at 0, capped (default 30). "Buy below" = 85% of fair value | `research.ts` `fairValue` |
+| Fair value | EPS × (7 + g) × 4.4 ÷ AAA yield. g = analysts' forecast EPS growth per year (next fiscal year to up to 5 years out); without one, the lower of past 5-year and 3-year growth. Floored at 0, capped (default 30). "Buy below" = 85% of fair value | `research.ts` `fairValue` |
 | Score (out of 100) | Valuation 20 (price ÷ fair value) + Growth 20 + Moat 20 (gross margin + return on equity) + Execution 10 (profitable, debt, current ratio) + Economy 30 (less for rising unemployment and a high 10-year yield). 80+ Strong, 70–79 Good, 60–69 Fair, under 60 Weak. Overrides replace any part | `research.ts` `research` |
 | Ticker type | Your `ticker_types` choice; else Finnhub type: ETP / closed-end fund → ETF (bond if its name says bond, treasury or T-bill), everything else → stock; else built-in lists | `allocationPlan.ts` `classify` |
 | Allocation mix | Holdings by type + long options + positive cash, per pool (brokerage portfolios together; each retirement account alone). Margin and sold options are left out | `allocationPlan.ts` `mixOf` |

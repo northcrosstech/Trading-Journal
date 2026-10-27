@@ -295,6 +295,12 @@ export type FundamentalsRow = {
   next_earnings_date: string | null
   next_earnings_hour: string | null
   next_eps_estimate: number | null
+  /** Analysts' expected EPS growth % per year, forecast_from_year -> forecast_to_year (FMP).
+   * Optional until the growth_forecast migration has run. */
+  eps_growth_forecast?: number | null
+  forecast_from_year?: number | null
+  forecast_to_year?: number | null
+  forecast_analysts?: number | null
   /** Finnhub's type (Common Stock, ETP, ADR, REIT...) and name, for stock / ETF / bond. */
   security_type?: string | null
   description?: string | null
