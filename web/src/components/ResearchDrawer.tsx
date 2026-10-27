@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { ResearchOverrideField } from '../lib/database.types'
 import {
@@ -10,8 +10,11 @@ import {
   ROE_TABLE,
   VALUATION_TABLE,
   economyPoints,
+  autoMoved,
+  epsEditEnds,
   fairTone,
   fairWord,
+  type EditCheck,
   type Macro,
   type Part,
   type Research,
@@ -90,11 +93,32 @@ export function ResearchDrawer({
     return v.v.trim() === '' ? null : parseAmount(v.v)
   }
 
-  async function override(field: ResearchOverrideField, title: string, label: string, current: number | null, hint: string, range?: [number, number]) {
+  /** What an edit remembers: the automatic number it replaces and, for EPS, when it ends
+   * (a few days after the next earnings report). */
+  const trackFor = (field: ResearchOverrideField, auto: number | null) => ({ autoValue: auto, expiresOn: field === 'eps' ? epsEditEnds(r?.earnings?.date ?? null) : null })
+
+  async function override(field: ResearchOverrideField, title: string, label: string, current: number | null, auto: number | null, hint: string, range?: [number, number]) {
     if (!user || !r) return
-    const v = await editNumber({ title, label, current, hint, min: range?.[0], max: range?.[1] })
+    const ends = field === 'eps' ? epsEditEnds(r.earnings?.date ?? null) : null
+    const v = await editNumber({
+      title,
+      label,
+      current,
+      hint: `${hint} Automatic: ${fmt(auto)}.${ends ? ` Your number is used until ${dateFmt(ends)}, after the next earnings report.` : ''}`,
+      min: range?.[0],
+      max: range?.[1],
+    })
     if (v === undefined) return
-    save(setResearchOverride(user.id, r.symbol, field, v), v === null ? `${r.symbol}: back to automatic` : `${r.symbol}: ${label.toLowerCase()} set`)
+    save(setResearchOverride(user.id, r.symbol, field, v, trackFor(field, auto)), v === null ? `${r.symbol}: back to automatic` : `${r.symbol}: ${label.toLowerCase()} set`)
+  }
+
+  function reset(field: ResearchOverrideField, label: string) {
+    if (user && r) save(setResearchOverride(user.id, r.symbol, field, null), `${r.symbol}: ${label} back to automatic`)
+  }
+
+  /** Keep your number: it now replaces today's automatic one (and an EPS edit runs to the next report). */
+  function keep(c: EditCheck) {
+    if (user && r) save(setResearchOverride(user.id, r.symbol, c.field, c.value, trackFor(c.field, c.auto)), `${r.symbol}: keeping your ${c.label}`)
   }
 
   async function editPart(p: Part) {
@@ -105,7 +129,7 @@ export function ResearchDrawer({
       save(setResearchSettings(user.id, { economy_override: v }), v === null ? 'Economy score back to automatic' : 'Economy score set for all stocks')
       return
     }
-    override(p.key, `${p.label} · ${r.symbol}`, `Points (0–${p.max})`, p.points, `Automatic: ${p.detail}`, [0, p.max])
+    override(p.key, `${p.label} · ${r.symbol}`, `Points (0–${p.max})`, p.points, p.auto, `From ${p.detail}.`, [0, p.max])
   }
 
   async function editGrowthCap() {
@@ -135,6 +159,60 @@ export function ResearchDrawer({
     >
       {r && (
         <div className="flex flex-col gap-6 text-sm">
+          {r.checks.length > 0 && (
+            <section className="rounded-xl border border-amber-500/25 bg-amber-500/8 px-3 py-2.5">
+              <p className="flex items-center gap-1.5 font-medium text-amber-100">
+                <AlertTriangle size={14} /> Check your edit{r.checks.length === 1 ? '' : 's'}
+              </p>
+              <ul className="mt-1.5 flex flex-col gap-2">
+                {r.checks.map((c) => (
+                  <li key={c.field} className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-amber-200/90">
+                      {c.status === 'ended' ? (
+                        <>
+                          Your {c.label} ({showValue(c.field, c.value)}) ended after the earnings report{c.endedOn ? ` (${dateFmt(c.endedOn)})` : ''}. The automatic{' '}
+                          {showValue(c.field, c.auto)} is used now.
+                        </>
+                      ) : !autoMoved(c.field, c.auto, c.value) ? (
+                        <>
+                          Your {c.label} ({showValue(c.field, c.value)}) matches the automatic one now. Switch to automatic so it keeps updating.
+                        </>
+                      ) : (
+                        <>
+                          {c.label}: automatic is now {showValue(c.field, c.auto)}
+                          {c.autoThen !== null ? ` (was ${showValue(c.field, c.autoThen)} when you edited)` : ''}. You set {showValue(c.field, c.value)}.
+                        </>
+                      )}
+                    </span>
+                    <span className="flex gap-1.5">
+                      {c.status === 'changed' && !autoMoved(c.field, c.auto, c.value) ? (
+                        <Button size="sm" onClick={() => reset(c.field, c.label)}>
+                          Switch to automatic
+                        </Button>
+                      ) : (
+                        c.status === 'changed' && (
+                          <Button size="sm" variant="ghost" onClick={() => reset(c.field, c.label)}>
+                            Use automatic
+                          </Button>
+                        )
+                      )}
+                      {c.status === 'ended' && (
+                        <Button size="sm" variant="ghost" onClick={() => reset(c.field, c.label)}>
+                          OK
+                        </Button>
+                      )}
+                      {(c.status === 'ended' || autoMoved(c.field, c.auto, c.value)) && (
+                        <Button size="sm" onClick={() => keep(c)}>
+                          {c.status === 'ended' ? 'Use mine again' : 'Keep mine'}
+                        </Button>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {/* Fair value */}
           <section>
             <div className="flex items-baseline justify-between">
@@ -152,33 +230,42 @@ export function ResearchDrawer({
             <dl className="mt-2 grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1.5">
               <dt className="text-neutral-400">
                 EPS, last 12 months
-                {r.eps.foreign && !r.eps.edited && (
+                {r.eps.edited ? (
                   <span className="block text-xs text-neutral-600">
-                    reports in {r.eps.foreign.currency}, so price ÷ P/E {fmt(r.eps.foreign.pe, 1)}
+                    your number · automatic {fmt(r.eps.auto)} <ResetLink onClick={() => reset('eps', 'EPS')} />
                   </span>
+                ) : (
+                  r.eps.foreign && (
+                    <span className="block text-xs text-neutral-600">
+                      reports in {r.eps.foreign.currency}, so price ÷ P/E {fmt(r.eps.foreign.pe, 1)}
+                    </span>
+                  )
                 )}
               </dt>
               <dd className="text-right tabular-nums text-neutral-100">
                 {fmt(r.eps.value)} {r.eps.edited && <Pill tone="violet">edited</Pill>}
               </dd>
               <dd>
-                <IconButton title="Edit EPS" onClick={() => override('eps', `EPS · ${r.symbol}`, 'EPS (last 12 months)', r.eps.value, 'Earnings per share over the last 12 months.')} />
+                <IconButton title="Edit EPS" onClick={() => override('eps', `EPS · ${r.symbol}`, 'EPS (last 12 months)', r.eps.value, r.eps.auto, 'Earnings per share over the last 12 months.')} />
               </dd>
               <dt className="text-neutral-400">
                 Growth used
                 <span className="block text-xs text-neutral-600">
-                  {r.growth.edited
-                    ? 'your number'
-                    : r.growth.from === 'forecast' && r.growth.forecast
+                  {r.growth.edited ? (
+                    <>
+                      your number · automatic {r.growth.auto !== null ? `${fmt(r.growth.auto, 1)}%` : '—'} <ResetLink onClick={() => reset('growth', 'growth')} />
+                    </>
+                  ) : r.growth.from === 'forecast' && r.growth.forecast
                       ? `analysts' forecast${r.growth.forecast.fromYear && r.growth.forecast.toYear ? `, ${r.growth.forecast.fromYear}–${r.growth.forecast.toYear}` : ''}${r.growth.forecast.analysts ? ` (${r.growth.forecast.analysts} analysts)` : ''}${r.growth.capped ? `, capped at ${settings.growthCap}%` : ''}`
-                      : `no forecast · past 5y ${fmt(r.growth.raw5y, 1)}% · 3y ${fmt(r.growth.raw3y, 1)}% → lower one${r.growth.capped ? `, capped at ${settings.growthCap}%` : ''}`}
+                      : `no forecast · past 5y ${fmt(r.growth.raw5y, 1)}% · 3y ${fmt(r.growth.raw3y, 1)}% → lower one${r.growth.capped ? `, capped at ${settings.growthCap}%` : ''}`
+                  }
                 </span>
               </dt>
               <dd className="text-right tabular-nums text-neutral-100">
                 {r.growth.value !== null ? `${fmt(r.growth.value, 1)}%` : '—'} {r.growth.edited && <Pill tone="violet">edited</Pill>}
               </dd>
               <dd>
-                <IconButton title="Edit growth" onClick={() => override('growth', `Growth · ${r.symbol}`, 'Growth % per year', r.growth.value, 'Expected yearly EPS growth over the next 5 years. Be conservative.')} />
+                <IconButton title="Edit growth" onClick={() => override('growth', `Growth · ${r.symbol}`, 'Growth % per year', r.growth.value, r.growth.auto, 'Expected yearly EPS growth over the next 5 years. Be conservative.')} />
               </dd>
               <dt className="text-neutral-400">
                 AAA bond yield
@@ -220,6 +307,7 @@ export function ResearchDrawer({
                     {p.edited && (
                       <>
                         <Pill tone="violet">edited</Pill>
+                        <span>automatic {p.auto ?? '—'}</span>
                         <button
                           className="inline-flex items-center gap-1 text-neutral-400 hover:text-white"
                           title="Back to automatic"
@@ -303,6 +391,17 @@ export function ResearchDrawer({
         </div>
       )}
     </Drawer>
+  )
+}
+
+const showValue = (field: ResearchOverrideField, v: number | null) =>
+  v === null ? '—' : field === 'eps' ? `$${fmt(v)}` : field === 'growth' ? `${fmt(v, 1)}%` : `${v} pts`
+
+function ResetLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="inline-flex items-center gap-1 text-neutral-400 hover:text-white" title="Back to automatic" onClick={onClick}>
+      <RotateCcw size={11} /> Reset
+    </button>
   )
 }
 

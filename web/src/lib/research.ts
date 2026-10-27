@@ -119,8 +119,59 @@ const KNOWN_ETFS = new Set([
 ])
 export const isEtf = (symbol: string) => KNOWN_ETFS.has(symbol.toUpperCase())
 
-export type Overrides = Partial<Record<ResearchOverrideField, number>>
-export type Part = { key: 'valuation' | 'growth_score' | 'moat' | 'execution' | 'economy'; label: string; max: number; points: number | null; edited: boolean; detail: string }
+/** Your number for a field, the automatic number it replaced, and when an EPS edit ends. */
+export type OverrideInput = { value: number; autoValue: number | null; expiresOn: string | null }
+export type Overrides = Partial<Record<ResearchOverrideField, OverrideInput>>
+export type Part = {
+  key: 'valuation' | 'growth_score' | 'moat' | 'execution' | 'economy'
+  label: string
+  max: number
+  points: number | null
+  edited: boolean
+  /** The points without your edit. */
+  auto: number | null
+  detail: string
+}
+
+/** An edit worth a second look: the automatic number has moved since you made it, or an EPS
+ * edit ended with an earnings report (the automatic EPS is back in use). */
+export type EditCheck = {
+  field: ResearchOverrideField
+  label: string
+  value: number
+  auto: number | null
+  autoThen: number | null
+  status: 'changed' | 'ended'
+  endedOn: string | null
+}
+
+export const OVERRIDE_LABEL: Record<ResearchOverrideField, string> = {
+  eps: 'EPS',
+  growth: 'Growth',
+  valuation: 'Valuation points',
+  growth_score: 'Growth points',
+  moat: 'Moat points',
+  execution: 'Execution points',
+}
+
+/** EPS changes with every report, so an EPS edit ends 3 days after the next one (time for the
+ * new numbers to arrive). Null = no report date known: it lasts until you change it. */
+export function epsEditEnds(nextEarnings: string | null): string | null {
+  if (!nextEarnings) return null
+  const d = new Date(`${nextEarnings}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 3)
+  return d.toISOString().slice(0, 10)
+}
+
+/** Has the automatic number really moved? Small daily drift isn't worth a flag: EPS within
+ * 2%, growth within half a point. Score points are whole numbers, so any change counts. An
+ * edit made before tracking (autoThen null) is flagged once, so it gets checked. */
+export function autoMoved(field: ResearchOverrideField, now: number | null, then: number | null): boolean {
+  if (now === null || then === null) return now !== then
+  if (field === 'eps') return Math.abs(now - then) > Math.max(0.02 * Math.abs(then), 0.01)
+  if (field === 'growth') return Math.abs(now - then) > 0.5
+  return now !== then
+}
 
 export type Research = {
   symbol: string
@@ -128,10 +179,11 @@ export type Research = {
   kind: 'stock' | 'etf' | 'no_data'
   price: number | null
   /** foreign: the company reports in another currency, so EPS is price / P/E instead. */
-  eps: { value: number | null; edited: boolean; foreign: { currency: string; pe: number | null } | null }
+  eps: { value: number | null; edited: boolean; auto: number | null; foreign: { currency: string; pe: number | null } | null }
   growth: {
     value: number | null
     edited: boolean
+    auto: number | null
     capped: boolean
     from: GrowthSource | null
     raw5y: number | null
@@ -147,6 +199,7 @@ export type Research = {
   partial: boolean
   label: ScoreLabel | null
   earnings: { date: string; hour: string | null; estimate: number | null; days: number } | null
+  checks: EditCheck[]
 }
 
 const fmtPct = (n: number | null) => (n === null ? '—' : `${Math.round(n * 10) / 10}%`)
@@ -162,6 +215,12 @@ export function research(
 ): Research {
   const etf = isEtf(symbol) || ['ETP', 'Closed-End Fund'].includes(f?.security_type ?? '')
   const aaa = macro.aaa ?? FALLBACK_AAA
+  // An edit applies unless it has ended (EPS edits end after the next earnings report).
+  const ended = (o: OverrideInput | undefined) => o !== undefined && o.expiresOn !== null && today > o.expiresOn
+  const mine = (k: ResearchOverrideField) => {
+    const o = overrides[k]
+    return o && !ended(o) ? o.value : undefined
+  }
   const epsRaw = f?.eps_ttm !== null && f?.eps_ttm !== undefined ? Number(f.eps_ttm) : null
   // A company reporting in another currency (TSM: Taiwan dollars per ordinary share, 5 to an
   // ADR) has an EPS that isn't $ per share held; its P/E is, so EPS = price / P/E.
@@ -169,18 +228,20 @@ export function research(
   const peTtm = f?.pe_ttm !== null && f?.pe_ttm !== undefined ? Number(f.pe_ttm) : null
   const foreign = currency !== null && currency !== 'USD' ? { currency, pe: peTtm } : null
   const epsAuto = foreign ? (price !== null && peTtm !== null && peTtm > 0 ? price / peTtm : null) : epsRaw
-  const eps = overrides.eps !== undefined ? { value: overrides.eps, edited: true, foreign } : { value: epsAuto, edited: false, foreign }
+  const epsMine = mine('eps')
+  const eps = epsMine !== undefined ? { value: epsMine, edited: true, auto: epsAuto, foreign } : { value: epsAuto, edited: false, auto: epsAuto, foreign }
   const auto = growthUsed(f, settings.growthCap)
   const forecast =
     f?.eps_growth_forecast !== null && f?.eps_growth_forecast !== undefined
       ? { value: Number(f.eps_growth_forecast), fromYear: f.forecast_from_year ?? null, toYear: f.forecast_to_year ?? null, analysts: f.forecast_analysts ?? null }
       : null
   const known = { raw5y: f?.eps_growth_5y ?? null, raw3y: f?.eps_growth_3y ?? null, forecast }
+  const growthMine = mine('growth')
   const growth =
-    overrides.growth !== undefined
-      ? { value: overrides.growth, edited: true, capped: false, from: null, ...known }
-      : { ...auto, edited: false, ...known }
-  const fair = etf && overrides.eps === undefined ? null : fairValue(eps.value, growth.value, aaa)
+    growthMine !== undefined
+      ? { value: growthMine, edited: true, auto: auto.value, capped: false, from: null, ...known }
+      : { ...auto, edited: false, auto: auto.value, ...known }
+  const fair = etf && epsMine === undefined ? null : fairValue(eps.value, growth.value, aaa)
   const pct = fair !== null && price !== null ? price / fair : null
 
   const num = (v: number | null | undefined) => (v === null || v === undefined ? null : Number(v))
@@ -191,24 +252,24 @@ export function research(
   const cr = num(f?.current_ratio)
   const econ = economyPoints(macro)
   const part = (key: Part['key'], label: string, max: number, autoPts: number | null, detail: string, override?: number): Part =>
-    override !== undefined ? { key, label, max, points: override, edited: true, detail } : { key, label, max, points: autoPts, edited: false, detail }
+    override !== undefined ? { key, label, max, points: override, edited: true, auto: autoPts, detail } : { key, label, max, points: autoPts, edited: false, auto: autoPts, detail }
 
   const stockData = !etf && f !== null
   const parts: Part[] = [
-    part('valuation', 'Valuation', 20, pct !== null ? valuationPoints(pct) : null, pct !== null ? `${Math.round(pct * 100)}% of fair value` : 'no fair value', overrides.valuation),
-    part('growth_score', 'Growth', 20, stockData && growth.value !== null ? growthPoints(growth.value) : null, growth.value !== null ? `${fmtPct(growth.value)}/yr` : 'no growth data', overrides.growth_score),
-    part('moat', 'Moat', 20, stockData ? moatPoints(gm, roe) : null, `margin ${fmtPct(gm)}, ROE ${fmtPct(roe)}`, overrides.moat),
+    part('valuation', 'Valuation', 20, pct !== null ? valuationPoints(pct) : null, pct !== null ? `${Math.round(pct * 100)}% of fair value` : 'no fair value', mine('valuation')),
+    part('growth_score', 'Growth', 20, stockData && growth.value !== null ? growthPoints(growth.value) : null, growth.value !== null ? `${fmtPct(growth.value)}/yr` : 'no growth data', mine('growth_score')),
+    part('moat', 'Moat', 20, stockData ? moatPoints(gm, roe) : null, `margin ${fmtPct(gm)}, ROE ${fmtPct(roe)}`, mine('moat')),
     part(
       'execution',
       'Execution',
       10,
       stockData ? executionPoints(nm, de, cr) : null,
       `${nm === null ? 'profit —' : nm > 0 ? 'profitable' : 'losing money'}, debt/equity ${de === null ? '—' : de.toFixed(2)}, current ratio ${cr === null ? '—' : cr.toFixed(1)}`,
-      overrides.execution,
+      mine('execution'),
     ),
     settings.economyOverride !== null
-      ? { key: 'economy', label: 'Economy', max: 30, points: settings.economyOverride, edited: true, detail: 'same for every stock' }
-      : { key: 'economy', label: 'Economy', max: 30, points: econ.points, edited: false, detail: 'same for every stock' },
+      ? { key: 'economy', label: 'Economy', max: 30, points: settings.economyOverride, edited: true, auto: econ.points, detail: 'same for every stock' }
+      : { key: 'economy', label: 'Economy', max: 30, points: econ.points, edited: false, auto: econ.points, detail: 'same for every stock' },
   ]
   const scored = parts.filter((p) => p.points !== null)
   const hasCompanyScore = parts.slice(0, 4).some((p) => p.points !== null)
@@ -221,6 +282,24 @@ export function research(
     const estimate = num(f.next_eps_estimate)
     const scaled = foreign ? (estimate !== null && epsAuto !== null && epsRaw ? (estimate * epsAuto) / epsRaw : null) : estimate
     if (days >= 0) earnings = { date: f.next_earnings_date, hour: f.next_earnings_hour, estimate: scaled, days }
+  }
+
+  // Edits to look at again: ended, or the automatic number has moved since they were made.
+  const autoOf: Record<ResearchOverrideField, number | null> = {
+    eps: epsAuto,
+    growth: auto.value,
+    valuation: parts[0].auto,
+    growth_score: parts[1].auto,
+    moat: parts[2].auto,
+    execution: parts[3].auto,
+  }
+  const checks: EditCheck[] = []
+  for (const k of Object.keys(OVERRIDE_LABEL) as ResearchOverrideField[]) {
+    const o = overrides[k]
+    if (!o) continue
+    const base = { field: k, label: OVERRIDE_LABEL[k], value: o.value, auto: autoOf[k], autoThen: o.autoValue }
+    if (ended(o)) checks.push({ ...base, status: 'ended', endedOn: o.expiresOn })
+    else if (autoMoved(k, autoOf[k], o.autoValue)) checks.push({ ...base, status: 'changed', endedOn: null })
   }
 
   return {
@@ -239,6 +318,7 @@ export function research(
     partial: total !== null && scored.length < parts.length,
     label: total !== null ? scoreLabel(total) : null,
     earnings,
+    checks,
   }
 }
 

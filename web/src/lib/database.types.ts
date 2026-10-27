@@ -321,7 +321,18 @@ export type MacroIndicatorRow = { key: string; value: number; as_of: string; upd
 export type ResearchWatchlistRow = { id: string; user_id: string; symbol: string; created_at: string }
 
 export type ResearchOverrideField = 'eps' | 'growth' | 'valuation' | 'growth_score' | 'moat' | 'execution'
-export type ResearchOverrideRow = { user_id: string; symbol: string; field: ResearchOverrideField; value: number; updated_at: string }
+export type ResearchOverrideRow = {
+  user_id: string
+  symbol: string
+  field: ResearchOverrideField
+  value: number
+  /** The automatic number when you made the edit, to tell you when it changes. Null = edited
+   * before tracking existed. Optional until the override_tracking migration has run. */
+  auto_value?: number | null
+  /** EPS edits end on this date (a few days after the next earnings report). */
+  expires_on?: string | null
+  updated_at: string
+}
 
 export type NetworthBalanceRow = {
   id: string

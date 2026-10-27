@@ -195,6 +195,11 @@ export function ResearchPage() {
                       <span className="font-semibold text-white">{r.symbol}</span>
                       {show === 'all' && held.has(r.symbol) && <Pill tone="teal">Held</Pill>}
                       {fetching.includes(r.symbol) && <Pill tone="amber">Fetching…</Pill>}
+                      {r.checks.length > 0 && (
+                        <Pill tone="amber" title="An edit of yours needs a look: open to see">
+                          Check edit{r.checks.length === 1 ? '' : 's'}
+                        </Pill>
+                      )}
                     </span>
                     <span className="block truncate text-xs text-neutral-500">{r.name ?? (r.kind === 'etf' ? 'Fund (ETF)' : ' ')}</span>
                   </span>

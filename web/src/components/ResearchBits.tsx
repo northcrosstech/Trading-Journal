@@ -62,6 +62,7 @@ export function ResearchPills({ r, onOpen }: { r: Research | undefined; onOpen: 
           </Pill>
         )}
         {r.total !== null && r.label !== null && <Pill tone={PILL_TONE[scoreTone(r.label)]}>{r.total}</Pill>}
+        {r.checks.length > 0 && <Pill tone="amber">check</Pill>}
       </span>
       {r.earnings && r.earnings.days <= 7 && (
         <span className="inline-flex items-center gap-1 text-[11px] text-amber-300">

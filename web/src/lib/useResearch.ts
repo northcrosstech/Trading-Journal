@@ -35,7 +35,8 @@ export function useResearch(symbols: string[], prices: Map<string, number>) {
     const out = new Map<string, Research>()
     for (const s of key ? key.split(',') : []) {
       const o: Overrides = {}
-      for (const r of overrideRows) if (r.symbol === s) o[r.field] = Number(r.value)
+      for (const r of overrideRows)
+        if (r.symbol === s) o[r.field] = { value: Number(r.value), autoValue: r.auto_value != null ? Number(r.auto_value) : null, expiresOn: r.expires_on ?? null }
       out.set(s, research(s, fund.get(s) ?? null, prices.get(s) ?? null, macro, o, settings, today))
     }
     return out

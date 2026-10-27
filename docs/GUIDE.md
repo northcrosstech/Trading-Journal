@@ -170,7 +170,11 @@ either one for the full breakdown and "How this is calculated".
 
 80+ is **Strong**, 70–79 **Good**, 60–69 **Fair**, under 60 **Weak**.
 
-- **Override any part** (EPS, growth or a score part) from the breakdown. Clear it to go back to automatic.
+- **Override any part** (EPS, growth or a score part) from the breakdown. **Reset** puts the automatic number back.
+- **Edits keep up with the data:**
+  - Each edit remembers the automatic number it replaced. If that number moves (EPS by more than 2%, growth by more than half a point, any change in score points), the breakdown says so, e.g. *"Growth: automatic is now 13.9% (was 20% when you edited)"*, with **Use automatic** or **Keep mine**. The ticker gets a **Check edit** pill on the Research list and a **check** pill on holdings.
+  - **EPS edits end 3 days after the company's next earnings report,** because EPS changes then. The automatic EPS comes back and the breakdown tells you, with **Use mine again** if you still want yours.
+  - If your number matches the automatic one, you're asked to switch to automatic so it keeps updating.
 - **ETFs and loss-making companies** get no fair value or score, because there are no positive earnings to value.
 - **Everything is automatic:** company data from Finnhub, analysts' forecasts from Financial Modeling Prep and economic numbers from FRED, refreshed daily. A new ticker fills in with "Get prices now", or at 4:45 PM.
 

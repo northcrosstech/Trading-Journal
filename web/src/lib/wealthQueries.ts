@@ -527,14 +527,25 @@ export async function fetchResearchOverrides(): Promise<ResearchOverrideRow[]> {
   return data ?? []
 }
 
-/** Set your own number for a ticker's input or score part; null puts the automatic one back. */
-export async function setResearchOverride(userId: string, symbol: string, field: ResearchOverrideField, value: number | null) {
-  const { error } =
-    value === null
-      ? await supabase.from('research_overrides').delete().eq('symbol', symbol).eq('field', field)
-      : await supabase
-          .from('research_overrides')
-          .upsert({ user_id: userId, symbol, field, value, updated_at: new Date().toISOString() }, { onConflict: 'user_id,symbol,field' })
+/** Set your own number for a ticker's input or score part; null puts the automatic one back.
+ * `track` remembers the automatic number it replaces and, for EPS, when the edit ends. */
+export async function setResearchOverride(
+  userId: string,
+  symbol: string,
+  field: ResearchOverrideField,
+  value: number | null,
+  track?: { autoValue: number | null; expiresOn: string | null },
+) {
+  if (value === null) {
+    const { error } = await supabase.from('research_overrides').delete().eq('symbol', symbol).eq('field', field)
+    if (error) throw error
+    return
+  }
+  const row: ResearchOverrideRow = { user_id: userId, symbol, field, value, updated_at: new Date().toISOString() }
+  const upsert = (r: ResearchOverrideRow) => supabase.from('research_overrides').upsert(r, { onConflict: 'user_id,symbol,field' })
+  let { error } = await upsert(track ? { ...row, auto_value: track.autoValue, expires_on: track.expiresOn } : row)
+  // Before the override_tracking migration: save the number without the tracking.
+  if (error && track && /auto_value|expires_on/.test(error.message)) ({ error } = await upsert(row))
   if (error) throw error
 }
 

@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261103010000_foreign_eps.sql` (2026-10-27).
+through `20261104010000_override_tracking.sql` (2026-10-27).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -386,6 +386,8 @@ A number you set in place of an automatic one. **Written by:** app. Primary key 
 |---|---|
 | `field` | `eps` · `growth` (fair value inputs) or `valuation` · `growth_score` · `moat` · `execution` (score parts). |
 | `value` | Your number. Delete the row to go back to automatic. |
+| `auto_value` | The automatic number when you made the edit. When today's automatic number differs, the app flags the edit. Null = made before tracking (flagged once). |
+| `expires_on` | EPS edits only: 3 days after the next earnings report. After it the automatic EPS is used again. |
 
 ### `allocation_targets`
 Target mix by type for one pool. **Written by:** app. Primary key `(user_id, scope)`. The five % columns must add up to 100.
