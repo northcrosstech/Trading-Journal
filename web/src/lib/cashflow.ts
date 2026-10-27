@@ -140,3 +140,17 @@ export function closeStatus(
   )
   return missing.length === 0 && unpaid.length === 0 ? null : { month, missing, unpaid }
 }
+
+/** The month Net worth opens on: the current month, except from the 1st to the 5th while
+ * last month is still being closed out, when it stays on last month. */
+export function netWorthOpenMonth(
+  today: string,
+  accounts: NetworthAccount[],
+  balances: NetworthBalance[],
+  payments: InstallmentPayment[],
+  closeFrom: string | null = null,
+): string {
+  const current = monthOf(today)
+  if (Number(today.slice(8, 10)) > 5) return current
+  return closeStatus(today, accounts, balances, payments, closeFrom) ? addMonths(current, -1) : current
+}

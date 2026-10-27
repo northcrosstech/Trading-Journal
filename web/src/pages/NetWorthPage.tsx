@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Landmark, Plus, Settings2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
@@ -6,6 +6,7 @@ import type { InstallmentPayment, NetworthAccount, NetworthBalance, NetworthCate
 import {
   createNetworthAccount,
   deleteNetworthAccount,
+  fetchCloseFromMonth,
   fetchDailyValues,
   fetchInstallmentPayments,
   fetchNetworthAccounts,
@@ -24,6 +25,7 @@ import { NetWorthChart } from '../components/WealthCharts'
 import { NetWorthComposition } from '../components/NetWorthComposition'
 import { InstallmentsCard } from '../components/InstallmentsCard'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
+import { netWorthOpenMonth } from '../lib/cashflow'
 import { usePaymentSetup } from '../lib/usePaymentSetup'
 import { Kpi } from '../components/WealthBits'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -451,8 +453,10 @@ export function NetWorthPage() {
   const currentMonth = monthOf(centralDateStr(new Date()))
   const [searchParams] = useSearchParams()
   const requested = searchParams.get('month')
-  // Month-end balances belong to a finished month, so open on the last completed one.
-  const [month, setMonth] = useState(requested && /^\d{4}-\d{2}$/.test(requested) ? `${requested}-01` : addMonths(currentMonth, -1))
+  const validRequest = requested !== null && /^\d{4}-\d{2}$/.test(requested)
+  // Without ?month, the first load picks the month (see netWorthOpenMonth).
+  const [month, setMonth] = useState(validRequest ? `${requested}-01` : currentMonth)
+  const placed = useRef(validRequest)
   // The month-end checklist links here with ?month=yyyy-mm.
   useEffect(() => {
     if (requested && /^\d{4}-\d{2}$/.test(requested)) setMonth(`${requested}-01`)
@@ -467,8 +471,21 @@ export function NetWorthPage() {
   const [manageOpen, setManageOpen] = useState(false)
 
   const load = useCallback(() => {
-    Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchPortfolios(), fetchDailyValues(), fetchInstallmentPayments()])
-      .then(([a, b, p, v, ip]) => {
+    Promise.all([
+      fetchNetworthAccounts(),
+      fetchNetworthBalances(),
+      fetchPortfolios(),
+      fetchDailyValues(),
+      fetchInstallmentPayments(),
+      fetchCloseFromMonth().catch(() => null),
+    ])
+      .then(([a, b, p, v, ip, closeFrom]) => {
+        if (!placed.current) {
+          placed.current = true
+          const open = netWorthOpenMonth(centralDateStr(new Date()), a, b, ip, closeFrom)
+          setMonth(open)
+          setYear(Number(open.slice(0, 4)))
+        }
         setAccounts(a)
         setBalances(b)
         setPortfolios(p)
@@ -541,7 +558,16 @@ export function NetWorthPage() {
         }
       />
 
-      <CloseMonthBanner accounts={accounts} balances={balances} payments={payments} />
+      <CloseMonthBanner
+        accounts={accounts}
+        balances={balances}
+        payments={payments}
+        viewing={month}
+        onOpenMonth={(m) => {
+          setMonth(m)
+          setYear(Number(m.slice(0, 4)))
+        }}
+      />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Kpi label={`Net worth · ${monthLabel(month)}`} value={currency(totals.net)} sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`} accent />

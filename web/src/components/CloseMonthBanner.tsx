@@ -20,11 +20,16 @@ export function CloseMonthBanner({
   balances,
   payments,
   showLink = true,
+  viewing,
+  onOpenMonth,
 }: {
   accounts: NetworthAccount[]
   balances: NetworthBalance[]
   payments: InstallmentPayment[]
   showLink?: boolean
+  /** On the Net worth page: the month on screen, and how to switch to the one being closed. */
+  viewing?: string
+  onOpenMonth?: (month: string) => void
 }) {
   const { user } = useAuth()
   const dialog = useDialog()
@@ -44,6 +49,17 @@ export function CloseMonthBanner({
   if (!status) return null
   const total = accounts.filter((a) => a.opened_month <= status.month && (a.closed_month === null || status.month < a.closed_month)).length
   const done = total - status.missing.length
+  const onClosingMonth = viewing === status.month
+  // Says why Net worth opened where it did: last month is kept through the 5th, then the new month takes over.
+  const why = !viewing
+    ? null
+    : onClosingMonth
+      ? Number(today.slice(8, 10)) <= 5
+        ? `Showing ${monthLabel(status.month)} until it’s closed, or through the 5th.`
+        : null
+      : viewing === thisMonth
+        ? `Showing ${monthLabel(thisMonth)} since the 5th has passed, but ${monthLabel(status.month)} was never closed.`
+        : null
 
   async function startFromThisMonth() {
     if (!user) return
@@ -73,6 +89,7 @@ export function CloseMonthBanner({
           <div className="font-semibold text-amber-100">
             Close {monthLabel(status.month)} · {done} of {total} balances updated
           </div>
+          {why && <div className="mt-0.5 text-amber-100/90">{why}</div>}
           <div className="mt-0.5 text-amber-200/80">
             {status.missing.length > 0 && <>Still to update: {list(status.missing.map((a) => a.name))}.</>}
             {status.missing.length > 0 && status.unpaid.length > 0 && ' '}
@@ -91,7 +108,12 @@ export function CloseMonthBanner({
             Start from {monthLabel(thisMonth, 'short')}
           </Button>
         )}
-        {showLink && (
+        {onOpenMonth && !onClosingMonth && (
+          <Button size="sm" className="border-amber-500/40 text-amber-100" onClick={() => onOpenMonth(status.month)}>
+            Open {monthLabel(status.month, 'short')}
+          </Button>
+        )}
+        {showLink && !onOpenMonth && (
           <ButtonLink to={`/networth?month=${status.month.slice(0, 7)}`} size="sm" className="border-amber-500/40 text-amber-100">
             Update {monthLabel(status.month, 'short')} balances
           </ButtonLink>
