@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Archive, ArchiveRestore, Pencil, Plus, Wallet } from 'lucide-react'
-import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind } from '../lib/database.types'
+import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind, TickerThesisRow } from '../lib/database.types'
 import {
   fetchActivity,
+  fetchAllocationTolerance,
   fetchCsps,
   fetchDailyValues,
   fetchHoldings,
   fetchLatestPrices,
   fetchOptions,
   fetchPortfolios,
+  fetchPositionTargets,
+  fetchTheses,
   updateHolding,
   updatePortfolio,
   type SymbolPrice,
@@ -40,6 +43,8 @@ import { OptionsCard } from '../components/OptionsCard'
 import { ActivityTable } from '../components/ActivityTable'
 import { ResearchPills } from '../components/ResearchBits'
 import { QuickTrade } from '../components/QuickTrade'
+import { PlanNotesCard, PositionPlanCard, reviewDue } from '../components/PositionPlan'
+import type { PlanTarget } from '../lib/positionPlan'
 import { ResearchDrawer } from '../components/ResearchDrawer'
 import { AccountAllocationCard } from '../components/AllocationCards'
 import { useResearch } from '../lib/useResearch'
@@ -52,7 +57,7 @@ import { Tabs } from '../components/ui/Tabs'
 import { Drawer } from '../components/ui/Drawer'
 import { EmptyState } from '../components/ui/EmptyState'
 
-type View = 'positions' | 'performance' | 'dividends' | 'activity'
+type View = 'positions' | 'plan' | 'performance' | 'dividends' | 'activity'
 
 /** Inline manual price for a holding -- for funds with no public ticker (many 401k funds).
  * Shares and average cost only change through Activity entries (Buy, Sell, Add existing,
@@ -128,6 +133,8 @@ function HoldingsTable({
   trading,
   onTrading,
   onTraded,
+  targets,
+  theses,
 }: {
   views: HoldingView[]
   total: number
@@ -141,6 +148,9 @@ function HoldingsTable({
   trading: string | null
   onTrading: (symbol: string | null) => void
   onTraded: (message: string) => void
+  /** Plan target % by ticker (empty = no plan). */
+  targets: Map<string, number>
+  theses: Map<string, TickerThesisRow>
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const tradeRow = (symbol: string) => (
@@ -187,7 +197,14 @@ function HoldingsTable({
                 title={`Log a buy or sale of ${v.holding.symbol}`}
                 className={`group cursor-pointer border-b border-(--border) transition last:border-0 hover:bg-white/2 ${trading === v.holding.symbol ? 'bg-white/3' : ''}`}
               >
-                <td className="px-5 py-3 font-semibold text-white">{v.holding.symbol}</td>
+                <td className="px-5 py-3 font-semibold text-white">
+                  {v.holding.symbol}
+                  {reviewDue(theses.get(v.holding.symbol)) && (
+                    <span className="ml-1.5 align-middle" title="Your thesis is due for review — open the fair value breakdown">
+                      <Pill tone="amber">review</Pill>
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-3 text-right tabular-nums text-neutral-300">{Number(Number(v.holding.quantity).toFixed(6))}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{priceFmt(Number(v.holding.avg_cost))}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-neutral-200">
@@ -218,7 +235,10 @@ function HoldingsTable({
                   {v.gain === null ? '—' : signed(v.gain)}
                   {v.gainPct !== null && <div className="text-xs font-normal">{percentFmt(v.gainPct)}</div>}
                 </td>
-                <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{total > 0 ? percentFmt(v.value / total).replace('+', '') : '—'}</td>
+                <td className="px-3 py-3 text-right tabular-nums text-neutral-400">
+                  {total > 0 ? percentFmt(v.value / total).replace('+', '') : '—'}
+                  {targets.size > 0 && <div className="text-xs text-neutral-600">{targets.has(v.holding.symbol) ? `target ${Number(targets.get(v.holding.symbol)!.toFixed(1))}%` : 'not in plan'}</div>}
+                </td>
                 <td className="px-3 py-3 text-right">
                   <button
                     onClick={(e) => {
@@ -257,14 +277,34 @@ export function PortfolioDetailPage() {
   const [view, setView] = useState<View>('positions')
   const [trade, setTrade] = useState<TradeTab | null>(null)
   const [trading, setTrading] = useState<string | null>(null)
+  const [plan, setPlan] = useState<PlanTarget[]>([])
+  const [tolerance, setTolerance] = useState(5)
+  const [theses, setTheses] = useState<Map<string, TickerThesisRow>>(new Map())
+  const loadTheses = useCallback(() => {
+    fetchTheses()
+      .then(setTheses)
+      .catch(() => {})
+  }, [])
+  useEffect(loadTheses, [loadTheses])
 
   const load = useCallback(() => {
     if (!portfolioId) return
-    Promise.all([fetchPortfolios(), fetchHoldings(portfolioId), fetchCsps(portfolioId), fetchDailyValues(portfolioId), fetchActivity(portfolioId), fetchOptions(portfolioId)])
-      .then(async ([ps, h, c, v, a, o]) => {
+    Promise.all([
+      fetchPortfolios(),
+      fetchHoldings(portfolioId),
+      fetchCsps(portfolioId),
+      fetchDailyValues(portfolioId),
+      fetchActivity(portfolioId),
+      fetchOptions(portfolioId),
+      fetchPositionTargets(),
+      fetchAllocationTolerance(),
+    ])
+      .then(async ([ps, h, c, v, a, o, pt, tol]) => {
+        const ownPlan = pt.filter((t) => t.portfolio_id === portfolioId).map((t) => ({ symbol: t.symbol, pct: Number(t.target_pct) }))
         const symbols = [
           ...new Set([
             ...h.map((x) => x.symbol),
+            ...ownPlan.map((x) => x.symbol),
             ...c.filter((x) => x.status === 'open').map((x) => x.symbol),
             ...o.filter((x) => x.status === 'open').map((x) => x.symbol),
           ]),
@@ -275,6 +315,8 @@ export function PortfolioDetailPage() {
         setOptions(o)
         setValues(v)
         setActivity(a)
+        setPlan(ownPlan)
+        setTolerance(tol)
         setAllPortfolios(ps)
         setPortfolio(ps.find((p) => p.id === portfolioId) ?? null)
       })
@@ -292,7 +334,14 @@ export function PortfolioDetailPage() {
   const pending = useMemo(() => unpricedSymbols(holdings, openCsps, prices, openOptions), [holdings, openCsps, prices, openOptions])
   // Fair value and score per holding, compared with the price the holdings table shows.
   const researchPrices = useMemo(() => new Map((snap?.holdings ?? []).filter((v) => v.price !== null).map((v) => [v.holding.symbol, v.price as number])), [snap])
-  const holdingSymbols = useMemo(() => holdings.map((h) => h.symbol), [holdings])
+  // Plan tickers you don't own yet get research too (opened from the plan).
+  const holdingSymbols = useMemo(() => [...holdings.map((h) => h.symbol), ...plan.map((t) => t.symbol)], [holdings, plan])
+  const planTargets = useMemo(() => new Map(plan.map((t) => [t.symbol, t.pct])), [plan])
+  const planHoldings = useMemo(
+    () => (snap?.holdings ?? []).map((v) => ({ symbol: v.holding.symbol, value: v.value, price: v.price ?? prices.get(v.holding.symbol)?.close ?? null })),
+    [snap, prices],
+  )
+  const longOptionsValue = useMemo(() => openOptions.filter((o) => o.side === 'long').reduce((s, o) => s + optionValue(o, prices), 0), [openOptions, prices])
   const research = useResearch(holdingSymbols, researchPrices)
   const [researchOpen, setResearchOpen] = useState<string | null>(null)
   const realized = useMemo(() => activity.reduce((s, a) => s + (a.voided_at === null && a.realized_gain !== null ? Number(a.realized_gain) : 0), 0), [activity])
@@ -454,6 +503,7 @@ export function PortfolioDetailPage() {
       <Tabs<View>
         tabs={[
           { value: 'positions', label: 'Positions', count: snap.holdings.length + openOptions.length + openCsps.length },
+          { value: 'plan', label: 'Plan' },
           { value: 'performance', label: 'Performance' },
           { value: 'dividends', label: 'Dividends' },
           { value: 'activity', label: 'Activity', count: activity.filter((a) => a.voided_at === null).length },
@@ -504,6 +554,8 @@ export function PortfolioDetailPage() {
                 trading={trading}
                 onTrading={setTrading}
                 onTraded={tradeDone}
+                targets={planTargets}
+                theses={theses}
               />
             )}
           </Card>
@@ -521,10 +573,28 @@ export function PortfolioDetailPage() {
               <AllocationDonut allocation={allocation} centerLabel="Value" />
             </Card>
           </div>
-          <AccountAllocationCard portfolio={p} snap={snap} options={options} prices={prices} />
           <Card title="Returns">
             <ReturnsRow series={series} />
           </Card>
+        </div>
+      )}
+
+      {view === 'plan' && (
+        <div className="flex flex-col gap-6">
+          <PositionPlanCard
+            portfolio={p}
+            holdings={planHoldings}
+            longOptions={longOptionsValue}
+            cash={snap.cash}
+            spendable={snap.cashAvailable}
+            plan={plan}
+            tolerance={tolerance}
+            theses={theses}
+            onOpenTicker={setResearchOpen}
+            onSaved={load}
+          />
+          <PlanNotesCard key={p.id} portfolio={p} onSaved={load} />
+          <AccountAllocationCard portfolio={p} snap={snap} options={options} prices={prices} plan={plan} />
         </div>
       )}
 
@@ -542,6 +612,7 @@ export function PortfolioDetailPage() {
         settings={research.settings}
         onClose={() => setResearchOpen(null)}
         onChanged={research.reload}
+        onThesisSaved={loadTheses}
       />
 
       <Drawer open={trade !== null} onClose={() => setTrade(null)} title={`Trade · ${p.name}`} subtitle={`Cash available ${currency(snap.cashAvailable)}`}>

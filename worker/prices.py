@@ -212,6 +212,10 @@ def run_pricing(
             watched = {w["symbol"] for w in _all_rows(client.table("research_watchlist").select("symbol"))}
         except Exception:  # noqa: BLE001
             watched = set()
+        try:  # and tickers in a position plan you don't own yet
+            watched |= {t["symbol"] for t in _all_rows(client.table("position_targets").select("symbol"))}
+        except Exception:  # noqa: BLE001
+            pass
 
         symbols = sorted(
             {h["symbol"] for h in holdings if h.get("manual_price") is None}

@@ -57,10 +57,11 @@ erDiagram
     fundamentals }o--o{ holdings : "by symbol"
     ticker_types }o--o{ holdings : "by symbol (per user)"
     portfolios ||--o| allocation_targets : "scope = id"
+    portfolios ||--o{ position_targets : "position plan"
 ```
 
 - **`prices`, `fundamentals`, `dividend_info` and `ticker_types` join to holdings by `symbol`,** not by a key. `prices` and `fundamentals` are shared by all users; the other two are per user.
-- **`allocation_targets`** has one row per portfolio (scope = its id): that account's mix target. `portfolios.target_pct` holds the split between brokerage portfolios.
+- **`allocation_targets`** has one row per portfolio (scope = its id): that account's mix target. `portfolios.target_pct` holds the split between brokerage portfolios. **`position_targets`** holds a portfolio's per-ticker plan; when present, the mix target is derived from it. **`ticker_theses`** joins to holdings by `symbol` (per user).
 - **`wealth_settings`** holds one row of per-user Wealth settings: close start month, growth cap, economy override, allocation tolerance.
 - **Net worth reads portfolios indirectly:** each active portfolio's latest `portfolio_daily_values` row in a month becomes a line under its `kind`.
 

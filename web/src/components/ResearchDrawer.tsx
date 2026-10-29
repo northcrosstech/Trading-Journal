@@ -27,6 +27,7 @@ import { Drawer } from './ui/Drawer'
 import { Button } from './ui/Button'
 import { Pill } from './ui/Pill'
 import { PILL_TONE, ScoreBadge } from './ResearchBits'
+import { ThesisBox } from './ThesisBox'
 
 const PART_BAR: Record<string, string> = { green: 'bg-emerald-400', teal: 'bg-teal-400', neutral: 'bg-neutral-400', amber: 'bg-amber-400' }
 const partTone = (p: Part) => (p.points === null ? 'neutral' : p.points / p.max >= 0.8 ? 'green' : p.points / p.max >= 0.6 ? 'teal' : p.points / p.max >= 0.4 ? 'neutral' : 'amber')
@@ -41,6 +42,7 @@ export function ResearchDrawer({
   onClose,
   onChanged,
   onRemove,
+  onThesisSaved,
 }: {
   r: Research | null
   macro: Macro
@@ -48,6 +50,7 @@ export function ResearchDrawer({
   onClose: () => void
   onChanged: () => void
   onRemove?: () => void
+  onThesisSaved?: () => void
 }) {
   const { user } = useAuth()
   const dialog = useDialog()
@@ -212,6 +215,8 @@ export function ResearchDrawer({
               </ul>
             </section>
           )}
+
+          <ThesisBox key={r.symbol} symbol={r.symbol} earningsDate={r.earnings?.date ?? null} onSaved={onThesisSaved} />
 
           {/* Fair value */}
           <section>

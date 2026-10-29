@@ -80,7 +80,7 @@ flowchart LR
 | `/insights` | Stats and breakdowns | `trades` (+ review fields) |
 | `/wealth` | Wealth overview: net worth, portfolios, month-end close banner | most wealth tables |
 | `/portfolios` | All portfolios, Health check, brokerage allocation | `portfolios`, `portfolio_daily_values`, `audit_summary`, `allocation_targets`, `ticker_types`, `fundamentals` |
-| `/portfolios/:id` | One portfolio: holdings (with fair value pills), activity, options, puts, dividends, performance and its own allocation | `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `prices`, `portfolio_daily_values`, `fundamentals` |
+| `/portfolios/:id` | One portfolio: holdings (with fair value pills), its plan (position targets, add money, plan notes, mix by type), activity, options, puts, dividends and performance | `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `prices`, `portfolio_daily_values`, `fundamentals`, `position_targets`, `ticker_theses` |
 | `/networth` | Net worth by month, accounts, monthly payments | `networth_accounts`, `networth_balances`, `installment_payments`, `wealth_settings` (+ portfolio values) |
 | `/cashflow` | What you kept each month, derived from balances | `networth_balances`, `portfolio_activity`, `portfolio_daily_values` |
 | `/research` | Fair value, score and next earnings for holdings and a watchlist | `fundamentals`, `macro_indicators`, `research_watchlist`, `research_overrides`, `wealth_settings` |

@@ -2,6 +2,8 @@ import { supabase } from './supabase'
 import type {
   AllocationTargetRow,
   TickerTypeRow,
+  PositionTargetRow,
+  TickerThesisRow,
   FundamentalsRow,
   MacroIndicatorRow,
   ResearchOverrideField,
@@ -99,9 +101,12 @@ export async function createPortfolio(userId: string, fields: { name: string; ki
   return data
 }
 
-export async function updatePortfolio(id: string, patch: Partial<Pick<Portfolio, 'name' | 'kind' | 'archived' | 'target_pct'>>) {
+export async function updatePortfolio(id: string, patch: Partial<Pick<Portfolio, 'name' | 'kind' | 'archived' | 'target_pct' | 'notes'>>) {
   const { error } = await supabase.from('portfolios').update(patch).eq('id', id)
-  if (error) throw error
+  if (error) {
+    if ('notes' in patch && /notes/.test(error.message)) throw new Error('Run the position_plans migration first')
+    throw error
+  }
 }
 
 export async function fetchHoldings(portfolioId?: string): Promise<Holding[]> {
@@ -688,4 +693,51 @@ export async function fetchExternalFlows(): Promise<Pick<PortfolioActivity, 'por
     .is('voided_at', null)
   if (error) throw error
   return data ?? []
+}
+
+// --- Position plans and theses --------------------------------------------------------------
+
+/** Every portfolio's position plan (target % per ticker). */
+export async function fetchPositionTargets(): Promise<PositionTargetRow[]> {
+  const { data, error } = await supabase.from('position_targets').select('*').order('target_pct', { ascending: false })
+  if (error) {
+    if (missingTable(error, 'position_targets')) return []
+    throw error
+  }
+  return data ?? []
+}
+
+/** Replace a portfolio's whole plan; an empty list clears it. */
+export async function savePositionPlan(portfolioId: string, targets: { symbol: string; pct: number }[]) {
+  const { error } = await supabase.rpc('set_position_plan', { p_portfolio: portfolioId, p_targets: targets })
+  if (error) {
+    if (/set_position_plan|position_targets/.test(error.message) && /function|schema cache|does not exist/i.test(error.message)) throw new Error('Run the position_plans migration first')
+    throw error
+  }
+}
+
+export async function fetchTheses(symbols?: string[]): Promise<Map<string, TickerThesisRow>> {
+  const out = new Map<string, TickerThesisRow>()
+  if (symbols && symbols.length === 0) return out
+  let q = supabase.from('ticker_theses').select('*')
+  if (symbols) q = q.in('symbol', symbols)
+  const { data, error } = await q
+  if (error) {
+    if (missingTable(error, 'ticker_theses')) return out
+    throw error
+  }
+  for (const r of data ?? []) out.set(r.symbol, r)
+  return out
+}
+
+/** Save a ticker's thesis; blank text and no review date removes it. */
+export async function saveThesis(userId: string, symbol: string, thesis: string, reviewOn: string | null) {
+  const { error } =
+    thesis.trim() === '' && !reviewOn
+      ? await supabase.from('ticker_theses').delete().eq('symbol', symbol)
+      : await supabase.from('ticker_theses').upsert({ user_id: userId, symbol, thesis: thesis.trim(), review_on: reviewOn, updated_at: new Date().toISOString() }, { onConflict: 'user_id,symbol' })
+  if (error) {
+    if (missingTable(error, 'ticker_theses')) throw new Error('Run the position_plans migration first')
+    throw error
+  }
 }

@@ -234,12 +234,16 @@ def _all_rows(query) -> list[dict]:
 
 
 def research_symbols(client) -> list[str]:
-    """Every ticker held (without a manual price) or on anyone's watchlist."""
+    """Every ticker held (without a manual price), on anyone's watchlist, or in a position plan."""
     held = {h["symbol"] for h in _all_rows(client.table("holdings").select("symbol,manual_price")) if h.get("manual_price") is None}
     try:
         watched = {w["symbol"] for w in _all_rows(client.table("research_watchlist").select("symbol"))}
     except Exception:  # table not created yet (migration not run)
         watched = set()
+    try:
+        watched |= {t["symbol"] for t in _all_rows(client.table("position_targets").select("symbol"))}
+    except Exception:  # table not created yet (migration not run)
+        pass
     return sorted(held | watched)
 
 

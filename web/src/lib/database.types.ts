@@ -313,6 +313,10 @@ export type FundamentalsRow = {
 
 /** Mix target for one pool: 'brokerage' or a retirement portfolio's id. Percentages add to 100. */
 export type AllocationTargetRow = { user_id: string; scope: string; etf: number; stock: number; bond: number; option: number; cash: number; updated_at: string }
+/** A portfolio's target % for one ticker (its position plan). */
+export type PositionTargetRow = { user_id: string; portfolio_id: string; symbol: string; target_pct: number; updated_at: string }
+/** Why you own a ticker, and when to look at that again. */
+export type TickerThesisRow = { user_id: string; symbol: string; thesis: string; review_on: string | null; updated_at: string }
 export type TickerTypeRow = { user_id: string; symbol: string; asset_type: 'stock' | 'etf' | 'bond'; updated_at: string }
 
 /** FRED indicators: aaa_yield, treasury_10y, unemployment_rate, unemployment_12m_low. */
@@ -354,6 +358,8 @@ export type PortfolioRow = {
   archived: boolean
   /** Brokerage only: % of all brokerage money. Absent until migration 20261101010000_allocation. */
   target_pct?: number | null
+  /** Plan notes. Absent until migration 20261107010000_position_plans. */
+  notes?: string | null
   created_at: string
 }
 
@@ -526,6 +532,8 @@ export type Database = {
       research_overrides: ReturnType<typeof table<ResearchOverrideRow>>
       allocation_targets: ReturnType<typeof table<AllocationTargetRow>>
       ticker_types: ReturnType<typeof table<TickerTypeRow>>
+      position_targets: ReturnType<typeof table<PositionTargetRow>>
+      ticker_theses: ReturnType<typeof table<TickerThesisRow>>
       portfolios: ReturnType<typeof table<PortfolioRow>>
       holdings: ReturnType<typeof table<HoldingRow>>
       csp_positions: ReturnType<typeof table<CspPositionRow>>
@@ -613,6 +621,10 @@ export type Database = {
       csp_edit: {
         Args: { p_csp: string; p_symbol: string; p_strike: number; p_expiration: string; p_contracts: number; p_premium: number; p_on: string }
         Returns: string
+      }
+      set_position_plan: {
+        Args: { p_portfolio: string; p_targets: { symbol: string; pct: number }[] }
+        Returns: number
       }
       portfolio_trades: {
         Args: { p_portfolio: string; p_trades: { symbol: string; side: 'buy' | 'sell'; quantity: number; price: number; fee: number; on: string }[] }

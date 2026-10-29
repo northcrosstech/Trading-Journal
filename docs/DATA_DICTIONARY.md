@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261106010000_mix_per_portfolio.sql` (2026-10-29).
+through `20261107010000_position_plans.sql` (2026-10-29).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -36,7 +36,7 @@ through `20261106010000_mix_per_portfolio.sql` (2026-10-29).
 | [Review, planning & setups](#review-planning--setups) | `playbooks`, `trade_playbooks`, `daily_plans`, `daily_plan_playbooks`, `daily_journal`, `target_settings` |
 | [Net worth](#net-worth) | `networth_accounts`, `networth_balances`, `installment_payments`, `wealth_settings` |
 | [Portfolios](#portfolios) | `portfolios`, `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `portfolio_daily_values`, `prices` |
-| [Research & allocation](#research--allocation) | `fundamentals`, `macro_indicators`, `research_watchlist`, `research_overrides`, `allocation_targets`, `ticker_types` |
+| [Research & allocation](#research--allocation) | `fundamentals`, `macro_indicators`, `research_watchlist`, `research_overrides`, `allocation_targets`, `ticker_types`, `position_targets`, `ticker_theses` |
 | [System](#system) | `sync_log`, the `audit_summary` view |
 | [Legacy — not used by the app](#legacy--not-used-by-the-app) | `emotions`, `trade_emotions`, `playbook_rule_groups`, `playbook_rules`, `trade_rule_checks`, `daily_rules`, `daily_rule_checks`, `missed_trades`, five `backup_*_20260711` tables |
 
@@ -225,7 +225,7 @@ Per-user Wealth preferences — **one row per user** (`user_id` is the primary k
 ## Portfolios
 
 ### `portfolios`
-An investment account you track (separate from the trading journal's `accounts`). **Written by:** app for `name`, `kind`, `archived` and `target_pct` only; everything else through functions.
+An investment account you track (separate from the trading journal's `accounts`). **Written by:** app for `name`, `kind`, `archived`, `target_pct` and `notes` only; everything else through functions.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -234,6 +234,7 @@ An investment account you track (separate from the trading journal's `accounts`)
 | `cash` | numeric | Cash in the portfolio. Moved by deposits, withdrawals, dividends, buys, sells, options and Set balance. **Negative = margin used**, shown in net worth as a Margin loans debt. |
 | `archived` | boolean | Archived portfolios aren't priced and leave net worth. |
 | `target_pct` | numeric | Brokerage only: this portfolio's target share of all brokerage money (0–100). Null = no target. |
+| `notes` | text | Plan notes: your rules for this account (Plan tab). Up to 10,000 characters. |
 
 ### `holdings`
 Shares currently held. **Written by:** functions only (buy, sell, transfer, split, assignment, undo); the app may set `manual_price`. Shares and average cost always equal what Activity adds up to. **Unique:** `(portfolio_id, symbol)`.
@@ -400,6 +401,24 @@ Target mix by type for one portfolio. **Written by:** app. Primary key `(user_id
 
 ### `ticker_types`
 Your type for a ticker when the detected one is wrong. **Written by:** app. Primary key `(user_id, symbol)`. `asset_type` is `stock`, `etf` or `bond`.
+
+### `position_targets`
+A portfolio's position plan: a target % per ticker. **Written by:** app, through `set_position_plan(portfolio, targets)`, which replaces the whole plan at once and refuses a total over 100%. Primary key `(portfolio_id, symbol)`; deleted with the portfolio.
+
+| Column | Meaning |
+|---|---|
+| `symbol` | Upper-case ticker. Need not be held yet ("not owned yet"); the worker prices and researches it anyway. |
+| `target_pct` | Target % (above 0, at most 100). What the tickers leave of 100% is the cash target. |
+
+When a portfolio has a plan, its mix-by-type target is worked out from the plan (each ticker by its type) instead of `allocation_targets`.
+
+### `ticker_theses`
+Why you own a ticker. **Written by:** app (research drawer). Primary key `(user_id, symbol)`, one per ticker across every portfolio and the watchlist.
+
+| Column | Meaning |
+|---|---|
+| `thesis` | Your reasons, and what would make you sell. |
+| `review_on` | When to look at it again. On or after this date the ticker shows a **review** pill. |
 
 ---
 

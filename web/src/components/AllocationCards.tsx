@@ -7,6 +7,7 @@ import {
   fetchAllocationTargets,
   fetchAllocationTolerance,
   fetchFundamentals,
+  fetchPositionTargets,
   fetchTickerTypes,
   saveAllocationTarget,
   setAllocationTolerance,
@@ -29,6 +30,7 @@ import {
   type TickerType,
 } from '../lib/allocationPlan'
 import { optionValue, kindLabel, type PortfolioSnapshot } from '../lib/portfolio'
+import { comparePlan, planTypeTargets, type PlanTarget } from '../lib/positionPlan'
 import { currency } from '../lib/format'
 import { INPUT_SM } from '../lib/ui'
 import { useToast } from '../lib/toastContext'
@@ -39,17 +41,21 @@ import { Drawer } from './ui/Drawer'
 
 // --- Data --------------------------------------------------------------------------------------
 
-/** Mix targets, your ticker types, the tolerance, and Finnhub's type per ticker. */
+/** Mix targets, position plans, your ticker types, the tolerance, and Finnhub's type per ticker. */
 export function useAllocationData(symbols: string[]) {
   const key = [...new Set(symbols)].sort().join(',')
   const [targets, setTargets] = useState<Map<string, Targets>>(new Map())
+  const [plans, setPlans] = useState<Map<string, PlanTarget[]>>(new Map())
   const [overrides, setOverrides] = useState<Map<string, TickerType>>(new Map())
   const [fund, setFund] = useState<Map<string, FundamentalsRow>>(new Map())
   const [tolerance, setTolerance] = useState(5)
 
   const load = useCallback(() => {
-    Promise.all([fetchAllocationTargets(), fetchTickerTypes(), fetchAllocationTolerance(), fetchFundamentals(key ? key.split(',') : [])])
-      .then(([t, o, tol, f]) => {
+    Promise.all([fetchAllocationTargets(), fetchTickerTypes(), fetchAllocationTolerance(), fetchFundamentals(key ? key.split(',') : []), fetchPositionTargets()])
+      .then(([t, o, tol, f, pt]) => {
+        const byPortfolio = new Map<string, PlanTarget[]>()
+        for (const r of pt) byPortfolio.set(r.portfolio_id, [...(byPortfolio.get(r.portfolio_id) ?? []), { symbol: r.symbol, pct: Number(r.target_pct) }])
+        setPlans(byPortfolio)
         setTargets(new Map(t.map((r) => [r.scope, { etf: Number(r.etf), stock: Number(r.stock), bond: Number(r.bond), option: Number(r.option), cash: Number(r.cash) }])))
         setOverrides(new Map(o.map((r) => [r.symbol, r.asset_type])))
         setTolerance(tol)
@@ -60,7 +66,7 @@ export function useAllocationData(symbols: string[]) {
   useEffect(load, [load])
 
   const typeOf = useCallback((symbol: string) => classify(symbol, fund.get(symbol), overrides.get(symbol)), [fund, overrides])
-  return { targets, tolerance, typeOf, reload: load }
+  return { targets, plans, tolerance, typeOf, reload: load }
 }
 
 /** One portfolio's (or several portfolios') mix by type. */
@@ -362,10 +368,25 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
     data.tolerance,
   )
   const accounts = [...brokerage, ...retirement].map((p) => {
-    const targets = data.targets.get(p.portfolio.id) ?? null
-    const mix = poolMix([p.snap], options.filter((o) => o.portfolio_id === p.portfolio.id), prices, data.typeOf)
-    const off = targets ? compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: mix.values[k] })), targets, data.tolerance).off : null
-    return { p, targets, mix, off }
+    const plan = data.plans.get(p.portfolio.id) ?? []
+    const own = options.filter((o) => o.portfolio_id === p.portfolio.id)
+    const mix = poolMix([p.snap], own, prices, data.typeOf)
+    // With a position plan, the plan is the target: positions are checked, and the mix by
+    // type is what the plan adds up to.
+    const targets = plan.length > 0 ? planTypeTargets(plan, data.typeOf) : (data.targets.get(p.portfolio.id) ?? null)
+    const off =
+      plan.length > 0
+        ? comparePlan(
+            p.snap.holdings.map((v) => ({ symbol: v.holding.symbol, value: v.value, price: v.price })),
+            mix.values.option,
+            p.snap.cash,
+            plan,
+            data.tolerance,
+          ).off
+        : targets
+          ? compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: mix.values[k] })), targets, data.tolerance).off
+          : null
+    return { p, targets, mix, off, byPosition: plan.length > 0 }
   })
   const off = (hasSplit ? split.off : 0) + accounts.reduce((s, a) => s + (a.off ?? 0), 0)
   const noTargets = !hasSplit && accounts.every((a) => a.targets === null)
@@ -374,7 +395,7 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
 
   const accountList = (list: typeof accounts) => (
     <ul className="divide-y divide-(--border)">
-      {list.map(({ p, targets, mix, off: o }) => (
+      {list.map(({ p, targets, mix, off: o, byPosition }) => (
         <li key={p.portfolio.id} className="py-1">
           <button
             type="button"
@@ -386,7 +407,13 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
               {p.portfolio.name} <span className="text-xs text-neutral-500">{kindLabel(p.portfolio.kind)}</span>
             </span>
             <span className="text-xs">
-              {o === null ? <span className="text-neutral-500">No targets</span> : o === 0 ? <Pill tone="green">On target</Pill> : <Pill tone="amber">{o} off target</Pill>}
+              {o === null ? (
+                <span className="text-neutral-500">No targets</span>
+              ) : o === 0 ? (
+                <Pill tone="green">{byPosition ? 'On plan' : 'On target'}</Pill>
+              ) : (
+                <Pill tone="amber">{byPosition ? `${o} position${o === 1 ? '' : 's'} off plan` : `${o} off target`}</Pill>
+              )}
             </span>
           </button>
           {openId === p.portfolio.id && (
@@ -394,7 +421,7 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
               <MixRows mix={mix} targets={targets} tolerance={data.tolerance} onTypeChange={changeType} />
               {mix.margin > 0 && <p className="mt-1 text-xs text-neutral-500">{currency(mix.margin)} of margin isn't counted in the mix.</p>}
               <Link to={`/portfolios/${p.portfolio.id}`} className="mt-1 inline-block text-xs text-(--accent-text) hover:underline">
-                {targets ? 'Edit its targets' : 'Set its targets'} on {p.portfolio.name} › Performance
+                {byPosition ? 'See its position plan' : targets ? 'Edit its targets' : 'Set its targets'} on {p.portfolio.name} › Plan
               </Link>
             </div>
           )}
@@ -477,20 +504,23 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
 }
 
 /** A portfolio's own page: its mix by type against its own targets. */
-export function AccountAllocationCard({ portfolio, snap, options, prices }: { portfolio: Portfolio; snap: PortfolioSnapshot; options: OptionPosition[]; prices: Map<string, SymbolPrice> }) {
+export function AccountAllocationCard({ portfolio, snap, options, prices, plan }: { portfolio: Portfolio; snap: PortfolioSnapshot; options: OptionPosition[]; prices: Map<string, SymbolPrice>; plan: PlanTarget[] }) {
   const symbols = useMemo(() => snap.holdings.map((v) => v.holding.symbol), [snap])
   const data = useAllocationData(symbols)
   const changeType = useTypeChanger(data.reload)
   const [editing, setEditing] = useState(false)
   const mix = poolMix([snap], options.filter((o) => o.status === 'open'), prices, data.typeOf)
-  const targets = data.targets.get(portfolio.id) ?? null
+  const fromPlan = plan.length > 0
+  const targets = fromPlan ? planTypeTargets(plan, data.typeOf) : (data.targets.get(portfolio.id) ?? null)
   const off = targets ? compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: mix.values[k] })), targets, data.tolerance).off : 0
 
   return (
     <Card
       title="Mix by type"
       subtitle={
-        !targets ? (
+        fromPlan ? (
+          'Targets come from your position plan (each ticker by its type).'
+        ) : !targets ? (
           'Set targets for this account to see what to rebalance.'
         ) : off === 0 ? (
           <span className="text-emerald-300">On target (±{data.tolerance}%)</span>
@@ -501,9 +531,11 @@ export function AccountAllocationCard({ portfolio, snap, options, prices }: { po
         )
       }
       actions={
-        <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
-          {targets ? 'Edit targets' : 'Set targets'}
-        </Button>
+        fromPlan ? undefined : (
+          <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
+            {targets ? 'Edit targets' : 'Set targets'}
+          </Button>
+        )
       }
     >
       <MixRows mix={mix} targets={targets} tolerance={data.tolerance} onTypeChange={changeType} />

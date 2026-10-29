@@ -202,7 +202,8 @@ Two kinds of targets:
 | Target | Where you set it | Covers |
 |---|---|---|
 | **Split** | Portfolios page → Allocation → **Edit split** | How brokerage money divides between brokerage accounts (e.g. Long Term 90%, Equity Trades 10%) |
-| **Mix by type** | Each portfolio's page → Performance → **Set / Edit targets** | That one account's ETFs / Stocks / Bonds / Options / Cash, brokerage and retirement alike |
+| **Position plan** | Each portfolio's page → **Plan** → **Set / Edit plan** | A target % per ticker in that account (e.g. VOO 40%, NVDA 20%) |
+| **Mix by type** | Each portfolio's page → **Plan** → **Set / Edit targets** | That one account's ETFs / Stocks / Bonds / Options / Cash. With a position plan, this is worked out from the plan instead |
 
 Retirement accounts are never in the split, because money can't move freely in or out of them.
 The Allocation card on Portfolios lists every account with **On target**, **N off target** or
@@ -212,6 +213,10 @@ The Allocation card on Portfolios lists every account with **On target**, **N of
 - **Not counted:** margin, and sold options (covered calls, sold puts), which are obligations rather than holdings.
 - **How types are detected:** from the exchange's own listing. ETFs count as ETF; ETFs whose names say bond, treasury or T-bill count as Bond; stocks, ADRs and REITs count as Stock.
 - **To change a ticker's type,** open its type row (e.g. ETFs) and pick a type next to it.
+- **Position plan:** enter a ticker and its % on each row (**+ Add ticker** for more); whatever doesn't add up to 100% stays as cash. Save is blocked while a row is missing its ticker or %, a ticker is listed twice, or the total is over 100%. Each ticker shows its target, where it is now, and what to buy or trim. Tickers you hold but didn't plan show "not in your plan"; planned tickers you don't own yet show "not owned yet". The holdings table shows each ticker's target under its weight.
+- **Add money** (Plan tab): type an amount and it suggests buys only, nothing sold, going first to whatever is furthest below its target. It uses the account's free cash first; anything more counts as new money.
+- **Plan notes** (Plan tab): your rules for the account. Saved as you type.
+- **Thesis** (any ticker's fair value breakdown): why you own it, what would make you sell, and a review date. From that date the ticker shows an amber **review** pill in the holdings table and the plan.
 - **Reading the bars:** the white marker is the target. **On target** (green) means within ± your tolerance (default 5%). **Over / Under** (amber) shows the gap, with the dollars to **add** or **trim**.
 - **Mix targets:** presets (Aggressive to Defensive) or your own numbers. Each mix must add up to 100%.
 
