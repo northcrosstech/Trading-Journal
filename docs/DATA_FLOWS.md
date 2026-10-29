@@ -160,6 +160,8 @@ flowchart TB
 
 That's why "Add existing" and "Deposit" are the right way to bring in things you already owned.
 
+**Logging from a position** sends every line to `portfolio_trades`, which runs `portfolio_buy` / `portfolio_sell` for each in one transaction: all lines are saved or none. A fee is stored inside the entry's price (cost per share on a buy, net proceeds per share on a sale) and recorded separately in `fee`, so cash, average cost, realized gain, undo and the audit need nothing extra.
+
 **Set balance** brings cash in line with the broker, including a negative balance for margin used. As a setup or correction it counts as money in or out (no effect on returns). Ticked as interest or fees, it's a real cost and lowers returns.
 
 ### Fixing mistakes: edit and undo

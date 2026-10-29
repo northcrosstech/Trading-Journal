@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261104010000_override_tracking.sql` (2026-10-27).
+through `20261105010000_quick_trades.sql` (2026-10-29).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -261,6 +261,7 @@ Every money/position event — the portfolio's ledger. **Append-only:** a trigge
 | `created_at` | timestamptz | When it was recorded — the worker uses this to assign money in/out to the right day. |
 | `voided_at` | timestamptz | Set when the entry is undone. Voided entries stay as history but count for nothing. |
 | `replaced_by` | uuid | On an edited entry: → the entry that replaced it (the original is also voided). |
+| `fee` | numeric | The broker's fee on a buy or sell (0 = none). `price` is **after** the fee (cost per share on a buy, net proceeds per share on a sale), so average cost, cash and realized gain include it; fill price = price − fee ÷ quantity (buy) or + fee ÷ quantity (sale). |
 
 **Activity kinds**
 
@@ -436,8 +437,9 @@ Trading functions run as the calling user (so RLS applies) unless marked otherwi
 | Function | Called by | What it does |
 |---|---|---|
 | `upsert_trade_bundle` | Worker | Writes one trade + its fills + options_detail atomically, deduplicated by `trade_key`. **Security definer.** Skips outcome fields when `manually_closed`. |
-| `portfolio_buy` | Buy, Add existing | Adds shares (blends avg cost). Buy takes cash; Add existing records money in. |
+| `portfolio_buy` | Buy, Add existing | Adds shares (blends avg cost). Buy takes cash (plus an optional fee, added to cost); Add existing records money in. |
 | `portfolio_sell` | Sell | Removes shares, adds proceeds to cash, records realized gain. Refuses shares covering open calls. |
+| `portfolio_trades` | Positions → Log | Several buys and sells (each with a fee) in one save, all or none; a failing line comes back as "Line 2 (VOO): …". |
 | `portfolio_transfer` | Transfer | Moves shares to another portfolio (or out) with avg cost carried over; money out/in on each side. |
 | `portfolio_cash` | Cash tab | Deposit / withdrawal / dividend. |
 | `csp_open` / `csp_resolve` | Cash-secured puts | Sell a put; resolve as expired / closed / assigned. |

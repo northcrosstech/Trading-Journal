@@ -43,6 +43,15 @@ const CASH_ONLY: Kind[] = [...CASH_KINDS, 'cash_adjust']
 const PLAIN_UNDO: Kind[] = [...CASH_ONLY, 'split']
 
 const qtyOf = (a: PortfolioActivity) => Number(Number(a.quantity ?? 0).toFixed(6))
+const feeOf = (a: PortfolioActivity) => Number(a.fee ?? 0)
+/** The price the trade filled at: the stored price is after the fee. */
+function fillPrice(a: PortfolioActivity): number | null {
+  if (a.price === null) return null
+  const q = Number(a.quantity ?? 0)
+  const f = feeOf(a)
+  if (!f || !q) return Number(a.price)
+  return a.kind === 'buy' ? Number(a.price) - f / q : a.kind === 'sell' ? Number(a.price) + f / q : Number(a.price)
+}
 
 /** What undoing an entry will do, in plain words, for the confirm dialog. */
 function undoMessage(a: PortfolioActivity): string {
@@ -102,10 +111,21 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
           label: a.kind === 'transfer_in' ? 'Cost per share' : 'Price per share',
           type: 'number',
           prefix: '$',
-          defaultValue: a.price !== null ? String(Number(a.price)) : '',
+          defaultValue: fillPrice(a) !== null ? String(Number(fillPrice(a)!.toFixed(6))) : '',
           validate: (s) => validators.required(s) ?? validators.nonNegative(s),
         },
       )
+      if (a.kind !== 'transfer_in')
+        fields.push({
+          name: 'fee',
+          label: 'Fee',
+          type: 'number',
+          prefix: '$',
+          optional: true,
+          defaultValue: feeOf(a) ? String(feeOf(a)) : '',
+          hint: a.kind === 'buy' ? 'Added to your cost.' : 'Taken off what you received.',
+          validate: (s) => (s.trim() === '' ? null : validators.nonNegative(s)),
+        })
     } else {
       fields.push({ name: 'amount', label: 'Amount', type: 'number', prefix: '$', defaultValue: String(Math.abs(Number(a.cash_change))), validate: validators.positive })
       if (a.kind === 'dividend') fields.push({ name: 'symbol', label: 'Ticker', defaultValue: a.symbol ?? '', optional: true, hint: 'Which holding paid it (optional).' })
@@ -125,6 +145,7 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
         price: shares ? parseAmount(v.price) : null,
         amount: shares ? null : parseAmount(v.amount),
         on: v.on,
+        fee: v.fee ? (parseAmount(v.fee) ?? 0) : 0,
       }),
       `${ACTIVITY_LABEL[a.kind]} updated`,
     )
@@ -198,7 +219,8 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
                     <>
                       {a.symbol}
                       {a.quantity !== null && ` × ${qtyOf(a)}`}
-                      {a.price !== null && ` @ ${priceFmt(Number(a.price))}`}
+                      {fillPrice(a) !== null && ` @ ${priceFmt(fillPrice(a)!)}`}
+                      {feeOf(a) > 0 && <span className="text-neutral-500"> · fee {currency(feeOf(a))}</span>}
                     </>
                   )}
                 </td>

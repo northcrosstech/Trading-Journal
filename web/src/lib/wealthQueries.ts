@@ -197,7 +197,11 @@ export async function fetchLatestPrices(symbols: string[]): Promise<Map<string, 
 // Actions (database functions -- each saves completely or not at all)
 // ---------------------------------------------------------------------------
 
-export async function portfolioBuy(p: { portfolioId: string; symbol: string; quantity: number; price: number; fromCash: boolean; on: string }) {
+/** A fee is only sent when there is one, so a database without the quick_trades migration
+ * still takes fee-free trades. */
+const feeArg = (fee: number | undefined) => (fee ? { p_fee: fee } : {})
+
+export async function portfolioBuy(p: { portfolioId: string; symbol: string; quantity: number; price: number; fromCash: boolean; on: string; fee?: number }) {
   const { error } = await supabase.rpc('portfolio_buy', {
     p_portfolio: p.portfolioId,
     p_symbol: p.symbol,
@@ -205,11 +209,12 @@ export async function portfolioBuy(p: { portfolioId: string; symbol: string; qua
     p_price: p.price,
     p_from_cash: p.fromCash,
     p_on: p.on,
+    ...feeArg(p.fee),
   })
   if (error) throw error
 }
 
-export async function portfolioSell(p: { portfolioId: string; symbol: string; quantity: number; price: number; toCash: boolean; on: string }) {
+export async function portfolioSell(p: { portfolioId: string; symbol: string; quantity: number; price: number; toCash: boolean; on: string; fee?: number }) {
   const { error } = await supabase.rpc('portfolio_sell', {
     p_portfolio: p.portfolioId,
     p_symbol: p.symbol,
@@ -217,8 +222,30 @@ export async function portfolioSell(p: { portfolioId: string; symbol: string; qu
     p_price: p.price,
     p_to_cash: p.toCash,
     p_on: p.on,
+    ...feeArg(p.fee),
   })
   if (error) throw error
+}
+
+export type TradeLine = { symbol: string; side: 'buy' | 'sell'; quantity: number; price: number; fee: number; on: string }
+
+/** Several buys and sells saved together: all or none. A failing line comes back as
+ * "Line 2 (VOO): ..." */
+export async function portfolioTrades(portfolioId: string, trades: TradeLine[]) {
+  const { error } = await supabase.rpc('portfolio_trades', { p_portfolio: portfolioId, p_trades: trades })
+  if (error) {
+    if (/portfolio_trades/.test(error.message) && /function|schema cache/i.test(error.message)) throw new Error('Run the quick_trades migration first')
+    throw error
+  }
+}
+
+/** When each portfolio last had an entry (newest live Activity), by portfolio id. */
+export async function fetchLastEntries(): Promise<Map<string, string>> {
+  const { data, error } = await supabase.from('portfolio_activity').select('portfolio_id, created_at').is('voided_at', null).order('created_at', { ascending: false })
+  if (error) throw error
+  const out = new Map<string, string>()
+  for (const r of data ?? []) if (!out.has(r.portfolio_id)) out.set(r.portfolio_id, r.created_at)
+  return out
 }
 
 /** Set cash to the broker's balance (negative = margin used). countsInReturn = false for a
@@ -399,7 +426,7 @@ export async function deleteActivityEntry(activityId: string) {
 
 /** Edit a buy / sell / add-existing (symbol, quantity, price) or a deposit / withdrawal /
  * dividend (amount, dividend symbol). The kind stays the same. */
-export async function editActivityEntry(p: { activityId: string; symbol: string | null; quantity: number | null; price: number | null; amount: number | null; on: string }) {
+export async function editActivityEntry(p: { activityId: string; symbol: string | null; quantity: number | null; price: number | null; amount: number | null; on: string; fee?: number }) {
   const { error } = await supabase.rpc('portfolio_entry_edit', {
     p_activity: p.activityId,
     p_symbol: p.symbol,
@@ -407,6 +434,7 @@ export async function editActivityEntry(p: { activityId: string; symbol: string 
     p_price: p.price,
     p_amount: p.amount,
     p_on: p.on,
+    ...feeArg(p.fee),
   })
   if (error) throw error
 }

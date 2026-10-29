@@ -26,7 +26,7 @@ import {
   unpricedSymbols,
   type HoldingView,
 } from '../lib/portfolio'
-import { currency, percentFmt, priceFmt } from '../lib/format'
+import { centralDateStr, currency, dateFmt, percentFmt, priceFmt } from '../lib/format'
 import { INPUT_SM, toneClass } from '../lib/ui'
 import { allocationSlices } from '../lib/allocation'
 import { useDialog } from '../lib/dialogContext'
@@ -39,6 +39,7 @@ import { GetPricesButton } from '../components/GetPricesButton'
 import { OptionsCard } from '../components/OptionsCard'
 import { ActivityTable } from '../components/ActivityTable'
 import { ResearchPills } from '../components/ResearchBits'
+import { QuickTrade } from '../components/QuickTrade'
 import { ResearchDrawer } from '../components/ResearchDrawer'
 import { AccountAllocationCard } from '../components/AllocationCards'
 import { useResearch } from '../lib/useResearch'
@@ -112,6 +113,8 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
   )
 }
 
+/** Holdings, with the quick trade form opening under the row you click (or at the top for a
+ * new ticker). `trading` is the open form's ticker: '' = new, null = closed. */
 function HoldingsTable({
   views,
   total,
@@ -119,6 +122,12 @@ function HoldingsTable({
   research,
   onResearch,
   onSaved,
+  portfolioId,
+  cash,
+  priceOf,
+  trading,
+  onTrading,
+  onTraded,
 }: {
   views: HoldingView[]
   total: number
@@ -126,8 +135,21 @@ function HoldingsTable({
   research: Map<string, Research>
   onResearch: (symbol: string) => void
   onSaved: () => void
+  portfolioId: string
+  cash: number
+  priceOf: (symbol: string) => number | null
+  trading: string | null
+  onTrading: (symbol: string | null) => void
+  onTraded: (message: string) => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const tradeRow = (symbol: string) => (
+    <tr key={`trade-${symbol}`} className="border-b border-(--border) bg-(--accent-soft)/40">
+      <td colSpan={10} className="px-5 py-3">
+        <QuickTrade key={symbol} portfolioId={portfolioId} views={views} priceOf={priceOf} cash={cash} symbol={symbol} onDone={onTraded} onCancel={() => onTrading(null)} />
+      </td>
+    </tr>
+  )
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -146,7 +168,8 @@ function HoldingsTable({
           </tr>
         </thead>
         <tbody>
-          {views.map((v) =>
+          {trading === '' && tradeRow('')}
+          {views.flatMap((v) => [
             editingId === v.holding.id ? (
               <HoldingEditRow
                 key={v.holding.id}
@@ -158,7 +181,12 @@ function HoldingsTable({
                 }}
               />
             ) : (
-              <tr key={v.holding.id} className="group border-b border-(--border) transition last:border-0 hover:bg-white/2">
+              <tr
+                key={v.holding.id}
+                onClick={() => onTrading(trading === v.holding.symbol ? null : v.holding.symbol)}
+                title={`Log a buy or sale of ${v.holding.symbol}`}
+                className={`group cursor-pointer border-b border-(--border) transition last:border-0 hover:bg-white/2 ${trading === v.holding.symbol ? 'bg-white/3' : ''}`}
+              >
                 <td className="px-5 py-3 font-semibold text-white">{v.holding.symbol}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-neutral-300">{Number(Number(v.holding.quantity).toFixed(6))}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{priceFmt(Number(v.holding.avg_cost))}</td>
@@ -178,7 +206,7 @@ function HoldingsTable({
                     </>
                   )}
                 </td>
-                <td className="px-3 py-3">
+                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                   <ResearchPills r={research.get(v.holding.symbol)} onOpen={() => onResearch(v.holding.symbol)} />
                 </td>
                 <td className="px-3 py-3 text-right font-medium tabular-nums text-white">{currency(v.value)}</td>
@@ -193,7 +221,10 @@ function HoldingsTable({
                 <td className="px-3 py-3 text-right tabular-nums text-neutral-400">{total > 0 ? percentFmt(v.value / total).replace('+', '') : '—'}</td>
                 <td className="px-3 py-3 text-right">
                   <button
-                    onClick={() => setEditingId(v.holding.id)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditingId(v.holding.id)
+                    }}
                     title={`Manual price for ${v.holding.symbol}`}
                     className="rounded-md p-1.5 text-neutral-600 transition hover:bg-(--card-raised) hover:text-white group-hover:text-neutral-300"
                   >
@@ -202,7 +233,8 @@ function HoldingsTable({
                 </td>
               </tr>
             ),
-          )}
+            trading === v.holding.symbol ? tradeRow(v.holding.symbol) : null,
+          ])}
         </tbody>
       </table>
     </div>
@@ -224,6 +256,7 @@ export function PortfolioDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<View>('positions')
   const [trade, setTrade] = useState<TradeTab | null>(null)
+  const [trading, setTrading] = useState<string | null>(null)
 
   const load = useCallback(() => {
     if (!portfolioId) return
@@ -342,9 +375,15 @@ export function PortfolioDetailPage() {
 
   const tradeDone = (message: string) => {
     setTrade(null)
+    setTrading(null)
     toast(message)
     load()
   }
+  const priceOf = (s: string) => {
+    const v = snap.holdings.find((x) => x.holding.symbol === s)
+    return v?.price ?? prices.get(s)?.close ?? null
+  }
+  const lastEntry = activity.find((a) => a.voided_at === null)?.created_at ?? null
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -427,11 +466,15 @@ export function PortfolioDetailPage() {
         <div className="flex flex-col gap-6">
           <Card
             title="Stocks & funds"
-            subtitle={snap.holdings.length > 0 ? `${snap.holdings.length} holding${snap.holdings.length === 1 ? '' : 's'} · ${currency(snap.holdingsValue)}` : undefined}
+            subtitle={
+              snap.holdings.length > 0
+                ? `${snap.holdings.length} holding${snap.holdings.length === 1 ? '' : 's'} · ${currency(snap.holdingsValue)} · click a row to log a buy or sale${lastEntry ? ` · last entry ${dateFmt(centralDateStr(new Date(lastEntry)))}` : ''}`
+                : undefined
+            }
             flush
             actions={
-              <Button size="sm" icon={<Plus size={14} />} onClick={() => setTrade(snap.holdings.length > 0 ? 'buy' : 'existing')}>
-                Add shares
+              <Button size="sm" icon={<Plus size={14} />} onClick={() => (snap.holdings.length > 0 ? setTrading('') : setTrade('existing'))}>
+                {snap.holdings.length > 0 ? 'New ticker' : 'Add shares'}
               </Button>
             }
           >
@@ -448,7 +491,20 @@ export function PortfolioDetailPage() {
                 Use “Add existing” for shares you already hold, or “Buy” for new purchases from this portfolio’s cash.
               </EmptyState>
             ) : (
-              <HoldingsTable views={snap.holdings} total={allocationTotal} dayLabel={dayChangeLabel(snap.asOf)} research={research.rows} onResearch={setResearchOpen} onSaved={load} />
+              <HoldingsTable
+                views={snap.holdings}
+                total={allocationTotal}
+                dayLabel={dayChangeLabel(snap.asOf)}
+                research={research.rows}
+                onResearch={setResearchOpen}
+                onSaved={load}
+                portfolioId={p.id}
+                cash={snap.cash}
+                priceOf={priceOf}
+                trading={trading}
+                onTrading={setTrading}
+                onTraded={tradeDone}
+              />
             )}
           </Card>
           <OptionsCard options={options} csps={csps} prices={prices} onChanged={load} onAdd={() => setTrade('option')} />

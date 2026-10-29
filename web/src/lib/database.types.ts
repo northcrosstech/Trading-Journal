@@ -429,6 +429,10 @@ export type PortfolioActivityRow = {
   voided_at: string | null
   /** An edited (voided) entry points at the entry that replaced it. */
   replaced_by: string | null
+  /** The broker's fee on a buy or sell. `price` is after it (cost basis / net proceeds per
+   * share); fill price = price - fee / quantity (buy) or + fee / quantity (sell). Optional
+   * until the quick_trades migration has run. */
+  fee?: number
 }
 
 export type PriceRow = {
@@ -536,11 +540,11 @@ export type Database = {
     }
     Functions: {
       portfolio_buy: {
-        Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_from_cash?: boolean; p_on?: string }
+        Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_from_cash?: boolean; p_on?: string; p_fee?: number }
         Returns: undefined
       }
       portfolio_sell: {
-        Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_to_cash?: boolean; p_on?: string }
+        Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_to_cash?: boolean; p_on?: string; p_fee?: number }
         Returns: undefined
       }
       portfolio_transfer: {
@@ -599,7 +603,7 @@ export type Database = {
         Returns: undefined
       }
       portfolio_entry_edit: {
-        Args: { p_activity: string; p_symbol: string | null; p_quantity: number | null; p_price: number | null; p_amount: number | null; p_on: string }
+        Args: { p_activity: string; p_symbol: string | null; p_quantity: number | null; p_price: number | null; p_amount: number | null; p_on: string; p_fee?: number }
         Returns: undefined
       }
       option_edit: {
@@ -609,6 +613,10 @@ export type Database = {
       csp_edit: {
         Args: { p_csp: string; p_symbol: string; p_strike: number; p_expiration: string; p_contracts: number; p_premium: number; p_on: string }
         Returns: string
+      }
+      portfolio_trades: {
+        Args: { p_portfolio: string; p_trades: { symbol: string; side: 'buy' | 'sell'; quantity: number; price: number; fee: number; on: string }[] }
+        Returns: number
       }
       position_undo_last: {
         Args: { p_option?: string | null; p_csp?: string | null }

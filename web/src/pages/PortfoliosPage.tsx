@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Archive, ChevronRight, Plus, Wallet } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { PortfolioKind } from '../lib/database.types'
-import { createPortfolio, updatePortfolio } from '../lib/wealthQueries'
+import { createPortfolio, fetchLastEntries, updatePortfolio } from '../lib/wealthQueries'
 import { KIND_TONE, PORTFOLIO_KINDS, dayChangeLabel, kindLabel, seriesFor, signedCurrency as signed, timeWeightedReturn } from '../lib/portfolio'
-import { currency, percentFmt } from '../lib/format'
+import { centralDateStr, currency, dateFmt, percentFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
 import { useDialog } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
@@ -30,6 +30,12 @@ export function PortfoliosPage() {
   const toast = useToast()
   const w = useWealthPortfolios()
   const [showArchived, setShowArchived] = useState(false)
+  const [lastEntries, setLastEntries] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    fetchLastEntries()
+      .then(setLastEntries)
+      .catch(() => setLastEntries(new Map()))
+  }, [w.portfolios])
 
   async function newPortfolio() {
     if (!user) return
@@ -138,6 +144,7 @@ export function PortfoliosPage() {
                         {snap.unpriced > 0 && <Pill tone="amber">{snap.unpriced} price pending</Pill>}
                         {snap.cash < 0 && <Pill tone="amber">{currency(-snap.cash)} margin</Pill>}
                       </div>
+                      {lastEntries.get(p.id) && <div className="mt-1 text-xs text-neutral-500">Last entry {dateFmt(centralDateStr(new Date(lastEntries.get(p.id)!)))}</div>}
                     </div>
                     <ChevronRight size={18} className="mt-1 shrink-0 text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300" />
                   </div>

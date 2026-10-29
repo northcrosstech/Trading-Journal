@@ -63,6 +63,7 @@ export function PortfolioActions({
   const [symbol, setSymbol] = useState('')
   const [qty, setQty] = useState('')
   const [price, setPrice] = useState('')
+  const [fee, setFee] = useState('')
   const [cashKind, setCashKind] = useState<'deposit' | 'withdrawal' | 'dividend' | 'balance'>('deposit')
   const [balanceReason, setBalanceReason] = useState<'correction' | 'interest'>('correction')
   const [amount, setAmount] = useState('')
@@ -114,13 +115,16 @@ export function PortfolioActions({
         if (!sym) throw new Error('Enter a ticker.')
         if (q === null || q <= 0) throw new Error('Enter a quantity above zero.')
         if (p === null || p < 0) throw new Error(tab === 'existing' ? 'Enter your average cost per share.' : 'Enter the price per share.')
-        if (tab === 'sell') await portfolioSell({ portfolioId, symbol: sym, quantity: q, price: p, toCash: true, on })
-        else await portfolioBuy({ portfolioId, symbol: sym, quantity: q, price: p, fromCash: tab === 'buy', on })
+        const f = tab === 'existing' ? 0 : (num(fee) ?? 0)
+        if (f < 0) throw new Error('The fee can’t be negative.')
+        if (tab === 'sell') await portfolioSell({ portfolioId, symbol: sym, quantity: q, price: p, toCash: true, on, fee: f })
+        else await portfolioBuy({ portfolioId, symbol: sym, quantity: q, price: p, fromCash: tab === 'buy', on, fee: f })
         message = `${tab === 'sell' ? 'Sold' : tab === 'buy' ? 'Bought' : 'Added'} ${fmtQty(q)} ${sym}`
       }
       setSymbol('')
       setQty('')
       setPrice('')
+      setFee('')
       setAmount('')
       onDone(message)
     } catch (e) {
@@ -132,7 +136,9 @@ export function PortfolioActions({
 
   const q = num(qty)
   const p = num(price)
-  const total = q !== null && p !== null ? q * p : null
+  const feeNum = tab === 'buy' || tab === 'sell' ? (num(fee) ?? 0) : 0
+  // What the trade really costs (buy) or pays (sale), after the fee.
+  const total = q !== null && p !== null ? q * p + (tab === 'sell' ? -feeNum : feeNum) : null
   const tickerSelect = (
     <select value={sym} onChange={(e) => setSymbol(e.target.value)} className={INPUT}>
       <option value="">Choose…</option>
@@ -252,6 +258,11 @@ export function PortfolioActions({
                   <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} className={INPUT} />
                 </Field>
               </div>
+              {(tab === 'buy' || tab === 'sell') && (
+                <Field label="Fee (optional)" hint={tab === 'buy' ? 'Added to your cost' : 'Taken off what you receive'}>
+                  <input inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="0.00" className={INPUT} />
+                </Field>
+              )}
               {dateField}
             </div>
           )}
@@ -259,7 +270,7 @@ export function PortfolioActions({
           <div className="rounded-xl bg-(--card-raised) px-4 py-3 text-sm">
             {(tab === 'buy' || tab === 'sell' || tab === 'existing') && total !== null ? (
               <div className="flex justify-between">
-                <span className="text-neutral-400">Total</span>
+                <span className="text-neutral-400">{tab === 'buy' ? 'Total cost' : tab === 'sell' ? 'You receive' : 'Total'}{feeNum > 0 ? ' (after fee)' : ''}</span>
                 <span className="font-semibold tabular-nums text-white">{currency(total)}</span>
               </div>
             ) : tab === 'split' && held && num(splitNew) && num(splitOld) && num(splitNew) !== num(splitOld) ? (

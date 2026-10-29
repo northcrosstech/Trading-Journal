@@ -302,7 +302,7 @@ export function ResearchDrawer({
                     </span>
                     <IconButton title={`Edit ${p.label.toLowerCase()}`} onClick={() => editPart(p)} />
                   </div>
-                  <div className="mt-0.5 flex items-center gap-2 pl-[5.75rem] text-xs text-neutral-500">
+                  <div className="mt-0.5 flex items-center gap-2 pl-23 text-xs text-neutral-500">
                     {p.detail}
                     {p.edited && (
                       <>

@@ -203,7 +203,7 @@ export function ResearchPage() {
                     </span>
                     <span className="block truncate text-xs text-neutral-500">{r.name ?? (r.kind === 'etf' ? 'Fund (ETF)' : ' ')}</span>
                   </span>
-                  <span className="text-right tabular-nums text-neutral-200 md:order-none">{r.price !== null ? priceFmt(r.price) : '—'}</span>
+                  <span className="text-right tabular-nums text-neutral-200 md:order-0">{r.price !== null ? priceFmt(r.price) : '—'}</span>
                   {r.kind === 'etf' && r.fair === null ? (
                     <span className="col-span-2 text-xs text-neutral-500 md:col-span-3">ETF · no fair value</span>
                   ) : r.fair === null && r.total === null ? (

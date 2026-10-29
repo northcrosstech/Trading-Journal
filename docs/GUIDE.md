@@ -119,9 +119,9 @@ The holding's pencil edits only a manual price. That's what keeps every number t
 | You did | Use | Effect on returns |
 |---|---|---|
 | Put money in / took money out | **Cash → Deposit / Withdraw** | None: it's your money, not a gain |
-| Bought shares | **Buy** | None: cash became shares |
+| Bought shares | **Click the position** (or Trade → Buy) | None: cash became shares |
 | Already owned shares before using the app | **Add existing** | None: counted as money in |
-| Sold shares | **Sell** | The gain or loss counts |
+| Sold shares | **Click the position** (or Trade → Sell) | The gain or loss counts |
 | Got a dividend | **Cash → Dividend** | Counts as earnings |
 | Moved shares between portfolios | **Transfer** | None on either side |
 | Stock split (or reverse split) | **Split** | None: shares × ratio, cost ÷ ratio |
@@ -129,6 +129,21 @@ The holding's pencil edits only a manual price. That's what keeps every number t
 | Options and sold puts | The **Options** and **Cash-secured puts** cards | Premiums and closes count |
 
 **Option prices are per share,** as brokers quote them (e.g. 4.20). The app multiplies by 100 × contracts.
+
+### Logging buys and sells from your positions
+
+The quickest way to record trades:
+
+1. **Click a position.** A form opens under it with the ticker, today's date and the last price filled in.
+2. **Pick Bought or Sold** and type the shares. **All** fills in your whole position for a sale. Change the price to your fill price, and add the fee if there was one.
+3. **More than one trade?** Press **Add another** for a new line (any ticker, bought or sold). For a ticker you don't hold yet, use **New ticker** above the table.
+4. **Check the cash before → after** at the bottom against your broker, then press **Log**.
+
+Every line is saved together, or none are: if one line has a problem (e.g. selling more than you hold), nothing is saved and that line is marked. Each line still becomes its own Activity entry, so you can edit or undo any one later.
+
+**Fees** count: on a buy they're added to your cost (so average cost includes them, like your broker's), on a sale they come off what you receive. The Activity list shows the fill price and the fee.
+
+**Behind on logging?** Each portfolio shows **Last entry** with a date, on its card and above its holdings, so you know where to pick up.
 
 ### Fixing a mistake
 
