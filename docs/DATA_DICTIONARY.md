@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261105010000_quick_trades.sql` (2026-10-29).
+through `20261106010000_mix_per_portfolio.sql` (2026-10-29).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -391,11 +391,11 @@ A number you set in place of an automatic one. **Written by:** app. Primary key 
 | `expires_on` | EPS edits only: 3 days after the next earnings report. After it the automatic EPS is used again. |
 
 ### `allocation_targets`
-Target mix by type for one pool. **Written by:** app. Primary key `(user_id, scope)`. The five % columns must add up to 100.
+Target mix by type for one portfolio. **Written by:** app. Primary key `(user_id, scope)`. The five % columns must add up to 100.
 
 | Column | Meaning |
 |---|---|
-| `scope` | `brokerage` (all brokerage portfolios together) or a retirement portfolio's id (that account alone). |
+| `scope` | The portfolio's id (every portfolio, brokerage or retirement, has its own mix). Before `20261106010000_mix_per_portfolio.sql` there was one shared `brokerage` row; that migration copied it to each brokerage portfolio and removed it. |
 | `etf` / `stock` / `bond` / `option` / `cash` | Target %. |
 
 ### `ticker_types`

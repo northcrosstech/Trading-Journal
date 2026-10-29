@@ -197,21 +197,23 @@ either one for the full breakdown and "How this is calculated".
 
 ## 7. Allocation
 
-Money that can move together is planned together:
+Two kinds of targets:
 
-| Pool | Includes | Targets you set |
+| Target | Where you set it | Covers |
 |---|---|---|
-| **Brokerage** | All brokerage portfolios together | A **split** between them (e.g. Long Term 90%, Equity Trades 10%) and one **mix** by type |
-| **Each retirement account** | 401k, Traditional IRA, Roth IRA, each on its own | Its own mix |
+| **Split** | Portfolios page → Allocation → **Edit split** | How brokerage money divides between brokerage accounts (e.g. Long Term 90%, Equity Trades 10%) |
+| **Mix by type** | Each portfolio's page → Performance → **Set / Edit targets** | That one account's ETFs / Stocks / Bonds / Options / Cash, brokerage and retirement alike |
 
 Retirement accounts are never in the split, because money can't move freely in or out of them.
+The Allocation card on Portfolios lists every account with **On target**, **N off target** or
+**No targets**; open a line to see that account's mix, with the dollars to add or trim.
 
 - **Types:** ETFs, Stocks, Bonds, Options, Cash.
 - **Not counted:** margin, and sold options (covered calls, sold puts), which are obligations rather than holdings.
 - **How types are detected:** from the exchange's own listing. ETFs count as ETF; ETFs whose names say bond, treasury or T-bill count as Bond; stocks, ADRs and REITs count as Stock.
 - **To change a ticker's type,** open its type row (e.g. ETFs) and pick a type next to it.
 - **Reading the bars:** the white marker is the target. **On target** (green) means within ± your tolerance (default 5%). **Over / Under** (amber) shows the gap, with the dollars to **add** or **trim**.
-- **Edit targets** on each card: presets (Aggressive to Defensive) or your own numbers. Each mix must add up to 100%.
+- **Mix targets:** presets (Aggressive to Defensive) or your own numbers. Each mix must add up to 100%.
 
 ---
 

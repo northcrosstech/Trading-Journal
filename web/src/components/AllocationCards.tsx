@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, Settings2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Settings2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { FundamentalsRow, OptionPosition, Portfolio } from '../lib/database.types'
 import {
@@ -190,7 +190,8 @@ function TargetsDrawer({
   open: boolean
   onClose: () => void
   title: string
-  scope: string
+  /** The portfolio whose mix this edits; omitted = no mix section (split only). */
+  scope?: string
   current: Targets | null
   split?: { id: string; name: string; target: number | null }[]
   tolerance: number
@@ -221,7 +222,7 @@ function TargetsDrawer({
     if (!user || !valid) return
     setSaving(true)
     try {
-      await saveAllocationTarget(user.id, scope, mixEmpty ? null : (Object.fromEntries(ASSET_TYPES.map((k) => [k, n(mix[k])])) as Targets))
+      if (scope) await saveAllocationTarget(user.id, scope, mixEmpty ? null : (Object.fromEntries(ASSET_TYPES.map((k) => [k, n(mix[k])])) as Targets))
       if (split) for (const p of split) await updatePortfolio(p.id, { target_pct: splitEmpty || (shares[p.id] ?? '').trim() === '' ? (splitEmpty ? null : 0) : n(shares[p.id]) })
       if (n(tol) !== tolerance) await setAllocationTolerance(user.id, n(tol))
       toast('Targets saved')
@@ -262,6 +263,7 @@ function TargetsDrawer({
           </section>
         )}
 
+        {scope && (
         <section>
           <div className="mb-2 flex items-baseline justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Mix by type</h3>
@@ -283,6 +285,7 @@ function TargetsDrawer({
             ))}
           </div>
         </section>
+        )}
 
         <section>
           <label className="flex items-center justify-between gap-3">
@@ -322,42 +325,72 @@ function PctInput({ value, onChange }: { value: string; onChange: (v: string) =>
 
 type PerPortfolio = { portfolio: Portfolio; snap: PortfolioSnapshot }
 
-/** Portfolios page: the brokerage pool (split between brokerage accounts + combined mix) and a
- * line per retirement account showing whether its own mix is on target. */
+/** Portfolios page: the split between brokerage accounts, and a line per account showing
+ * whether its own mix is on target (open a line to see the mix). Mix targets are set on each
+ * portfolio's page. */
 export function BrokerageAllocationCard({ perPortfolio, options, prices, onChanged }: { perPortfolio: PerPortfolio[]; options: OptionPosition[]; prices: Map<string, SymbolPrice>; onChanged: () => void }) {
   const symbols = useMemo(() => perPortfolio.flatMap((p) => p.snap.holdings.map((v) => v.holding.symbol)), [perPortfolio])
   const data = useAllocationData(symbols)
   const changeType = useTypeChanger(data.reload)
   const [editing, setEditing] = useState(false)
+  const [openId, setOpenId] = useState<string | null>(null)
 
   const brokerage = perPortfolio.filter((p) => !isRetirement(p.portfolio.kind))
   const retirement = perPortfolio.filter((p) => isRetirement(p.portfolio.kind))
-  const brokerageIds = new Set(brokerage.map((p) => p.portfolio.id))
-  const hasSplit = brokerage.some((p) => p.portfolio.target_pct != null)
+  const hasSplit = brokerage.length >= 2 && brokerage.some((p) => p.portfolio.target_pct != null)
   const split = compareToTargets(
     brokerage.map((p) => ({ key: p.portfolio.id, label: p.portfolio.name, value: p.snap.total })),
     hasSplit ? Object.fromEntries(brokerage.map((p) => [p.portfolio.id, Number(p.portfolio.target_pct ?? 0)])) : null,
     data.tolerance,
   )
-  const mix = poolMix(brokerage.map((p) => p.snap), options.filter((o) => brokerageIds.has(o.portfolio_id)), prices, data.typeOf)
-  const brokerageTargets = data.targets.get('brokerage') ?? null
-  const mixCmp = compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: mix.values[k] })), brokerageTargets, data.tolerance)
-  const retirementStatus = retirement.map((p) => {
-    const t = data.targets.get(p.portfolio.id) ?? null
-    const m = poolMix([p.snap], options.filter((o) => o.portfolio_id === p.portfolio.id), prices, data.typeOf)
-    return { p, off: t ? compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: m.values[k] })), t, data.tolerance).off : null }
+  const accounts = [...brokerage, ...retirement].map((p) => {
+    const targets = data.targets.get(p.portfolio.id) ?? null
+    const mix = poolMix([p.snap], options.filter((o) => o.portfolio_id === p.portfolio.id), prices, data.typeOf)
+    const off = targets ? compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: mix.values[k] })), targets, data.tolerance).off : null
+    return { p, targets, mix, off }
   })
-  const off = (hasSplit ? split.off : 0) + (brokerageTargets ? mixCmp.off : 0)
-  const noTargets = !hasSplit && !brokerageTargets
+  const off = (hasSplit ? split.off : 0) + accounts.reduce((s, a) => s + (a.off ?? 0), 0)
+  const noTargets = !hasSplit && accounts.every((a) => a.targets === null)
 
-  if (brokerage.length === 0 && retirement.length === 0) return null
+  if (accounts.length === 0) return null
+
+  const accountList = (list: typeof accounts) => (
+    <ul className="divide-y divide-(--border)">
+      {list.map(({ p, targets, mix, off: o }) => (
+        <li key={p.portfolio.id} className="py-1">
+          <button
+            type="button"
+            onClick={() => setOpenId(openId === p.portfolio.id ? null : p.portfolio.id)}
+            className="flex w-full items-center justify-between gap-3 py-1.5 text-left text-sm"
+          >
+            <span className="flex items-center gap-1.5 text-neutral-200">
+              <ChevronRight size={13} className={`text-neutral-500 transition ${openId === p.portfolio.id ? 'rotate-90' : ''}`} />
+              {p.portfolio.name} <span className="text-xs text-neutral-500">{kindLabel(p.portfolio.kind)}</span>
+            </span>
+            <span className="text-xs">
+              {o === null ? <span className="text-neutral-500">No targets</span> : o === 0 ? <Pill tone="green">On target</Pill> : <Pill tone="amber">{o} off target</Pill>}
+            </span>
+          </button>
+          {openId === p.portfolio.id && (
+            <div className="pb-2 pl-5">
+              <MixRows mix={mix} targets={targets} tolerance={data.tolerance} onTypeChange={changeType} />
+              {mix.margin > 0 && <p className="mt-1 text-xs text-neutral-500">{currency(mix.margin)} of margin isn't counted in the mix.</p>}
+              <Link to={`/portfolios/${p.portfolio.id}`} className="mt-1 inline-block text-xs text-(--accent-text) hover:underline">
+                {targets ? 'Edit its targets' : 'Set its targets'} on {p.portfolio.name} › Performance
+              </Link>
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
 
   return (
     <Card
       title="Allocation"
       subtitle={
         noTargets ? (
-          'Your brokerage money by account and by type — set targets to see what to rebalance.'
+          'Each account by type, and how brokerage money splits between accounts. Set targets to see what to rebalance.'
         ) : off === 0 ? (
           <span className="text-emerald-300">Everything on target (±{data.tolerance}%)</span>
         ) : (
@@ -367,9 +400,9 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
         )
       }
       actions={
-        brokerage.length > 0 ? (
+        brokerage.length >= 2 ? (
           <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
-            {noTargets ? 'Set targets' : 'Edit targets'}
+            {hasSplit ? 'Edit split' : 'Set split'}
           </Button>
         ) : undefined
       }
@@ -388,27 +421,15 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
         {brokerage.length > 0 && (
           <section>
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-              Brokerage mix by type <span className="font-normal normal-case text-neutral-600">· open a row to see or change its tickers</span>
+              Brokerage accounts · mix by type <span className="font-normal normal-case text-neutral-600">· open one to see its mix</span>
             </h3>
-            <MixRows mix={mix} targets={brokerageTargets} tolerance={data.tolerance} onTypeChange={changeType} />
-            {mix.margin > 0 && <p className="mt-1 text-xs text-neutral-500">{currency(mix.margin)} of margin isn't counted in the mix.</p>}
+            {accountList(accounts.filter((a) => !isRetirement(a.p.portfolio.kind)))}
           </section>
         )}
         {retirement.length > 0 && (
           <section>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Retirement accounts · each balanced on its own</h3>
-            <ul className="divide-y divide-(--border)">
-              {retirementStatus.map(({ p, off: o }) => (
-                <li key={p.portfolio.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <span className="text-neutral-200">
-                    {p.portfolio.name} <span className="text-xs text-neutral-500">{kindLabel(p.portfolio.kind)}</span>
-                  </span>
-                  <Link to={`/portfolios/${p.portfolio.id}`} className="text-xs">
-                    {o === null ? <span className="text-neutral-500 hover:text-white">No targets · set on its page ›</span> : o === 0 ? <Pill tone="green">On target</Pill> : <Pill tone="amber">{o} off target ›</Pill>}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Retirement accounts · mix by type</h3>
+            {accountList(accounts.filter((a) => isRetirement(a.p.portfolio.kind)))}
           </section>
         )}
       </div>
@@ -416,10 +437,9 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
       <TargetsDrawer
         open={editing}
         onClose={() => setEditing(false)}
-        title="Brokerage targets"
-        scope="brokerage"
-        current={brokerageTargets}
-        split={brokerage.length >= 2 ? brokerage.map((p) => ({ id: p.portfolio.id, name: p.portfolio.name, target: p.portfolio.target_pct != null ? Number(p.portfolio.target_pct) : null })) : undefined}
+        title="Brokerage split"
+        current={null}
+        split={brokerage.map((p) => ({ id: p.portfolio.id, name: p.portfolio.name, target: p.portfolio.target_pct != null ? Number(p.portfolio.target_pct) : null }))}
         tolerance={data.tolerance}
         onSaved={() => {
           data.reload()
@@ -430,63 +450,47 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
   )
 }
 
-/** A portfolio's own page: its mix by type. A retirement account has its own targets; a
- * brokerage account shows its mix and points to the shared brokerage targets. */
+/** A portfolio's own page: its mix by type against its own targets. */
 export function AccountAllocationCard({ portfolio, snap, options, prices }: { portfolio: Portfolio; snap: PortfolioSnapshot; options: OptionPosition[]; prices: Map<string, SymbolPrice> }) {
   const symbols = useMemo(() => snap.holdings.map((v) => v.holding.symbol), [snap])
   const data = useAllocationData(symbols)
   const changeType = useTypeChanger(data.reload)
   const [editing, setEditing] = useState(false)
-  const retirement = isRetirement(portfolio.kind)
   const mix = poolMix([snap], options.filter((o) => o.status === 'open'), prices, data.typeOf)
-  const targets = retirement ? (data.targets.get(portfolio.id) ?? null) : null
+  const targets = data.targets.get(portfolio.id) ?? null
   const off = targets ? compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: mix.values[k] })), targets, data.tolerance).off : 0
 
   return (
     <Card
       title="Mix by type"
       subtitle={
-        retirement ? (
-          !targets ? (
-            'This account is balanced on its own — set targets to see what to rebalance.'
-          ) : off === 0 ? (
-            <span className="text-emerald-300">On target (±{data.tolerance}%)</span>
-          ) : (
-            <span className="text-amber-300">
-              {off} off target (±{data.tolerance}%)
-            </span>
-          )
+        !targets ? (
+          'Set targets for this account to see what to rebalance.'
+        ) : off === 0 ? (
+          <span className="text-emerald-300">On target (±{data.tolerance}%)</span>
         ) : (
-          <>
-            This account only. Targets are set for all brokerage accounts together on{' '}
-            <Link to="/portfolios" className="text-(--accent-text) hover:underline">
-              Portfolios
-            </Link>
-            .
-          </>
+          <span className="text-amber-300">
+            {off} off target (±{data.tolerance}%)
+          </span>
         )
       }
       actions={
-        retirement ? (
-          <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
-            {targets ? 'Edit targets' : 'Set targets'}
-          </Button>
-        ) : undefined
+        <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
+          {targets ? 'Edit targets' : 'Set targets'}
+        </Button>
       }
     >
       <MixRows mix={mix} targets={targets} tolerance={data.tolerance} onTypeChange={changeType} />
       {mix.margin > 0 && <p className="mt-1 text-xs text-neutral-500">{currency(mix.margin)} of margin isn't counted in the mix.</p>}
-      {retirement && (
-        <TargetsDrawer
-          open={editing}
-          onClose={() => setEditing(false)}
-          title={`${portfolio.name} targets`}
-          scope={portfolio.id}
-          current={targets}
-          tolerance={data.tolerance}
-          onSaved={data.reload}
-        />
-      )}
+      <TargetsDrawer
+        open={editing}
+        onClose={() => setEditing(false)}
+        title={`${portfolio.name} targets`}
+        scope={portfolio.id}
+        current={targets}
+        tolerance={data.tolerance}
+        onSaved={data.reload}
+      />
     </Card>
   )
 }

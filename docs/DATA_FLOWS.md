@@ -56,11 +56,11 @@ erDiagram
     dividend_info }o--o{ holdings : "by symbol (per user)"
     fundamentals }o--o{ holdings : "by symbol"
     ticker_types }o--o{ holdings : "by symbol (per user)"
-    portfolios ||--o| allocation_targets : "scope = id (retirement)"
+    portfolios ||--o| allocation_targets : "scope = id"
 ```
 
 - **`prices`, `fundamentals`, `dividend_info` and `ticker_types` join to holdings by `symbol`,** not by a key. `prices` and `fundamentals` are shared by all users; the other two are per user.
-- **`allocation_targets`** has one `brokerage` row for all brokerage portfolios together, plus one row per retirement portfolio (scope = its id). `portfolios.target_pct` holds the split between brokerage portfolios.
+- **`allocation_targets`** has one row per portfolio (scope = its id): that account's mix target. `portfolios.target_pct` holds the split between brokerage portfolios.
 - **`wealth_settings`** holds one row of per-user Wealth settings: close start month, growth cap, economy override, allocation tolerance.
 - **Net worth reads portfolios indirectly:** each active portfolio's latest `portfolio_daily_values` row in a month becomes a line under its `kind`.
 
@@ -252,7 +252,7 @@ Nothing below is stored. The website calculates it from the tables each time a p
 | Fair value | EPS × (7 + g) × 4.4 ÷ AAA yield. EPS = last 12 months; price ÷ P/E when the company reports in another currency. g = analysts' forecast EPS growth per year (next fiscal year to up to 5 years out); without one, the lower of past 5-year and 3-year growth. Floored at 0, capped (default 30). "Buy below" = 85% of fair value | `research.ts` `fairValue` |
 | Score (out of 100) | Valuation 20 (price ÷ fair value) + Growth 20 + Moat 20 (gross margin + return on equity) + Execution 10 (profitable, debt, current ratio) + Economy 30 (less for rising unemployment and a high 10-year yield). 80+ Strong, 70–79 Good, 60–69 Fair, under 60 Weak. Overrides replace any part | `research.ts` `research` |
 | Ticker type | Your `ticker_types` choice; else Finnhub type: ETP / closed-end fund → ETF (bond if its name says bond, treasury or T-bill), everything else → stock; else built-in lists | `allocationPlan.ts` `classify` |
-| Allocation mix | Holdings by type + long options + positive cash, per pool (brokerage portfolios together; each retirement account alone). Margin and sold options are left out | `allocationPlan.ts` `mixOf` |
+| Allocation mix | Holdings by type + long options + positive cash, per portfolio. Margin and sold options are left out | `allocationPlan.ts` `mixOf` |
 | On / over / under target | Actual % − target %, within ± tolerance = on target. Add / trim $ = (target % − actual %) × pool total | `allocationPlan.ts` `compareToTargets` |
 
 ---
