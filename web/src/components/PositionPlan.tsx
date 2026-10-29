@@ -3,6 +3,7 @@ import { ClipboardList, NotebookPen, Plus, Settings2, X } from 'lucide-react'
 import type { Portfolio, TickerThesisRow } from '../lib/database.types'
 import { savePositionPlan, updatePortfolio } from '../lib/wealthQueries'
 import { comparePlan, suggestBuys, type PlanRow, type PlanTarget } from '../lib/positionPlan'
+import { bandText } from '../lib/allocationPlan'
 import { centralDateStr, currency } from '../lib/format'
 import { INPUT, INPUT_SM } from '../lib/ui'
 import { useToast } from '../lib/toastContext'
@@ -59,11 +60,11 @@ export function PositionPlanCard({
           'Set a target % for each ticker to see what to buy or trim.'
         ) : cmp.off === 0 ? (
           <span className="text-emerald-300">
-            On plan (±{tolerance}%){cmp.unplanned > 0 && <span className="text-neutral-500"> · {cmp.unplanned} not in your plan</span>}
+            On plan ({bandText(tolerance)}){cmp.unplanned > 0 && <span className="text-neutral-500"> · {cmp.unplanned} not in your plan</span>}
           </span>
         ) : (
           <span className="text-amber-300">
-            {cmp.off} off plan (±{tolerance}%){cmp.unplanned > 0 && <span className="text-neutral-500"> · {cmp.unplanned} not in your plan</span>}
+            {cmp.off} off plan ({bandText(tolerance)}){cmp.unplanned > 0 && <span className="text-neutral-500"> · {cmp.unplanned} not in your plan</span>}
           </span>
         )
       }

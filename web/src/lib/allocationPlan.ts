@@ -58,11 +58,19 @@ export function mixOf(holdings: { symbol: string; value: number }[], longOptions
   return { values, tickers, base, margin: Math.max(-cash, 0) }
 }
 
+/** How far a share can drift from its target and still be on target (the 5/25 rule): the
+ * tolerance in percentage points, or a quarter of the target if that's smaller -- so a 5%
+ * target is off below 3.75% or above 6.25%, while a 40% target keeps the full ±5. Never under
+ * half a point, so rounding alone doesn't flag a 0% target. */
+export const driftBand = (target: number, tolerance: number) => Math.min(tolerance, Math.max(target * 0.25, 0.5))
+/** The rule in words, for subtitles. */
+export const bandText = (tolerance: number) => `±${tolerance}%, or ¼ of the target if less`
+
 export type Status = 'on' | 'over' | 'under' | 'none'
 export type TargetRow = { key: string; label: string; value: number; pct: number; target: number | null; status: Status; diff: number; move: number }
 
 /** Current share vs target for each row. `move` is the dollars to add (+) or trim (-) to
- * hit the target; a row is on target within the tolerance (percentage points). */
+ * hit the target; a row is on target within its drift band (see driftBand). */
 export function compareToTargets(rows: { key: string; label: string; value: number }[], targets: Record<string, number> | null, tolerance: number): { rows: TargetRow[]; base: number; off: number } {
   const base = rows.reduce((s, r) => s + Math.max(r.value, 0), 0)
   const out = rows.map((r) => {
@@ -70,7 +78,7 @@ export function compareToTargets(rows: { key: string; label: string; value: numb
     const target = targets ? (targets[r.key] ?? 0) : null
     if (target === null) return { ...r, pct, target, status: 'none' as Status, diff: 0, move: 0 }
     const diff = pct - target
-    const status: Status = Math.abs(diff) <= tolerance ? 'on' : diff > 0 ? 'over' : 'under'
+    const status: Status = Math.abs(diff) <= driftBand(target, tolerance) ? 'on' : diff > 0 ? 'over' : 'under'
     return { ...r, pct, target, status, diff, move: (target / 100) * base - Math.max(r.value, 0) }
   })
   return { rows: out, base, off: out.filter((r) => r.status === 'over' || r.status === 'under').length }

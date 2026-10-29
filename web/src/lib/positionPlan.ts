@@ -1,4 +1,4 @@
-import { ASSET_TYPES, type AssetType, type Targets, type TickerType } from './allocationPlan'
+import { ASSET_TYPES, driftBand, type AssetType, type Targets, type TickerType } from './allocationPlan'
 
 /** A portfolio's position plan: a target % per ticker. What's left of 100% is the cash target. */
 export type PlanTarget = { symbol: string; pct: number }
@@ -47,7 +47,7 @@ export function comparePlan(
     if (target === null) return { key, symbol, kind, value, price, pct, target, diff: 0, move: 0, status: 'unplanned' }
     const diff = pct - target
     const move = (target / 100) * base - Math.max(value, 0)
-    const status: PlanStatus = kind === 'ticker' && value <= 0 ? 'missing' : Math.abs(diff) <= tolerance ? 'on' : diff > 0 ? 'over' : 'under'
+    const status: PlanStatus = kind === 'ticker' && value <= 0 ? 'missing' : Math.abs(diff) <= driftBand(target, tolerance) ? 'on' : diff > 0 ? 'over' : 'under'
     return { key, symbol, kind, value, price, pct, target, diff, move, status }
   }
 

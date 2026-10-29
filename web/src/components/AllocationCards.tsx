@@ -18,6 +18,7 @@ import {
 import {
   ASSET_TYPES,
   PRESETS,
+  bandText,
   TYPE_LABEL,
   classify,
   compareToTargets,
@@ -297,7 +298,7 @@ function TargetsDrawer({
           <label className="flex items-center justify-between gap-3">
             <span>
               <span className="text-neutral-200">Warn me when off by more than</span>
-              <span className="block text-xs text-neutral-500">Same for every account</span>
+              <span className="block text-xs text-neutral-500">Same for every account. Small targets use a quarter of the target if that's less (a 5% target is off past ±1.25%).</span>
             </span>
             <PctInput value={tol} onChange={setTol} />
           </label>
@@ -438,10 +439,10 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
         noTargets ? (
           'Each account by type, and how brokerage money splits between accounts. Set targets to see what to rebalance.'
         ) : off === 0 ? (
-          <span className="text-emerald-300">Everything on target (±{data.tolerance}%)</span>
+          <span className="text-emerald-300">Everything on target ({bandText(data.tolerance)})</span>
         ) : (
           <span className="text-amber-300">
-            {off} {off === 1 ? 'thing' : 'things'} off target (±{data.tolerance}%)
+            {off} {off === 1 ? 'thing' : 'things'} off target ({bandText(data.tolerance)})
           </span>
         )
       }
@@ -523,10 +524,10 @@ export function AccountAllocationCard({ portfolio, snap, options, prices, plan }
         ) : !targets ? (
           'Set targets for this account to see what to rebalance.'
         ) : off === 0 ? (
-          <span className="text-emerald-300">On target (±{data.tolerance}%)</span>
+          <span className="text-emerald-300">On target ({bandText(data.tolerance)})</span>
         ) : (
           <span className="text-amber-300">
-            {off} off target (±{data.tolerance}%)
+            {off} off target ({bandText(data.tolerance)})
           </span>
         )
       }

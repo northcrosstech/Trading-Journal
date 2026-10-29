@@ -217,7 +217,7 @@ The Allocation card on Portfolios lists every account with **On target**, **N of
 - **Add money** (Plan tab): type an amount and it suggests buys only, nothing sold, going first to whatever is furthest below its target. It uses the account's free cash first; anything more counts as new money.
 - **Plan notes** (Plan tab): your rules for the account. Saved as you type.
 - **Thesis** (any ticker's fair value breakdown): why you own it, what would make you sell, and a review date. From that date the ticker shows an amber **review** pill in the holdings table and the plan.
-- **Reading the bars:** the white marker is the target. **On target** (green) means within ± your tolerance (default 5%). **Over / Under** (amber) shows the gap, with the dollars to **add** or **trim**.
+- **Reading the bars:** the white marker is the target. **On target** (green) means within ± your tolerance (default 5 points), or within a quarter of the target if that's smaller (the 5/25 rule), so small positions are judged fairly: a 5% target is on target only between 3.75% and 6.25%, a 40% target between 35% and 45%. A 0% target allows half a point. **Over / Under** (amber) shows the gap, with the dollars to **add** or **trim**.
 - **Mix targets:** presets (Aggressive to Defensive) or your own numbers. Each mix must add up to 100%.
 
 ---
