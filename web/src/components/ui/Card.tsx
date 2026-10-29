@@ -29,7 +29,7 @@ export function Card({
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </header>
       )}
-      {children !== undefined && <div className={flush ? '' : hasHeader ? 'px-5 pb-5 pt-3' : 'p-5'}>{children}</div>}
+      {children !== undefined && children !== null && children !== false && <div className={flush ? '' : hasHeader ? 'px-5 pb-5 pt-3' : 'p-5'}>{children}</div>}
     </section>
   )
 }

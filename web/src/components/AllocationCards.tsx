@@ -334,6 +334,24 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
   const changeType = useTypeChanger(data.reload)
   const [editing, setEditing] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
+  // Collapsed to its one-line summary unless you opened it last time (remembered per browser).
+  const [expanded, setExpanded] = useState(() => {
+    try {
+      return localStorage.getItem('allocation-card-open') === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggle = () => {
+    setExpanded((v) => {
+      try {
+        localStorage.setItem('allocation-card-open', v ? '0' : '1')
+      } catch {
+        // storage blocked: just don't remember
+      }
+      return !v
+    })
+  }
 
   const brokerage = perPortfolio.filter((p) => !isRetirement(p.portfolio.kind))
   const retirement = perPortfolio.filter((p) => isRetirement(p.portfolio.kind))
@@ -388,6 +406,7 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
   return (
     <Card
       title="Allocation"
+      flush={!expanded}
       subtitle={
         noTargets ? (
           'Each account by type, and how brokerage money splits between accounts. Set targets to see what to rebalance.'
@@ -400,13 +419,19 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
         )
       }
       actions={
-        brokerage.length >= 2 ? (
-          <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
-            {hasSplit ? 'Edit split' : 'Set split'}
+        <>
+          {expanded && brokerage.length >= 2 && (
+            <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
+              {hasSplit ? 'Edit split' : 'Set split'}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" icon={<ChevronDown size={14} className={`transition ${expanded ? 'rotate-180' : ''}`} />} onClick={toggle}>
+            {expanded ? 'Hide' : 'Show'}
           </Button>
-        ) : undefined
+        </>
       }
     >
+      {expanded && (
       <div className="flex flex-col gap-5">
         {brokerage.length >= 2 && (
           <section>
@@ -433,6 +458,7 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
           </section>
         )}
       </div>
+      )}
 
       <TargetsDrawer
         open={editing}

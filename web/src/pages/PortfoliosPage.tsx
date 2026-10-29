@@ -120,10 +120,6 @@ export function PortfoliosPage() {
             <Kpi label="Realized gain" value={signed(w.realizedTotal)} tone={w.realizedTotal} sub="sales, options and puts" />
           </div>
 
-          <HealthCheckCard />
-
-          <BrokerageAllocationCard perPortfolio={w.perPortfolio} options={w.openOptions} prices={w.prices} onChanged={w.load} />
-
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {w.perPortfolio.map(({ portfolio: p, snap }) => {
               const ret = timeWeightedReturn(seriesFor(w.values, p.id))
@@ -167,6 +163,10 @@ export function PortfoliosPage() {
               )
             })}
           </div>
+
+          <HealthCheckCard />
+
+          <BrokerageAllocationCard perPortfolio={w.perPortfolio} options={w.openOptions} prices={w.prices} onChanged={w.load} />
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
             <Card title="Value" subtitle="All portfolios, at each trading day’s close" className="xl:col-span-3">
