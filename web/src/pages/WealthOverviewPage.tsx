@@ -4,6 +4,7 @@ import { ArrowRight, Landmark, PieChart } from 'lucide-react'
 import type { DividendInfo, InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
 import { fetchDividendInfo, fetchInstallmentPayments, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
+import { FreedomGauge } from '../components/FreedomGauge'
 import { addMonths, categoryLabel, isDebt, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
 import { KIND_TONE, dayChangeLabel, kindLabel, signedCurrency as signed } from '../lib/portfolio'
 import { dividendRows } from '../lib/dividends'
@@ -109,6 +110,8 @@ export function WealthOverviewPage() {
         </Card>
       ) : (
         <>
+          <FreedomGauge today={today} month={month} accounts={accounts ?? []} balances={balances} portfolios={portfolios} values={w.values} />
+
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <StatCard label="Net worth" value={currency(totals.net)} sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`} accent />
             <StatCard

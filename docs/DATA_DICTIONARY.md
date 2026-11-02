@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261107010000_position_plans.sql` (2026-10-29).
+through `20261108010000_freedom_settings.sql` (2026-10-29).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -419,6 +419,18 @@ Why you own a ticker. **Written by:** app (research drawer). Primary key `(user_
 |---|---|
 | `thesis` | Your reasons, and what would make you sell. |
 | `review_on` | When to look at it again. On or after this date the ticker shows a **review** pill. |
+
+### `freedom_settings`
+The inputs behind the financial freedom gauge on the Wealth page; balances come from net worth and portfolios. **Written by:** app. One row per user.
+
+| Column | Meaning |
+|---|---|
+| `monthly_spending` | Your ongoing spending per month, without loan or mortgage payments. Null = use the suggested number. |
+| `other_bills` | Bills not on cards; part of the suggested number. |
+| `monthly_savings` | What you expect to add each month. Null = use the suggested number (average "kept" on Cash flow). |
+| `withdrawal_rate` | % of your money you'd spend each year (1–10, default 4). |
+| `real_return` | Expected yearly growth after inflation, % (0–15, default 5). |
+| `coast_years` | Years until you'd stop working at the latest, for the Coast milestone (default 25). |
 
 ---
 

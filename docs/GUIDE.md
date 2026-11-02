@@ -195,6 +195,18 @@ either one for the full breakdown and "How this is calculated".
 
 ---
 
+## Towards financial freedom
+
+The gauge at the top of **Wealth** shows how much of the money you need to stop depending on a paycheck you already have. Press **Details** to see the breakdown or change your inputs.
+
+- **Freedom money** = brokerage + retirement + cash and emergency fund − cards, car loans, margin and other debts. Retirement money counts in full, before taxes. The home, cars and miscellaneous items are left out. Day trading plays no part in it.
+- **Freedom number** = ongoing spending × 12 ÷ your withdrawal rate (4% means 25 times), plus your mortgage balance as a one-time cost. Every mortgage payment lowers it, and the mortgage payment itself stays out of spending.
+- **Spending:** the app suggests your cards' average month-end balance over 12 months + escrow + the other bills you enter. Type your own number to replace it. Cards with a fixed payment count as loans, so they aren't in it. If you carry card balances, the suggestion runs high.
+- **Savings** only affects the time estimate. The app suggests your average "kept" from Cash flow; add 401k contributions if they aren't logged in a portfolio.
+- **Time estimate and Coast** use your growth assumption (5% after inflation by default). They're estimates, not promises.
+
+---
+
 ## 7. Allocation
 
 Two kinds of targets:

@@ -280,6 +280,18 @@ export type WealthSettingsRow = {
   updated_at: string
 }
 
+/** The inputs behind the financial freedom gauge. Null spending or savings = use the suggestion. */
+export type FreedomSettingsRow = {
+  user_id: string
+  monthly_spending: number | null
+  other_bills: number
+  monthly_savings: number | null
+  withdrawal_rate: number
+  real_return: number
+  coast_years: number
+  updated_at: string
+}
+
 /** Per-ticker fundamentals from Finnhub, shared like prices; written by the worker. */
 export type FundamentalsRow = {
   symbol: string
@@ -526,6 +538,7 @@ export type Database = {
       networth_balances: ReturnType<typeof table<NetworthBalanceRow>>
       installment_payments: ReturnType<typeof table<InstallmentPaymentRow>>
       wealth_settings: ReturnType<typeof table<WealthSettingsRow>>
+      freedom_settings: ReturnType<typeof table<FreedomSettingsRow>>
       fundamentals: ReturnType<typeof table<FundamentalsRow>>
       macro_indicators: ReturnType<typeof table<MacroIndicatorRow>>
       research_watchlist: ReturnType<typeof table<ResearchWatchlistRow>>

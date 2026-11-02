@@ -99,6 +99,44 @@ export function ValueHistoryChart({ data }: { data: ValuePoint[] }) {
   )
 }
 
+export type FreedomPointView = { label: string; pct: number; money: number; target: number }
+
+function FreedomTooltip({ active, payload }: { active?: boolean; payload?: { payload: FreedomPointView }[] }) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="rounded-lg border border-(--border-strong) bg-(--card-raised) px-3 py-2 text-xs shadow-lg">
+      <div className="text-neutral-400">{p.label}</div>
+      <div className="mt-1 font-medium tabular-nums text-neutral-100">{p.pct.toFixed(1)}%</div>
+      <div className="tabular-nums text-neutral-400">
+        {currency(p.money)} of {currency(p.target)}
+      </div>
+    </div>
+  )
+}
+
+/** Progress towards the freedom number, month by month. */
+export function FreedomHistoryChart({ data }: { data: FreedomPointView[] }) {
+  if (data.length < 2) return <div className="flex h-40 items-center justify-center text-center text-sm text-neutral-500">The line starts once you have two months of balances.</div>
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+        <defs>
+          <linearGradient id="freedomFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--series-1)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--series-1)" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke="var(--gridline)" vertical={false} />
+        <XAxis dataKey="label" tick={AXIS} stroke="var(--baseline)" tickLine={false} minTickGap={40} />
+        <YAxis tick={AXIS} stroke="var(--baseline)" tickLine={false} tickFormatter={(n: number) => `${Math.round(n)}%`} width={40} domain={[0, 'auto']} />
+        <Tooltip content={<FreedomTooltip />} cursor={{ stroke: 'var(--text-muted)', strokeWidth: 1 }} />
+        <Area type="monotone" dataKey="pct" stroke="var(--series-1)" strokeWidth={2} fill="url(#freedomFill)" dot={false} activeDot={{ r: 4 }} />
+      </AreaChart>
+    </ResponsiveContainer>
+  )
+}
+
 const pctOf = (w: number) => `${(w * 100).toFixed(1)}%`
 
 function SliceTooltip({ active, payload }: { active?: boolean; payload?: { payload: Slice }[] }) {

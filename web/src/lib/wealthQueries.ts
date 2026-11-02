@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import type {
   AllocationTargetRow,
   TickerTypeRow,
+  FreedomSettingsRow,
   PositionTargetRow,
   TickerThesisRow,
   FundamentalsRow,
@@ -22,6 +23,7 @@ import type {
   PortfolioDailyValue,
   PortfolioKind,
 } from './database.types'
+import { FREEDOM_DEFAULTS, type FreedomSettings } from './freedom'
 
 // ---------------------------------------------------------------------------
 // Net worth
@@ -693,6 +695,47 @@ export async function fetchExternalFlows(): Promise<Pick<PortfolioActivity, 'por
     .is('voided_at', null)
   if (error) throw error
   return data ?? []
+}
+
+// --- Financial freedom ----------------------------------------------------------------------
+
+/** The gauge's inputs; the defaults until they're saved or the migration has run. */
+export async function fetchFreedomSettings(): Promise<FreedomSettings> {
+  const { data, error } = await supabase.from('freedom_settings').select('*').maybeSingle()
+  if (error) {
+    if (missingTable(error, 'freedom_settings')) return FREEDOM_DEFAULTS
+    throw error
+  }
+  const r: FreedomSettingsRow | null = data
+  if (!r) return FREEDOM_DEFAULTS
+  return {
+    monthlySpending: r.monthly_spending != null ? Number(r.monthly_spending) : null,
+    monthlySavings: r.monthly_savings != null ? Number(r.monthly_savings) : null,
+    otherBills: Number(r.other_bills),
+    withdrawalRate: Number(r.withdrawal_rate),
+    realReturn: Number(r.real_return),
+    coastYears: Number(r.coast_years),
+  }
+}
+
+export async function saveFreedomSettings(userId: string, s: FreedomSettings) {
+  const { error } = await supabase.from('freedom_settings').upsert(
+    {
+      user_id: userId,
+      monthly_spending: s.monthlySpending,
+      monthly_savings: s.monthlySavings,
+      other_bills: s.otherBills,
+      withdrawal_rate: s.withdrawalRate,
+      real_return: s.realReturn,
+      coast_years: s.coastYears,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' },
+  )
+  if (error) {
+    if (missingTable(error, 'freedom_settings')) throw new Error('Run the freedom_settings migration first')
+    throw error
+  }
 }
 
 // --- Position plans and theses --------------------------------------------------------------
