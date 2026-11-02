@@ -24,6 +24,7 @@ import type {
   PortfolioKind,
 } from './database.types'
 import { FREEDOM_DEFAULTS, type FreedomSettings } from './freedom'
+import { EMPTY_BOOK, type MonthBook } from './cashflow'
 
 // ---------------------------------------------------------------------------
 // Net worth
@@ -695,6 +696,34 @@ export async function fetchExternalFlows(): Promise<Pick<PortfolioActivity, 'por
     .is('voided_at', null)
   if (error) throw error
   return data ?? []
+}
+
+// --- Month-end close -------------------------------------------------------------------------
+
+/** Closed months and their history. `ready` is false until the month_close migration has run. */
+export async function fetchMonthBook(): Promise<MonthBook> {
+  const [closes, log] = await Promise.all([
+    supabase.from('networth_month_closes').select('*'),
+    supabase.from('networth_close_log').select('*').order('at'),
+  ])
+  const error = closes.error ?? log.error
+  if (error) {
+    if (missingTable(error, 'networth_month_closes|networth_close_log')) return EMPTY_BOOK
+    throw error
+  }
+  return { ready: true, closedAt: new Map((closes.data ?? []).map((c) => [c.month, c.closed_at])), log: log.data ?? [] }
+}
+
+const closeError = (message: string) => (/close_networth_month|reopen_networth_month/.test(message) && /function|schema cache/i.test(message) ? 'Run the month_close migration first' : message)
+
+export async function closeNetworthMonth(month: string) {
+  const { error } = await supabase.rpc('close_networth_month', { p_month: month })
+  if (error) throw new Error(closeError(error.message))
+}
+
+export async function reopenNetworthMonth(month: string, reason: string) {
+  const { error } = await supabase.rpc('reopen_networth_month', { p_month: month, p_reason: reason })
+  if (error) throw new Error(closeError(error.message))
 }
 
 // --- Financial freedom ----------------------------------------------------------------------

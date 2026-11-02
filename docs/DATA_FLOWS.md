@@ -283,18 +283,23 @@ Nothing below is stored. The website calculates it from the tables each time a p
 
 ## 8. The month-end close
 
-Net worth runs on **month-end balances**, so each month has to be closed: every open account gets its balance as of the last day, and every due payment is marked paid.
+Net worth runs on **month-end balances**, so each month is closed by hand, like a business closing its books.
 
 ```mermaid
 flowchart LR
-    A[1st of the month] --> B{Last month closed?<br/>all balances entered<br/>+ due payments paid}
-    B -- no --> C[Close banner on Overview,<br/>Net worth and Cash flow]
-    C --> D[Enter balances / mark paid]
-    D --> B
-    B -- yes --> E[Banner gone;<br/>Net worth opens on this month]
+    A[1st of the month] --> B[Close banner on Overview,<br/>Net worth and Cash flow]
+    B --> C[Enter or confirm balances,<br/>mark payments paid]
+    C --> D[Press Close:<br/>close_networth_month]
+    D --> E[Month locked;<br/>Net worth opens on this month]
+    E -- correction --> F[Reopen with a reason:<br/>reopen_networth_month]
+    F --> C
 ```
 
-- **Which month Net worth opens on:** the current month from the 6th onward. On the 1st–5th it stays on last month until that month is closed, and the banner says so. After the 5th, an unclosed month keeps its banner with an **Open** button.
+- **Checklist:** `close_networth_month` refuses a month that isn't over, an open account with no balance saved for it, a payment not marked paid, or a month whose previous month still has to close. An old gap that was never closed doesn't hold back a month that has been closed before.
+- **The lock:** triggers refuse any write to `networth_balances` or `installment_payments` in a closed month, and refuse changes to an account that would alter one (delete, category, opened or closed month).
+- **Reopening** needs a reason and reopens every later closed month too. `networth_close_log` keeps every close and reopen.
+- **Which month Net worth opens on:** the current month from the 6th onward. On the 1st–5th it opens on the month waiting to be closed. The banner stays until that month closes, and says overdue after the 15th.
 - **Where closing starts:** months before `wealth_settings.close_from_month` are never asked to be closed ("Start from this month" on the banner).
+- **Not locked:** portfolio lines in a closed month come from `portfolio_daily_values`, with no copy taken at closing.
 - **Balances carried forward:** a month with no balance entered uses the last earlier one, marked "carried", so totals never drop to zero. Cash flow marks a month incomplete while it leans on carried balances.
-- Code: `cashflow.ts` `closeStatus`, `CloseMonthBanner.tsx`.
+- Code: `cashflow.ts` `closeChecklist`, `closeBlocker`, `closeStatus`; `CloseMonthBanner.tsx`, `MonthClosePanel.tsx`.

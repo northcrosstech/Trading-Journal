@@ -6,6 +6,7 @@ import {
   fetchDailyValues,
   fetchExternalFlows,
   fetchInstallmentPayments,
+  fetchMonthBook,
   fetchNetworthAccounts,
   fetchNetworthBalances,
   fetchPortfolios,
@@ -65,6 +66,7 @@ export function CashFlowPage() {
   const [dailyValues, setDailyValues] = useState<PortfolioDailyValue[]>([])
   const [flows, setFlows] = useState<Flow[]>([])
   const [payments, setPayments] = useState<InstallmentPayment[]>([])
+  const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -80,6 +82,11 @@ export function CashFlowPage() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
   useEffect(load, [load])
+  useEffect(() => {
+    fetchMonthBook()
+      .then((b) => setClosedMonths(new Set(b.closedAt.keys())))
+      .catch(() => {})
+  }, [])
 
   const cf = useMemo(() => (accounts ? monthCashFlow(month, accounts, balances, portfolios, dailyValues, flows) : null), [month, accounts, balances, portfolios, dailyValues, flows])
   const bars = useMemo<Bar[]>(() => {
@@ -248,7 +255,7 @@ export function CashFlowPage() {
                         <td className={`px-3 py-2.5 text-right tabular-nums ${toneClass(b.investmentGrowth)}`}>{signed(b.investmentGrowth)}</td>
                         <td className={`px-3 py-2.5 text-right tabular-nums ${toneClass(b.netWorthChange)}`}>{signed(b.netWorthChange)}</td>
                         <td className="px-5 py-2.5 text-right">
-                          {b.month === currentMonth ? <Pill tone="blue">In progress</Pill> : b.complete ? <Pill tone="green">Closed</Pill> : <Pill tone="amber">Estimated</Pill>}
+                          {b.month === currentMonth ? <Pill tone="blue">In progress</Pill> : closedMonths.has(b.month) ? <Pill tone="green">Closed</Pill> : b.complete ? <Pill>Open</Pill> : <Pill tone="amber">Estimated</Pill>}
                         </td>
                       </tr>
                     ))}

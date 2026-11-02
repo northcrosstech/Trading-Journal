@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261108010000_freedom_settings.sql` (2026-10-29).
+through `20261109010000_month_close.sql` (2026-10-29).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -34,7 +34,7 @@ through `20261108010000_freedom_settings.sql` (2026-10-29).
 |---|---|
 | [Trading journal](#trading-journal) | `accounts`, `trades`, `executions`, `options_detail` |
 | [Review, planning & setups](#review-planning--setups) | `playbooks`, `trade_playbooks`, `daily_plans`, `daily_plan_playbooks`, `daily_journal`, `target_settings` |
-| [Net worth](#net-worth) | `networth_accounts`, `networth_balances`, `installment_payments`, `wealth_settings` |
+| [Net worth](#net-worth) | `networth_accounts`, `networth_balances`, `installment_payments`, `networth_month_closes`, `networth_close_log`, `wealth_settings` |
 | [Portfolios](#portfolios) | `portfolios`, `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `portfolio_daily_values`, `prices` |
 | [Research & allocation](#research--allocation) | `fundamentals`, `macro_indicators`, `research_watchlist`, `research_overrides`, `allocation_targets`, `ticker_types`, `position_targets`, `ticker_theses` |
 | [System](#system) | `sync_log`, the `audit_summary` view |
@@ -419,6 +419,12 @@ Why you own a ticker. **Written by:** app (research drawer). Primary key `(user_
 |---|---|
 | `thesis` | Your reasons, and what would make you sell. |
 | `review_on` | When to look at it again. On or after this date the ticker shows a **review** pill. |
+
+### `networth_month_closes`
+One row per closed month. While a row exists, that month's balances and payments can't change. **Written by:** `close_networth_month` and `reopen_networth_month` only. Primary key `(user_id, month)`.
+
+### `networth_close_log`
+Every close and reopen of a month, never edited. `action` is `close` or `reopen`; `reason` says why a month was reopened. **Written by:** the same two functions, and once by the migration for months it closed.
 
 ### `freedom_settings`
 The inputs behind the financial freedom gauge on the Wealth page; balances come from net worth and portfolios. **Written by:** app. One row per user.

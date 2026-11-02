@@ -24,6 +24,7 @@ export function InstallmentsCard({
   balances,
   payments,
   onChanged,
+  locked = false,
 }: {
   month: string
   today: string
@@ -31,6 +32,8 @@ export function InstallmentsCard({
   balances: NetworthBalance[]
   payments: InstallmentPayment[]
   onChanged: () => void
+  /** The month is closed: its payments can't be marked or unmarked. */
+  locked?: boolean
 }) {
   const { user } = useAuth()
   const dialog = useDialog()
@@ -95,6 +98,7 @@ export function InstallmentsCard({
   function status(r: (typeof rows)[number]) {
     if (r.paid) return <Pill tone="green"><CheckCircle2 size={12} /> Paid {dateFmt(r.paid.paid_on)}</Pill>
     if (r.nothingDue) return <Pill>Nothing due</Pill>
+    if (locked) return <Pill>Not recorded</Pill>
     const days = daysBetween(today, r.due)
     if (days > 31) return <Pill>Scheduled</Pill>
     if (days < 0) return <Pill tone="red">Overdue {-days}d</Pill>
@@ -185,7 +189,7 @@ export function InstallmentsCard({
                   <td className="px-3 py-3">{status(r)}</td>
                   <td className="px-5 py-3 text-right">
                     <span className="flex items-center justify-end gap-1">
-                      {!r.paid && !r.nothingDue && (
+                      {!locked && !r.paid && !r.nothingDue && (
                         <Button size="sm" variant="primary" onClick={() => markPaid(r)}>
                           Mark paid
                         </Button>
@@ -193,7 +197,7 @@ export function InstallmentsCard({
                       <Menu
                         label={`Actions for ${r.a.name}`}
                         items={[
-                          ...(r.paid ? [{ label: 'Mark unpaid', onClick: () => undo(r) }] : []),
+                          ...(r.paid && !locked ? [{ label: 'Mark unpaid', onClick: () => undo(r) }] : []),
                           { label: 'Payment details…', onClick: () => editPayment(r.a) },
                         ]}
                       />

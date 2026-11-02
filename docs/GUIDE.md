@@ -41,21 +41,26 @@ Each person signs in with their own login and only ever sees their own data.
 | **Every trading day** | Nothing to do. Trades sync every 15 minutes in market hours; prices and research update at 4:45 PM New York time | Automatic |
 | **After trading** | Review closed trades: whose idea it was, what went well or badly, the setup | Review |
 | **When you buy, sell or move money** in a portfolio | Record it as an entry so cash and shares stay right | Portfolio page → actions |
-| **Start of each month** (by the 5th) | **Close last month:** enter each account's balance as of the last day, and mark payments paid | The amber "Close {month}" banner |
+| **Start of each month** (by the 15th) | **Close last month:** enter each account's balance as of the last day, mark payments paid, then press Close | The amber "Close {month}" banner, then the close card on Net worth |
 | **Now and then** | Glance at the Health check and the Allocation card | Portfolios |
 
 ### Closing a month
 
 Net worth is built from month-end balances, so each month needs closing once it's over.
 
-- **From the 1st,** an amber banner appears: *"Close October · 5 of 8 balances updated"*. It lists what's missing.
+- **From the 1st,** an amber banner appears: *"Close October · 5 of 8 balances confirmed"*. After the 15th it's marked overdue, but nothing closes by itself.
 - **Use the balance on the last day of the month** from each statement. Debts are entered as positive numbers; the app subtracts them.
+- **Save only writes what you changed.** A number carried from last month stays marked "carried" until you edit it or tick **unchanged**. Accounts with a carried number don't count as done.
 - **Mark each payment paid** under Monthly payments.
-- **When everything is in,** the banner disappears.
+- **Press Close** in the month-end close card on Net worth. Months close in order, and a closed month's balances and payments are locked.
+- **To correct a closed month, press Reopen** and give a reason. Later closed months reopen with it. Fix the numbers, then close them again in order. Every close and reopen is kept in the month's history.
+- **What a correction changes:** that month's cash flow and the next month's. Balances already saved for later months stay as they are; a later month without its own balance carries the new number.
+- **While closed,** you also can't delete an account with balances in that month, change its category, or change its open or close date to a closed month. Renaming is fine. To retire an account, close it from a later month.
+- **Portfolios aren't locked:** a closed month's portfolio lines still come from saved daily values, not a copy taken at closing.
 
 **Which month Net worth opens on:**
 - **From the 6th to the end of the month,** it opens on the current month.
-- **On the 1st–5th,** it stays on last month until you close it.
+- **On the 1st–5th,** it opens on the month waiting to be closed.
 - **After the 5th,** an unclosed month keeps its banner, with an **Open** button.
 
 **Missing a balance isn't fatal.** A month without one uses the last balance you entered,

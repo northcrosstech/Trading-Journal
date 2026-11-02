@@ -1,6 +1,6 @@
-import type { InstallmentPayment, NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, PortfolioActivity, PortfolioDailyValue } from './database.types'
+import type { CloseLogRow, InstallmentPayment, NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, PortfolioActivity, PortfolioDailyValue } from './database.types'
 import { addMonths, isDebt, isOpenIn, monthOf, monthTotals } from './networth'
-import { expectedPayment, hasPaymentPlan, paymentDueDate } from './installments'
+import { expectedPayment, hasPaymentPlan } from './installments'
 
 /** Everyday money: what a month's change in these balances means you kept (or used). */
 export const CASH_CATEGORIES: NetworthCategory[] = ['cash', 'emergency_fund']
@@ -110,47 +110,53 @@ export function monthCashFlow(
   }
 }
 
-export type CloseStatus = {
-  month: string // the month being closed (the previous calendar month)
-  missing: NetworthAccount[] // open accounts with no balance entered for that month
-  unpaid: NetworthAccount[] // debts with a payment set but not marked paid for that month
-}
+/** The closed months and their history. `ready` is false until the migration has run. */
+export type MonthBook = { ready: boolean; closedAt: Map<string, string>; log: CloseLogRow[] }
+export const EMPTY_BOOK: MonthBook = { ready: false, closedAt: new Map(), log: [] }
 
-/** The month-end checklist: last month's accounts still without a fresh balance, and
- * installments not marked paid. Null once everything is done, or when last month is before
- * `closeFrom` (the month closing starts from). */
-export function closeStatus(
-  today: string,
-  accounts: NetworthAccount[],
-  balances: NetworthBalance[],
-  payments: InstallmentPayment[],
-  closeFrom: string | null = null,
-): CloseStatus | null {
-  const month = addMonths(monthOf(today), -1)
-  if (closeFrom !== null && month < closeFrom) return null
+/** What a month still needs before it can close: a balance saved for every open account (a
+ * carried one doesn't count), and every payment with something to pay marked paid. */
+export function closeChecklist(month: string, accounts: NetworthAccount[], balances: NetworthBalance[], payments: InstallmentPayment[]): { missing: NetworthAccount[]; unpaid: NetworthAccount[] } {
   const open = accounts.filter((a) => isOpenIn(a, month))
-  const missing = open.filter((a) => !balances.some((b) => b.account_id === a.id && b.month === month))
-  const unpaid = open.filter(
-    (a) =>
-      isDebt(a.category) &&
-      hasPaymentPlan(a) &&
-      expectedPayment(a, balances, month).amount > 0 &&
-      paymentDueDate(a, month) < today &&
-      !payments.some((p) => p.account_id === a.id && p.month === month),
-  )
-  return missing.length === 0 && unpaid.length === 0 ? null : { month, missing, unpaid }
+  return {
+    missing: open.filter((a) => !balances.some((b) => b.account_id === a.id && b.month === month)),
+    unpaid: open.filter((a) => isDebt(a.category) && hasPaymentPlan(a) && expectedPayment(a, balances, month).amount > 0 && !payments.some((p) => p.account_id === a.id && p.month === month)),
+  }
 }
 
-/** The month Net worth opens on: the current month, except from the 1st to the 5th while
- * last month is still being closed out, when it stays on last month. */
-export function netWorthOpenMonth(
-  today: string,
-  accounts: NetworthAccount[],
-  balances: NetworthBalance[],
-  payments: InstallmentPayment[],
-  closeFrom: string | null = null,
-): string {
+/** The earlier month that has to close first, or null. The rule close_networth_month enforces:
+ * months close in order, from the month closing starts at; an old gap that was never closed
+ * doesn't hold back a month that has been closed before. */
+export function closeBlocker(month: string, balances: NetworthBalance[], book: MonthBook, closeFrom: string | null): string | null {
+  const prev = addMonths(month, -1)
+  if (book.closedAt.has(prev) || (closeFrom !== null && prev < closeFrom)) return null
+  if (!balances.some((b) => b.month === prev)) return null
+  const logged = (m: string) => book.log.some((l) => l.month === m)
+  return logged(prev) || !logged(month) ? prev : null
+}
+
+export type CloseStatus = {
+  month: string // the month to close next
+  missing: NetworthAccount[]
+  unpaid: NetworthAccount[]
+  ready: boolean
+}
+
+/** The month-end reminder: the earliest month waiting to be closed, up to last month. Null once
+ * last month is closed, or when it's before `closeFrom` (the month closing starts from). */
+export function closeStatus(today: string, accounts: NetworthAccount[], balances: NetworthBalance[], payments: InstallmentPayment[], closeFrom: string | null, book: MonthBook): CloseStatus | null {
+  let month = addMonths(monthOf(today), -1)
+  if (book.closedAt.has(month) || (closeFrom !== null && month < closeFrom)) return null
+  // Before the migration has run there's no history to walk back through.
+  if (book.ready) for (let b = closeBlocker(month, balances, book, closeFrom); b !== null; b = closeBlocker(month, balances, book, closeFrom)) month = b
+  const { missing, unpaid } = closeChecklist(month, accounts, balances, payments)
+  return { month, missing, unpaid, ready: missing.length === 0 && unpaid.length === 0 }
+}
+
+/** The month Net worth opens on: the current month, except from the 1st to the 5th while a
+ * month is waiting to be closed, when it opens on that month. */
+export function netWorthOpenMonth(today: string, accounts: NetworthAccount[], balances: NetworthBalance[], payments: InstallmentPayment[], closeFrom: string | null, book: MonthBook): string {
   const current = monthOf(today)
   if (Number(today.slice(8, 10)) > 5) return current
-  return closeStatus(today, accounts, balances, payments, closeFrom) ? addMonths(current, -1) : current
+  return closeStatus(today, accounts, balances, payments, closeFrom, book)?.month ?? current
 }

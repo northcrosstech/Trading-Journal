@@ -258,6 +258,11 @@ export type NetworthAccountRow = {
   created_at: string
 }
 
+/** A closed month: its balances and payments are locked until it's reopened. */
+export type MonthCloseRow = { user_id: string; month: string; closed_at: string }
+/** Every close and reopen; a reopen says why. */
+export type CloseLogRow = { id: string; user_id: string; month: string; action: 'close' | 'reopen'; reason: string | null; at: string }
+
 export type InstallmentPaymentRow = {
   id: string
   user_id: string
@@ -538,6 +543,8 @@ export type Database = {
       networth_balances: ReturnType<typeof table<NetworthBalanceRow>>
       installment_payments: ReturnType<typeof table<InstallmentPaymentRow>>
       wealth_settings: ReturnType<typeof table<WealthSettingsRow>>
+      networth_month_closes: ReturnType<typeof table<MonthCloseRow>>
+      networth_close_log: ReturnType<typeof table<CloseLogRow>>
       freedom_settings: ReturnType<typeof table<FreedomSettingsRow>>
       fundamentals: ReturnType<typeof table<FundamentalsRow>>
       macro_indicators: ReturnType<typeof table<MacroIndicatorRow>>
@@ -560,6 +567,8 @@ export type Database = {
       audit_summary: { Row: AuditProblem; Relationships: [] }
     }
     Functions: {
+      close_networth_month: { Args: { p_month: string }; Returns: undefined }
+      reopen_networth_month: { Args: { p_month: string; p_reason: string }; Returns: number }
       portfolio_buy: {
         Args: { p_portfolio: string; p_symbol: string; p_quantity: number; p_price: number; p_from_cash?: boolean; p_on?: string; p_fee?: number }
         Returns: undefined

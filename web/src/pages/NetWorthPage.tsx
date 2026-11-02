@@ -9,6 +9,7 @@ import {
   fetchCloseFromMonth,
   fetchDailyValues,
   fetchInstallmentPayments,
+  fetchMonthBook,
   fetchNetworthAccounts,
   fetchNetworthBalances,
   fetchPortfolios,
@@ -25,7 +26,8 @@ import { NetWorthChart } from '../components/WealthCharts'
 import { NetWorthComposition } from '../components/NetWorthComposition'
 import { InstallmentsCard } from '../components/InstallmentsCard'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
-import { netWorthOpenMonth } from '../lib/cashflow'
+import { MonthClosePanel } from '../components/MonthClosePanel'
+import { EMPTY_BOOK, netWorthOpenMonth, type MonthBook } from '../lib/cashflow'
 import { usePaymentSetup } from '../lib/usePaymentSetup'
 import { Kpi } from '../components/WealthBits'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -52,7 +54,8 @@ const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e)
 
 /** The month's balances as a table: open accounts only, pre-filled with this month's entry
  * or the most recent earlier one ("carried"), grouped into Assets and Debts with subtotals.
- * Portfolio-fed lines are read-only. A save bar appears once anything has changed. */
+ * Portfolio-fed lines are read-only. Saving writes only what you changed or marked unchanged,
+ * so a carried balance stays carried until you've looked at it. A closed month is read-only. */
 function BalancesTable({
   month,
   accounts,
@@ -60,6 +63,7 @@ function BalancesTable({
   portfolioLines,
   onSaved,
   onManage,
+  locked,
 }: {
   month: string
   accounts: NetworthAccount[]
@@ -67,6 +71,7 @@ function BalancesTable({
   portfolioLines: { key: string; name: string; category: NetworthCategory; amount: number }[]
   onSaved: () => void
   onManage: () => void
+  locked: boolean
 }) {
   const { user } = useAuth()
   const toast = useToast()
@@ -82,23 +87,23 @@ function BalancesTable({
   }, [open, balances, month])
 
   const [draft, setDraft] = useState<Map<string, string>>(new Map())
+  const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     setDraft(new Map(Array.from(prefill, ([id, p]) => [id, p.value])))
+    setConfirmed(new Set())
     setError(null)
   }, [prefill])
 
-  // Changed vs what's stored for this month (a carried value counts as unsaved for this month).
-  const dirty = open.some((a) => {
-    const p = prefill.get(a.id)
-    return (draft.get(a.id) ?? '') !== (p?.value ?? '') || (p?.from != null && (draft.get(a.id) ?? '') !== '')
-  })
+  // Saved when you changed it, or ticked a carried balance as unchanged for this month.
+  const toSave = (a: NetworthAccount) => confirmed.has(a.id) || parseBalance(draft.get(a.id) ?? '') !== parseBalance(prefill.get(a.id)?.value ?? '')
+  const dirty = open.some(toSave)
 
   async function save() {
     if (!user) return
     const entries: { accountId: string; balance: number | null }[] = []
-    for (const a of open) {
+    for (const a of open.filter(toSave)) {
       const parsed = parseBalance(draft.get(a.id) ?? '')
       if (parsed === undefined) {
         setError(`“${draft.get(a.id)}” isn’t a valid amount for ${a.name}. Enter a positive number — debts are subtracted for you.`)
@@ -141,7 +146,9 @@ function BalancesTable({
   })
   const assets = groups[0].subtotal
   const debts = groups[1].subtotal
-  const carriedCount = Array.from(prefill.values()).filter((p) => p.from).length
+  // Carried balances you haven't changed or ticked yet.
+  const unconfirmed = open.filter((a) => prefill.get(a.id)?.from && !toSave(a))
+  const carriedCount = unconfirmed.length
 
   if (open.length === 0 && portfolioLines.length === 0) {
     return (
@@ -164,7 +171,7 @@ function BalancesTable({
   return (
     <Card
       title={`Balances · ${monthLabel(month)}`}
-      subtitle="Enter each balance as a positive number — debts are subtracted for you. Blank = no balance this month."
+      subtitle={locked ? `${monthLabel(month)} is closed. Reopen it to change these.` : 'Enter each balance as a positive number — debts are subtracted for you. Blank = no balance this month.'}
       flush
       actions={
         <Button size="sm" icon={<Settings2 size={14} />} onClick={onManage}>
@@ -193,7 +200,25 @@ function BalancesTable({
                                 {it.key.startsWith('margin:') ? 'margin used · from Portfolios' : 'from Portfolios · last close'}
                               </div>
                             ) : (
-                              p?.from && <div className="text-xs text-amber-400/90">carried from {monthLabel(p.from)}</div>
+                              p?.from &&
+                              !locked && (
+                                <label className="mt-0.5 flex items-center gap-1.5 text-xs text-amber-400/90">
+                                  carried from {monthLabel(p.from)} ·
+                                  <input
+                                    type="checkbox"
+                                    checked={confirmed.has(it.account.id)}
+                                    onChange={(e) =>
+                                      setConfirmed((c) => {
+                                        const n = new Set(c)
+                                        if (e.target.checked) n.add(it.account.id)
+                                        else n.delete(it.account.id)
+                                        return n
+                                      })
+                                    }
+                                  />
+                                  unchanged
+                                </label>
+                              )
                             )}
                           </td>
                           <td className="px-3 py-2.5">
@@ -207,12 +232,13 @@ function BalancesTable({
                                   inputMode="decimal"
                                   aria-label={`${it.name} balance`}
                                   value={draft.get(it.account.id) ?? ''}
+                                  disabled={locked}
                                   onChange={(e) => setDraft((d) => new Map(d).set(it.account.id, e.target.value))}
                                   onBlur={(e) => {
                                     const n = parseBalance(e.target.value)
                                     if (n !== null && n !== undefined) setDraft((d) => new Map(d).set(it.account.id, fmtBalance(n)))
                                   }}
-                                  className={`${INPUT_SM} pl-6 text-right tabular-nums ${p?.from ? 'border-amber-500/40' : ''}`}
+                                  className={`${INPUT_SM} pl-6 text-right tabular-nums disabled:opacity-70 ${p?.from && !confirmed.has(it.account.id) ? 'border-amber-500/40' : ''}`}
                                 />
                               </span>
                             </td>
@@ -247,24 +273,36 @@ function BalancesTable({
         </table>
       </div>
 
-      {(dirty || error || carriedCount > 0) && (
+      {!locked && (dirty || error || carriedCount > 0) && (
         <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 rounded-b-2xl border-t border-(--border) bg-(--card-raised)/95 px-5 py-3 backdrop-blur">
           <span className="text-xs text-neutral-400">
             {error ? (
               <span className="text-red-400">{error}</span>
             ) : carriedCount > 0 ? (
-              `${carriedCount} balance${carriedCount === 1 ? ' is' : 's are'} carried from an earlier month — saving keeps ${carriedCount === 1 ? 'it' : 'them'} for ${monthLabel(month)}.`
+              `${carriedCount} balance${carriedCount === 1 ? ' is' : 's are'} carried from an earlier month. Enter ${carriedCount === 1 ? 'it' : 'them'}, or tick “unchanged” to keep the number for ${monthLabel(month)}.`
             ) : (
               'You have unsaved changes.'
             )}
           </span>
           <span className="flex gap-2">
             {dirty && (
-              <Button size="sm" variant="ghost" onClick={() => setDraft(new Map(Array.from(prefill, ([id, p]) => [id, p.value])))}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setDraft(new Map(Array.from(prefill, ([id, p]) => [id, p.value])))
+                  setConfirmed(new Set())
+                }}
+              >
                 Discard
               </Button>
             )}
-            <Button size="sm" variant="primary" onClick={save} disabled={saving || open.length === 0}>
+            {carriedCount > 0 && (
+              <Button size="sm" variant="ghost" onClick={() => setConfirmed((c) => new Set([...c, ...unconfirmed.map((a) => a.id)]))}>
+                Mark all unchanged
+              </Button>
+            )}
+            <Button size="sm" variant="primary" onClick={save} disabled={saving || !dirty}>
               {saving ? 'Saving…' : `Save ${monthLabel(month, 'short')}`}
             </Button>
           </span>
@@ -469,6 +507,8 @@ export function NetWorthPage() {
   const [payments, setPayments] = useState<InstallmentPayment[]>([])
   const [error, setError] = useState<string | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
+  const [book, setBook] = useState<MonthBook>(EMPTY_BOOK)
+  const [closeFromMonth, setCloseFromMonthValue] = useState<string | null>(null)
 
   const load = useCallback(() => {
     Promise.all([
@@ -478,11 +518,12 @@ export function NetWorthPage() {
       fetchDailyValues(),
       fetchInstallmentPayments(),
       fetchCloseFromMonth().catch(() => null),
+      fetchMonthBook().catch(() => EMPTY_BOOK),
     ])
-      .then(([a, b, p, v, ip, closeFrom]) => {
+      .then(([a, b, p, v, ip, closeFrom, mb]) => {
         if (!placed.current) {
           placed.current = true
-          const open = netWorthOpenMonth(centralDateStr(new Date()), a, b, ip, closeFrom)
+          const open = netWorthOpenMonth(centralDateStr(new Date()), a, b, ip, closeFrom, mb)
           setMonth(open)
           setYear(Number(open.slice(0, 4)))
         }
@@ -491,6 +532,8 @@ export function NetWorthPage() {
         setPortfolios(p)
         setDailyValues(v)
         setPayments(ip)
+        setBook(mb)
+        setCloseFromMonthValue(closeFrom)
       })
       .catch((e) => setError(errorMessage(e)))
   }, [])
@@ -562,12 +605,15 @@ export function NetWorthPage() {
         accounts={accounts}
         balances={balances}
         payments={payments}
+        book={book}
         viewing={month}
         onOpenMonth={(m) => {
           setMonth(m)
           setYear(Number(m.slice(0, 4)))
         }}
       />
+
+      <MonthClosePanel month={month} currentMonth={currentMonth} accounts={accounts} balances={balances} payments={payments} book={book} closeFrom={closeFromMonth} onChanged={load} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Kpi label={`Net worth · ${monthLabel(month)}`} value={currency(totals.net)} sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`} accent />
@@ -605,7 +651,7 @@ export function NetWorthPage() {
 
       <NetWorthComposition lines={totals.lines} monthName={monthLabel(month)} />
 
-      <InstallmentsCard month={month} today={centralDateStr(new Date())} accounts={accounts} balances={balances} payments={payments} onChanged={load} />
+      <InstallmentsCard month={month} today={centralDateStr(new Date())} accounts={accounts} balances={balances} payments={payments} onChanged={load} locked={book.closedAt.has(month)} />
 
       <BalancesTable
         month={month}
@@ -614,6 +660,7 @@ export function NetWorthPage() {
         portfolioLines={portfolioLines}
         onSaved={load}
         onManage={() => setManageOpen(true)}
+        locked={book.closedAt.has(month)}
       />
 
       <Drawer open={manageOpen} onClose={() => setManageOpen(false)} title="Accounts" subtitle="What you own and what you owe" width="max-w-lg">
