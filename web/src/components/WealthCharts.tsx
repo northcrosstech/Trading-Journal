@@ -208,7 +208,7 @@ export function AllocationDonut({ allocation, centerLabel = 'Total', noun = 'Pos
           <div key={s.key} onMouseEnter={() => setHover(s.key)} onMouseLeave={() => setHover(null)} className="rounded-lg px-2 hover:bg-(--card-raised)">
             <div className="flex items-center gap-2.5 py-1.5">
               <Swatch color={s.color} />
-              <span className="min-w-0 flex-1 break-words font-medium text-neutral-100">
+              <span className="min-w-0 flex-1 wrap-break-word font-medium text-neutral-100">
                 {s.role === 'other' && s.members.length > 1 ? `Other (${s.members.length})` : s.label}
               </span>
               <span className="w-14 text-right tabular-nums text-neutral-300">{pctOf(s.weight)}</span>
@@ -219,7 +219,7 @@ export function AllocationDonut({ allocation, centerLabel = 'Total', noun = 'Pos
               s.members.map((m) => (
                 <div key={m.key} className="flex items-center gap-2 py-0.5 pl-4 text-xs">
                   <Swatch color={s.color} small />
-                  <span className="min-w-0 flex-1 break-words text-neutral-400">{m.label}</span>
+                  <span className="min-w-0 flex-1 wrap-break-word text-neutral-400">{m.label}</span>
                   <span className="w-14 text-right tabular-nums text-neutral-500">{pctOf(m.value / total)}</span>
                   <span className="w-24 text-right tabular-nums text-neutral-600">{currency(m.value)}</span>
                 </div>

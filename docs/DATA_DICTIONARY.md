@@ -185,7 +185,7 @@ An account you track by hand (home, mortgage, checking, credit card…). **Writt
 | `closed_month` | date | From this month on it's gone from the form; history is kept. Null = open. |
 | `sort_order` | integer | Display order. |
 | `payment_amount` | numeric | Debts: the usual monthly payment, in full (including escrow). Null = no fixed payment. |
-| `payment_day` | integer | Debts: day of the month it's due (1–31; a short month uses its last day). A card with a due day but no fixed payment pays its statement: the month's closing balance, due the **following** month. |
+| `payment_day` | integer | Debts: day of the month it's due (1–31; a short month uses its last day). A month's payment is due the **following** month. A card with a due day but no fixed payment pays its statement: the month's closing balance. |
 | `interest_rate` | numeric | Debts: APR in percent (e.g. `6.25`). Optional; drives the payoff estimate. |
 | `escrow_amount` | numeric | Mortgages: the part of `payment_amount` that goes to property tax and insurance. The payoff estimate uses `payment_amount − escrow_amount`. |
 

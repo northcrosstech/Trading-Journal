@@ -15,8 +15,8 @@ import { Menu } from './ui/Menu'
 import { EmptyState } from './ui/EmptyState'
 
 /** Monthly payments on debts for the selected month: due date, amount, APR, balance, the
- * payoff estimate, and a paid / due soon / overdue status with Mark paid. Fixed payments are
- * due that month; a card's statement (the month's closing balance) is due the next month. */
+ * payoff estimate, and a paid / due soon / overdue status with Mark paid. A month's payment is
+ * due the next month: the fixed amount, or for a card the month's closing balance. */
 export function InstallmentsCard({
   month,
   today,

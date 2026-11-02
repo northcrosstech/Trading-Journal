@@ -65,7 +65,7 @@ marked "carried", until you fill it in.
 
 | Debt | Set up with | What's due |
 |---|---|---|
-| Mortgage, auto loan, personal loan | Payment amount + due day | That amount, on that day each month |
+| Mortgage, auto loan, personal loan | Payment amount + due day | That amount, on that day **next month** (October's payment is due in November) |
 | Credit card | Due day only | The month's closing balance, due on that day **next month** (October's statement is paid in November). A $0 card has nothing due |
 | Mortgage with escrow | Also the escrow amount | The full payment is due; the payoff estimate uses only the part that pays the loan |
 

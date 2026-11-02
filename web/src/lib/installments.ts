@@ -19,11 +19,11 @@ export function expectedPayment(a: NetworthAccount, balances: NetworthBalance[],
   return { amount: Math.max(balanceUpTo(a, balances, month) ?? 0, 0), fixed: false }
 }
 
-/** When `month`'s payment is due: a fixed payment on its day that month; a card's statement
- * on its day the following month (October's balance is due in November). */
+/** When `month`'s payment is due: on its day the following month, for fixed payments and card
+ * statements alike (October's payment is due in November), so closing a month settles the
+ * payment that falls just after it. */
 export function paymentDueDate(a: NetworthAccount, month: string): string {
-  const fixed = (a.payment_amount ?? 0) > 0
-  return dueDateIn(fixed ? month : addMonths(month, 1), a.payment_day ?? 1)
+  return dueDateIn(addMonths(month, 1), a.payment_day ?? 1)
 }
 
 /** The due date (yyyy-mm-dd) of a payment in a given month (yyyy-mm-01). A due day past the
