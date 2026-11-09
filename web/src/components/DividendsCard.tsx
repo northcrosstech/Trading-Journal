@@ -18,6 +18,8 @@ import { useToast } from '../lib/toastContext'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Plus } from 'lucide-react'
+import { SortTh } from './SortTh'
+import { sortRows, useSort } from '../lib/useSort'
 const pct = (n: number | null) => (n === null ? '—' : percentFmt(n).replace('+', ''))
 
 function CalendarTooltip({ active, payload }: { active?: boolean; payload?: { payload: CalendarMonth }[] }) {
@@ -131,6 +133,9 @@ function EditRow({ row, onSave, onRemove, onCancel }: { row: DividendRow; onSave
   )
 }
 
+const DIV_SORT_KEYS = ['symbol', 'perShare', 'pays', 'yield', 'onCost', 'shares', 'perYear', 'next'] as const
+const DIV_ASC_FIRST = ['symbol', 'next'] as const
+
 /** Projected dividend income: a Jan-Dec calendar (received for months gone by, expected
  * ahead), totals, and -- on a portfolio's page -- the per-ticker table where the yearly
  * dividend, frequency and pay month are entered once per ticker, plus one-tap Record.
@@ -177,6 +182,22 @@ export function DividendsCard({
   useEffect(load, [load])
 
   const rows = useMemo(() => dividendRows(holdings, info, prices, currentMonth), [holdings, info, prices, currentMonth])
+  const { state: sort, toggle: onSort } = useSort('dividends', DIV_SORT_KEYS, DIV_ASC_FIRST)
+  const sortedRows = useMemo(
+    () =>
+      sortRows(rows, sort, {
+        symbol: (r) => r.symbol,
+        perShare: (r) => (r.info ? Number(r.info.annual_per_share) : null),
+        pays: (r) => (r.info ? r.months.length : null),
+        yield: (r) => r.yield,
+        onCost: (r) => r.yieldOnCost,
+        shares: (r) => r.shares,
+        perYear: (r) => (r.info ? r.perYear : null),
+        // Months until the next payment, so the soonest comes first.
+        next: (r) => (r.nextMonth === null ? null : (r.nextMonth - currentMonth + 12) % 12),
+      }),
+    [rows, sort, currentMonth],
+  )
   const calendar = useMemo(() => dividendCalendar(rows, received, year, currentMonth), [rows, received, year, currentMonth])
   const projected = rows.reduce((s, r) => s + r.perYear, 0)
   const receivedThisYear = receivedSince(received, `${year}-01-01`)
@@ -252,19 +273,19 @@ export function DividendsCard({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-              <th className="px-5 py-2.5">Ticker</th>
-              <th className="px-3 py-2.5 text-right">$/share/yr</th>
-              <th className="px-3 py-2.5">Pays</th>
-              <th className="px-3 py-2.5 text-right" title="Yearly dividend ÷ today's price">Yield</th>
-              <th className="px-3 py-2.5 text-right" title="Yearly dividend ÷ your average cost">On cost</th>
-              <th className="px-3 py-2.5 text-right">Shares</th>
-              <th className="px-3 py-2.5 text-right">Per year</th>
-              <th className="px-3 py-2.5 text-right">Next</th>
+              <SortTh k="symbol" sort={sort} onSort={onSort} className="px-5 py-2.5">Ticker</SortTh>
+              <SortTh k="perShare" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">$/share/yr</SortTh>
+              <SortTh k="pays" sort={sort} onSort={onSort} className="px-3 py-2.5" title="Payments a year">Pays</SortTh>
+              <SortTh k="yield" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right" title="Yearly dividend ÷ today's price">Yield</SortTh>
+              <SortTh k="onCost" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right" title="Yearly dividend ÷ your average cost">On cost</SortTh>
+              <SortTh k="shares" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Shares</SortTh>
+              <SortTh k="perYear" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Per year</SortTh>
+              <SortTh k="next" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right" title="Next payment; soonest first">Next</SortTh>
               <th className="px-5 py-2.5" />
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) =>
+            {sortedRows.map((r) =>
               editing === r.symbol ? (
                 <EditRow
                   key={r.symbol}

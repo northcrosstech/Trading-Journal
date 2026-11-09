@@ -12,6 +12,8 @@ import { Button } from './ui/Button'
 import { Pill, type PillTone } from './ui/Pill'
 import { Menu, type MenuItem } from './ui/Menu'
 import { EmptyState } from './ui/EmptyState'
+import { SortTh } from './SortTh'
+import { sortRows, useSort } from '../lib/useSort'
 
 const daysTo = (iso: string, from: string) => Math.round((Date.parse(iso) - Date.parse(from)) / 86_400_000)
 const pct = (n: number | null) => (n === null ? '—' : percentFmt(n).replace('+', ''))
@@ -37,6 +39,9 @@ type Row = {
 
 const STATUS_LABEL: Record<string, string> = { closed: 'Closed', expired: 'Expired', exercised: 'Exercised', assigned: 'Assigned' }
 
+const OPTION_SORT_KEYS = ['label', 'expires', 'premium', 'value', 'gain'] as const
+const OPTION_ASC_FIRST = ['label', 'expires'] as const
+
 /** All open option positions in one table, with row actions (update price, close, expire,
  * exercise/assign) in a menu. There's no free option price feed: a long option counts at
  * what was paid until you enter today's price; short ones at their in-the-money amount. */
@@ -56,6 +61,7 @@ export function OptionsCard({
   const dialog = useDialog()
   const toast = useToast()
   const [showHistory, setShowHistory] = useState(false)
+  const { state: sort, toggle: onSort } = useSort('options', OPTION_SORT_KEYS, OPTION_ASC_FIRST)
   const today = centralDateStr(new Date())
   const resolveDate = (expiration: string) => (expiration < today ? expiration : today)
 
@@ -348,7 +354,11 @@ export function OptionsCard({
       }
     })
 
-  const rows = [...optionRows, ...cspRows].sort((a, b) => a.expiration.localeCompare(b.expiration))
+  const rows = sortRows(
+    [...optionRows, ...cspRows].sort((a, b) => a.expiration.localeCompare(b.expiration)),
+    sort,
+    { label: (r) => r.label, expires: (r) => r.expiration, premium: (r) => r.premium, value: (r) => r.value, gain: (r) => r.gain },
+  )
   const stats = cspStats(csps)
   const unrealized = rows.reduce((s, r) => s + r.gain, 0)
 
@@ -398,11 +408,11 @@ export function OptionsCard({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-                <th className="px-5 py-2.5">Position</th>
-                <th className="px-3 py-2.5">Expires</th>
-                <th className="px-3 py-2.5 text-right">Premium</th>
-                <th className="px-3 py-2.5 text-right">Value</th>
-                <th className="px-3 py-2.5 text-right">Gain</th>
+                <SortTh k="label" sort={sort} onSort={onSort} className="px-5 py-2.5">Position</SortTh>
+                <SortTh k="expires" sort={sort} onSort={onSort} className="px-3 py-2.5">Expires</SortTh>
+                <SortTh k="premium" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Premium</SortTh>
+                <SortTh k="value" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Value</SortTh>
+                <SortTh k="gain" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Gain</SortTh>
                 <th className="w-12 px-3 py-2.5" />
               </tr>
             </thead>

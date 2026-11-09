@@ -11,9 +11,13 @@ import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Pill } from './ui/Pill'
 import { Drawer } from './ui/Drawer'
+import { SortTh } from './SortTh'
+import { sortRows, useSort } from '../lib/useSort'
 
 const shares = (amount: number, price: number | null) => (price && price > 0 ? ` (${Number((amount / price).toFixed(amount / price >= 10 ? 1 : 2))} sh)` : '')
 const pct = (n: number) => `${Number(n.toFixed(1))}%`
+const PLAN_SORT_KEYS = ['symbol', 'target', 'now', 'drift', 'move'] as const
+const PLAN_ASC_FIRST = ['symbol'] as const
 
 /** Is a thesis due for review (its review date is today or past)? */
 export const reviewDue = (t: TickerThesisRow | undefined) => !!t?.review_on && t.review_on <= centralDateStr(new Date())
@@ -50,6 +54,23 @@ export function PositionPlanCard({
   const amount = Number(money.replace(/[$,\s]/g, ''))
   const suggestion = useMemo(() => suggestBuys(cmp.rows, cmp.base, cash, amount, spendable), [cmp, cash, amount, spendable])
   const hasPlan = plan.length > 0
+  const { state: sort, toggle: onSort } = useSort('plan', PLAN_SORT_KEYS, PLAN_ASC_FIRST)
+  // Tickers sort; the Options and Cash rows stay at the bottom.
+  const lines = useMemo(() => {
+    const planned = (r: PlanRow) => r.target !== null
+    const tickers = sortRows(
+      cmp.rows.filter((r) => r.kind === 'ticker'),
+      sort,
+      {
+        symbol: (r) => r.symbol,
+        target: (r) => r.target,
+        now: (r) => r.pct,
+        drift: (r) => (planned(r) ? r.diff : null),
+        move: (r) => (planned(r) ? r.move : null),
+      },
+    )
+    return [...tickers, ...cmp.rows.filter((r) => r.kind !== 'ticker')]
+  }, [cmp, sort])
 
   return (
     <Card
@@ -80,16 +101,16 @@ export function PositionPlanCard({
             <table className="w-full min-w-[40rem] text-sm">
               <thead>
                 <tr className="border-b border-(--border) text-left text-xs uppercase tracking-wide text-neutral-500">
-                  <th className="px-5 py-2.5 font-medium">Ticker</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Target</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Now</th>
+                  <SortTh k="symbol" sort={sort} onSort={onSort} className="px-5 py-2.5 font-medium">Ticker</SortTh>
+                  <SortTh k="target" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right font-medium">Target</SortTh>
+                  <SortTh k="now" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right font-medium">Now</SortTh>
                   <th className="w-40 px-3 py-2.5 font-medium" />
-                  <th className="px-3 py-2.5 text-right font-medium">Drift</th>
-                  <th className="px-5 py-2.5 font-medium">To get back on plan</th>
+                  <SortTh k="drift" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right font-medium" title="Over plan first">Drift</SortTh>
+                  <SortTh k="move" sort={sort} onSort={onSort} className="px-5 py-2.5 font-medium" title="Biggest buy first, biggest trim last">To get back on plan</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {cmp.rows.map((r) => (
+                {lines.map((r) => (
                   <PlanLine key={r.key} r={r} thesis={theses.get(r.symbol)} onOpen={r.kind === 'ticker' ? () => onOpenTicker(r.symbol) : undefined} />
                 ))}
               </tbody>

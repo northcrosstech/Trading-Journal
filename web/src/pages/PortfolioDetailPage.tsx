@@ -38,6 +38,8 @@ import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { PortfolioActions, type TradeTab } from '../components/PortfolioActions'
 import { DividendsCard } from '../components/DividendsCard'
+import { SortTh } from '../components/SortTh'
+import { sortRows, useSort } from '../lib/useSort'
 import { GetPricesButton } from '../components/GetPricesButton'
 import { OptionsCard } from '../components/OptionsCard'
 import { ActivityTable } from '../components/ActivityTable'
@@ -141,6 +143,10 @@ function PlanCell({ a, onTrade }: { a: PlanAction | undefined; onTrade: (a: Plan
   )
 }
 
+const HOLDING_SORT_KEYS = ['symbol', 'qty', 'avgCost', 'price', 'fair', 'value', 'day', 'gain', 'weight', 'plan'] as const
+// Text sorts A→Z first; fair value (price ÷ fair value) sorts cheapest first.
+const HOLDING_ASC_FIRST = ['symbol', 'fair'] as const
+
 /** Holdings, with the quick trade form opening under the row you click (or at the top for a
  * new ticker). `trading` is the open form's ticker: '' = new, null = closed. With a position
  * plan, each row shows what to buy or trim to get back on plan, and planned tickers you don't
@@ -185,6 +191,7 @@ function HoldingsTable({
   preset: TradePreset | null
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const { state: sort, toggle: onSort } = useSort('holdings', HOLDING_SORT_KEYS, HOLDING_ASC_FIRST)
   const hasPlan = actions !== null
   const cols = hasPlan ? 11 : 10
   const trade = (a: PlanAction) => onTrading(a.symbol, a.shares ? { side: a.kind === 'trim' ? 'sell' : 'buy', qty: a.shares } : undefined)
@@ -192,7 +199,22 @@ function HoldingsTable({
     const k = actions?.get(s)?.kind
     return k === 'buy' || k === 'trim'
   }
-  const shown = offOnly && hasPlan ? views.filter((v) => off(v.holding.symbol)) : views
+  const drift = (s: string) => {
+    const a = actions?.get(s)
+    return a && a.target !== null ? a.pct - a.target : null
+  }
+  const shown = sortRows(offOnly && hasPlan ? views.filter((v) => off(v.holding.symbol)) : views, sort, {
+    symbol: (v) => v.holding.symbol,
+    qty: (v) => Number(v.holding.quantity),
+    avgCost: (v) => Number(v.holding.avg_cost),
+    price: (v) => v.price,
+    fair: (v) => research.get(v.holding.symbol)?.pct ?? null,
+    value: (v) => v.value,
+    day: (v) => v.dayChange,
+    gain: (v) => v.gain,
+    weight: (v) => v.value,
+    plan: (v) => drift(v.holding.symbol),
+  })
   const notOwned = hasPlan ? [...actions.values()].filter((a) => !a.owned && (!offOnly || off(a.symbol))) : []
   const tradeRow = (symbol: string) => (
     <tr key={`trade-${symbol}`} className="border-b border-(--border) bg-(--accent-soft)/40">
@@ -217,16 +239,20 @@ function HoldingsTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-            <th className="px-5 py-2.5">Ticker</th>
-            <th className="px-3 py-2.5 text-right">Qty</th>
-            <th className="px-3 py-2.5 text-right">Avg cost</th>
-            <th className="px-3 py-2.5 text-right">Price</th>
-            <th className="px-3 py-2.5" title="Fair value, how cheap it is, and the score — click for the breakdown">Fair value</th>
-            <th className="px-3 py-2.5 text-right">Value</th>
-            <th className="px-3 py-2.5 text-right">{dayLabel}</th>
-            <th className="px-3 py-2.5 text-right">Gain</th>
-            <th className="px-3 py-2.5 text-right">Weight</th>
-            {hasPlan && <th className="hidden px-3 py-2.5 sm:table-cell">Vs plan</th>}
+            <SortTh k="symbol" sort={sort} onSort={onSort} className="px-5 py-2.5">Ticker</SortTh>
+            <SortTh k="qty" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Qty</SortTh>
+            <SortTh k="avgCost" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Avg cost</SortTh>
+            <SortTh k="price" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Price</SortTh>
+            <SortTh k="fair" sort={sort} onSort={onSort} className="px-3 py-2.5" title="Fair value, how cheap it is, and the score; sorts cheapest first">Fair value</SortTh>
+            <SortTh k="value" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Value</SortTh>
+            <SortTh k="day" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">{dayLabel}</SortTh>
+            <SortTh k="gain" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Gain</SortTh>
+            <SortTh k="weight" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Weight</SortTh>
+            {hasPlan && (
+              <SortTh k="plan" sort={sort} onSort={onSort} className="hidden px-3 py-2.5 sm:table-cell" title="Drift from target; over plan first">
+                Vs plan
+              </SortTh>
+            )}
             <th className="w-16 px-3 py-2.5" />
           </tr>
         </thead>

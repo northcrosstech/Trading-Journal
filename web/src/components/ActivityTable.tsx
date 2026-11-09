@@ -8,6 +8,8 @@ import { parseAmount, useDialog, validators, type DialogField } from '../lib/dia
 import { useToast } from '../lib/toastContext'
 import { Menu, type MenuItem } from './ui/Menu'
 import { EmptyState } from './ui/EmptyState'
+import { SortTh } from './SortTh'
+import { sortRows, useSort } from '../lib/useSort'
 
 type Kind = PortfolioActivity['kind']
 
@@ -80,6 +82,9 @@ function undoMessage(a: PortfolioActivity): string {
   }
 }
 
+const ACTIVITY_SORT_KEYS = ['date', 'event', 'details', 'cash', 'realized'] as const
+const ACTIVITY_ASC_FIRST = ['event', 'details'] as const
+
 /** Every trade, cash move and option event in a portfolio, newest first. Each entry can be
  * undone; stock and cash entries can also be edited. Both reverse the original exactly. */
 export function ActivityTable({ activity, onChanged }: { activity: PortfolioActivity[]; onChanged: () => void }) {
@@ -87,7 +92,14 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
   const toast = useToast()
   const [showUndone, setShowUndone] = useState(false)
   const undoneCount = activity.filter((a) => a.voided_at !== null).length
-  const rows = showUndone ? activity : activity.filter((a) => a.voided_at === null)
+  const { state: sort, toggle: onSort } = useSort('activity', ACTIVITY_SORT_KEYS, ACTIVITY_ASC_FIRST)
+  const rows = sortRows(showUndone ? activity : activity.filter((a) => a.voided_at === null), sort, {
+    date: (a) => a.occurred_on,
+    event: (a) => ACTIVITY_LABEL[a.kind],
+    details: (a) => a.symbol,
+    cash: (a) => (Number(a.cash_change) === 0 ? null : Number(a.cash_change)),
+    realized: (a) => (a.realized_gain === null ? null : Number(a.realized_gain)),
+  })
 
   async function run(p: Promise<unknown>, message: string) {
     try {
@@ -188,11 +200,11 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
       <table className="w-full text-sm">
         <thead>
           <tr className="border-y border-(--border) bg-white/2 text-left text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-            <th className="px-5 py-2.5">Date</th>
-            <th className="px-3 py-2.5">Event</th>
-            <th className="px-3 py-2.5">Details</th>
-            <th className="px-3 py-2.5 text-right">Cash</th>
-            <th className="px-3 py-2.5 text-right">Realized</th>
+            <SortTh k="date" sort={sort} onSort={onSort} className="px-5 py-2.5">Date</SortTh>
+            <SortTh k="event" sort={sort} onSort={onSort} className="px-3 py-2.5">Event</SortTh>
+            <SortTh k="details" sort={sort} onSort={onSort} className="px-3 py-2.5" title="By ticker">Details</SortTh>
+            <SortTh k="cash" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Cash</SortTh>
+            <SortTh k="realized" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Realized</SortTh>
             <th className="w-12 px-3 py-2.5" />
           </tr>
         </thead>
