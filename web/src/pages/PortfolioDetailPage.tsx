@@ -44,7 +44,7 @@ import { ActivityTable } from '../components/ActivityTable'
 import { ResearchPills } from '../components/ResearchBits'
 import { QuickTrade } from '../components/QuickTrade'
 import { PlanNotesCard, PositionPlanCard, reviewDue } from '../components/PositionPlan'
-import type { PlanTarget } from '../lib/positionPlan'
+import { comparePlan, planActions, type PlanAction, type PlanTarget } from '../lib/positionPlan'
 import { ResearchDrawer } from '../components/ResearchDrawer'
 import { AccountAllocationCard } from '../components/AllocationCards'
 import { useResearch } from '../lib/useResearch'
@@ -118,8 +118,33 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
   )
 }
 
+export type TradePreset = { side: 'buy' | 'sell'; qty: number }
+
+function PlanCell({ a, onTrade }: { a: PlanAction | undefined; onTrade: (a: PlanAction) => void }) {
+  if (!a) return null
+  if (a.kind === 'unplanned') return <span className="text-xs text-neutral-500">Not in plan</span>
+  if (a.kind === 'on') return <span className="text-xs text-emerald-300">✓ On plan</span>
+  const label = `${a.kind === 'buy' ? '▲ Buy' : '▼ Trim'} ${a.shares === null ? '' : `${a.shares} sh`}`.trim()
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        onTrade(a)
+      }}
+      title={`Log this ${a.kind === 'buy' ? 'buy' : 'sale'}`}
+      className="whitespace-nowrap rounded-md px-1.5 py-0.5 text-left text-xs text-amber-300 hover:bg-amber-500/15"
+    >
+      <span className="font-medium">{label}</span>
+      <span className="text-neutral-500"> ({currency(a.dollars)}{a.shares === null ? ', price pending' : ''})</span>
+    </button>
+  )
+}
+
 /** Holdings, with the quick trade form opening under the row you click (or at the top for a
- * new ticker). `trading` is the open form's ticker: '' = new, null = closed. */
+ * new ticker). `trading` is the open form's ticker: '' = new, null = closed. With a position
+ * plan, each row shows what to buy or trim to get back on plan, and planned tickers you don't
+ * own yet follow at the bottom. */
 function HoldingsTable({
   views,
   total,
@@ -135,6 +160,9 @@ function HoldingsTable({
   onTraded,
   targets,
   theses,
+  actions,
+  offOnly,
+  preset,
 }: {
   views: HoldingView[]
   total: number
@@ -146,17 +174,41 @@ function HoldingsTable({
   cash: number
   priceOf: (symbol: string) => number | null
   trading: string | null
-  onTrading: (symbol: string | null) => void
+  onTrading: (symbol: string | null, preset?: TradePreset) => void
   onTraded: (message: string) => void
   /** Plan target % by ticker (empty = no plan). */
   targets: Map<string, number>
   theses: Map<string, TickerThesisRow>
+  /** What to do per ticker to get back on plan; null = no plan. */
+  actions: Map<string, PlanAction> | null
+  offOnly: boolean
+  preset: TradePreset | null
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const hasPlan = actions !== null
+  const cols = hasPlan ? 11 : 10
+  const trade = (a: PlanAction) => onTrading(a.symbol, a.shares ? { side: a.kind === 'trim' ? 'sell' : 'buy', qty: a.shares } : undefined)
+  const off = (s: string) => {
+    const k = actions?.get(s)?.kind
+    return k === 'buy' || k === 'trim'
+  }
+  const shown = offOnly && hasPlan ? views.filter((v) => off(v.holding.symbol)) : views
+  const notOwned = hasPlan ? [...actions.values()].filter((a) => !a.owned && (!offOnly || off(a.symbol))) : []
   const tradeRow = (symbol: string) => (
     <tr key={`trade-${symbol}`} className="border-b border-(--border) bg-(--accent-soft)/40">
-      <td colSpan={10} className="px-5 py-3">
-        <QuickTrade key={symbol} portfolioId={portfolioId} views={views} priceOf={priceOf} cash={cash} symbol={symbol} onDone={onTraded} onCancel={() => onTrading(null)} />
+      <td colSpan={cols} className="px-5 py-3">
+        <QuickTrade
+          key={`${symbol}-${preset?.side ?? ''}-${preset?.qty ?? ''}`}
+          portfolioId={portfolioId}
+          views={views}
+          priceOf={priceOf}
+          cash={cash}
+          symbol={symbol}
+          side={preset?.side}
+          qty={preset?.qty}
+          onDone={onTraded}
+          onCancel={() => onTrading(null)}
+        />
       </td>
     </tr>
   )
@@ -174,12 +226,13 @@ function HoldingsTable({
             <th className="px-3 py-2.5 text-right">{dayLabel}</th>
             <th className="px-3 py-2.5 text-right">Gain</th>
             <th className="px-3 py-2.5 text-right">Weight</th>
+            {hasPlan && <th className="hidden px-3 py-2.5 sm:table-cell">Vs plan</th>}
             <th className="w-16 px-3 py-2.5" />
           </tr>
         </thead>
         <tbody>
           {trading === '' && tradeRow('')}
-          {views.flatMap((v) => [
+          {shown.flatMap((v) => [
             editingId === v.holding.id ? (
               <HoldingEditRow
                 key={v.holding.id}
@@ -203,6 +256,11 @@ function HoldingsTable({
                     <span className="ml-1.5 align-middle" title="Your thesis is due for review — open the fair value breakdown">
                       <Pill tone="amber">review</Pill>
                     </span>
+                  )}
+                  {hasPlan && (
+                    <div className="font-normal sm:hidden">
+                      <PlanCell a={actions.get(v.holding.symbol)} onTrade={trade} />
+                    </div>
                   )}
                 </td>
                 <td className="px-3 py-3 text-right tabular-nums text-neutral-300">{Number(Number(v.holding.quantity).toFixed(6))}</td>
@@ -237,8 +295,13 @@ function HoldingsTable({
                 </td>
                 <td className="px-3 py-3 text-right tabular-nums text-neutral-400">
                   {total > 0 ? percentFmt(v.value / total).replace('+', '') : '—'}
-                  {targets.size > 0 && <div className="text-xs text-neutral-600">{targets.has(v.holding.symbol) ? `target ${Number(targets.get(v.holding.symbol)!.toFixed(1))}%` : 'not in plan'}</div>}
+                  {targets.has(v.holding.symbol) && <div className="text-xs text-neutral-500">→ {Number(targets.get(v.holding.symbol)!.toFixed(1))}%</div>}
                 </td>
+                {hasPlan && (
+                  <td className="hidden px-3 py-3 sm:table-cell">
+                    <PlanCell a={actions.get(v.holding.symbol)} onTrade={trade} />
+                  </td>
+                )}
                 <td className="px-3 py-3 text-right">
                   <button
                     onClick={(e) => {
@@ -255,6 +318,46 @@ function HoldingsTable({
             ),
             trading === v.holding.symbol ? tradeRow(v.holding.symbol) : null,
           ])}
+          {notOwned.length > 0 && (
+            <tr className="border-y border-(--border) bg-white/2">
+              <td colSpan={cols} className="px-5 py-2 text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                In your plan, not owned yet
+              </td>
+            </tr>
+          )}
+          {notOwned.flatMap((a) => [
+            <tr key={`plan-${a.symbol}`} onClick={() => trade(a)} title={`Log a buy of ${a.symbol}`} className="cursor-pointer border-b border-(--border) last:border-0 hover:bg-white/2">
+              <td className="px-5 py-3 font-semibold text-white">
+                {a.symbol}
+                <div className="font-normal sm:hidden">
+                  <PlanCell a={a} onTrade={trade} />
+                </div>
+              </td>
+              <td className="px-3 py-3 text-right text-neutral-600">—</td>
+              <td className="px-3 py-3 text-right text-neutral-600">—</td>
+              <td className="px-3 py-3 text-right tabular-nums text-neutral-200">{a.price !== null ? priceFmt(a.price) : <Pill tone="amber">pending</Pill>}</td>
+              <td className="px-3 py-3" />
+              <td className="px-3 py-3 text-right text-neutral-600">—</td>
+              <td className="px-3 py-3" />
+              <td className="px-3 py-3" />
+              <td className="px-3 py-3 text-right tabular-nums text-neutral-400">
+                0%
+                {a.target !== null && <div className="text-xs text-neutral-500">→ {Number(a.target.toFixed(1))}%</div>}
+              </td>
+              <td className="hidden px-3 py-3 sm:table-cell">
+                <PlanCell a={a} onTrade={trade} />
+              </td>
+              <td className="px-3 py-3" />
+            </tr>,
+            trading === a.symbol ? tradeRow(a.symbol) : null,
+          ])}
+          {offOnly && hasPlan && shown.length === 0 && notOwned.length === 0 && (
+            <tr>
+              <td colSpan={cols} className="px-5 py-6 text-center text-sm text-emerald-300">
+                Everything is on plan.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -277,6 +380,28 @@ export function PortfolioDetailPage() {
   const [view, setView] = useState<View>('positions')
   const [trade, setTrade] = useState<TradeTab | null>(null)
   const [trading, setTrading] = useState<string | null>(null)
+  const [preset, setPreset] = useState<TradePreset | null>(null)
+  // "Off plan only" on the holdings table, remembered per browser.
+  const [offOnly, setOffOnly] = useState(() => {
+    try {
+      return localStorage.getItem('positions-off-plan-only') === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleOffOnly = () =>
+    setOffOnly((v) => {
+      try {
+        localStorage.setItem('positions-off-plan-only', v ? '0' : '1')
+      } catch {
+        // storage blocked: just don't remember
+      }
+      return !v
+    })
+  const openTrade = (symbol: string | null, p?: TradePreset) => {
+    setTrading(symbol)
+    setPreset(p ?? null)
+  }
   const [plan, setPlan] = useState<PlanTarget[]>([])
   const [tolerance, setTolerance] = useState(5)
   const [theses, setTheses] = useState<Map<string, TickerThesisRow>>(new Map())
@@ -342,6 +467,12 @@ export function PortfolioDetailPage() {
     [snap, prices],
   )
   const longOptionsValue = useMemo(() => openOptions.filter((o) => o.side === 'long').reduce((s, o) => s + optionValue(o, prices), 0), [openOptions, prices])
+  // Buy / trim per ticker to get back on plan, on the same base as the Plan tab.
+  const actions = useMemo(() => {
+    if (!snap || plan.length === 0) return null
+    const cmp = comparePlan(planHoldings, longOptionsValue, snap.cash, plan, tolerance)
+    return new Map(planActions(cmp.rows, (s) => prices.get(s)?.close ?? null).map((a) => [a.symbol, a]))
+  }, [snap, plan, planHoldings, longOptionsValue, tolerance, prices])
   const research = useResearch(holdingSymbols, researchPrices)
   const [researchOpen, setResearchOpen] = useState<string | null>(null)
   const realized = useMemo(() => activity.reduce((s, a) => s + (a.voided_at === null && a.realized_gain !== null ? Number(a.realized_gain) : 0), 0), [activity])
@@ -425,6 +556,7 @@ export function PortfolioDetailPage() {
   const tradeDone = (message: string) => {
     setTrade(null)
     setTrading(null)
+    setPreset(null)
     toast(message)
     load()
   }
@@ -433,6 +565,11 @@ export function PortfolioDetailPage() {
     return v?.price ?? prices.get(s)?.close ?? null
   }
   const lastEntry = activity.find((a) => a.voided_at === null)?.created_at ?? null
+  const planSummary = actions && {
+    off: [...actions.values()].filter((a) => a.kind === 'buy' || a.kind === 'trim').length,
+    buy: [...actions.values()].filter((a) => a.kind === 'buy').reduce((s, a) => s + a.dollars, 0),
+    trim: [...actions.values()].filter((a) => a.kind === 'trim').reduce((s, a) => s + a.dollars, 0),
+  }
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -517,15 +654,35 @@ export function PortfolioDetailPage() {
           <Card
             title="Stocks & funds"
             subtitle={
-              snap.holdings.length > 0
-                ? `${snap.holdings.length} holding${snap.holdings.length === 1 ? '' : 's'} · ${currency(snap.holdingsValue)} · click a row to log a buy or sale${lastEntry ? ` · last entry ${dateFmt(centralDateStr(new Date(lastEntry)))}` : ''}`
-                : undefined
+              snap.holdings.length > 0 ? (
+                <>
+                  {`${snap.holdings.length} holding${snap.holdings.length === 1 ? '' : 's'} · ${currency(snap.holdingsValue)}`}
+                  {planSummary &&
+                    (planSummary.off === 0 ? (
+                      <span className="text-emerald-300"> · on plan</span>
+                    ) : (
+                      <span className="text-amber-300">
+                        {` · ${planSummary.off} off plan`}
+                        {planSummary.buy > 0 && ` · buy ${currency(planSummary.buy)}`}
+                        {planSummary.trim > 0 && ` · trim ${currency(planSummary.trim)}`}
+                      </span>
+                    ))}
+                  {` · click a row to log a buy or sale${lastEntry ? ` · last entry ${dateFmt(centralDateStr(new Date(lastEntry)))}` : ''}`}
+                </>
+              ) : undefined
             }
             flush
             actions={
-              <Button size="sm" icon={<Plus size={14} />} onClick={() => (snap.holdings.length > 0 ? setTrading('') : setTrade('existing'))}>
-                {snap.holdings.length > 0 ? 'New ticker' : 'Add shares'}
-              </Button>
+              <>
+                {actions && snap.holdings.length > 0 && (
+                  <Button size="sm" variant={offOnly ? 'primary' : 'ghost'} onClick={toggleOffOnly} aria-pressed={offOnly}>
+                    Off plan only
+                  </Button>
+                )}
+                <Button size="sm" icon={<Plus size={14} />} onClick={() => (snap.holdings.length > 0 ? openTrade('') : setTrade('existing'))}>
+                  {snap.holdings.length > 0 ? 'New ticker' : 'Add shares'}
+                </Button>
+              </>
             }
           >
             {snap.holdings.length === 0 ? (
@@ -552,10 +709,13 @@ export function PortfolioDetailPage() {
                 cash={snap.cash}
                 priceOf={priceOf}
                 trading={trading}
-                onTrading={setTrading}
+                onTrading={openTrade}
                 onTraded={tradeDone}
                 targets={planTargets}
                 theses={theses}
+                actions={actions}
+                offOnly={offOnly}
+                preset={preset}
               />
             )}
           </Card>

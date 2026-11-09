@@ -62,6 +62,36 @@ export function comparePlan(
   return { rows, base, off, unplanned: rows.filter((r) => r.status === 'unplanned' && r.kind === 'ticker').length }
 }
 
+/** What to do with one ticker to get back to its exact target, in whole shares rounded down
+ * (so you never overshoot or spend more than needed). Off plan by less than a share counts as
+ * on plan. With no price yet, `shares` is null and `dollars` is the full amount to move. */
+export type PlanAction = {
+  symbol: string
+  kind: 'buy' | 'trim' | 'on' | 'unplanned'
+  shares: number | null
+  dollars: number
+  price: number | null
+  pct: number
+  target: number | null
+  owned: boolean
+}
+
+export function planActions(rows: PlanRow[], priceOf: (symbol: string) => number | null): PlanAction[] {
+  return rows
+    .filter((r) => r.kind === 'ticker')
+    .map((r) => {
+      const price = r.price ?? priceOf(r.symbol)
+      const base = { symbol: r.symbol, price, pct: r.pct, target: r.target, owned: r.value > 0 }
+      if (r.status === 'unplanned') return { ...base, kind: 'unplanned' as const, shares: null, dollars: 0 }
+      if (r.status === 'on') return { ...base, kind: 'on' as const, shares: null, dollars: 0 }
+      const kind = r.move > 0 ? ('buy' as const) : ('trim' as const)
+      if (!price || price <= 0) return { ...base, kind, shares: null, dollars: Math.abs(r.move) }
+      // A hair of float error mustn't drop a whole share (9.9999999 is 10).
+      const shares = Math.floor(Math.abs(r.move) / price + 1e-9)
+      return shares === 0 ? { ...base, kind: 'on' as const, shares: null, dollars: 0 } : { ...base, kind, shares, dollars: shares * price }
+    })
+}
+
 export type Buy = { symbol: string; amount: number; price: number | null }
 
 /** Buys only (no selling): where `amount` should go to get closest to the plan. The money

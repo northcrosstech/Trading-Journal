@@ -31,6 +31,8 @@ export function QuickTrade({
   priceOf,
   cash,
   symbol,
+  side = 'buy',
+  qty,
   onDone,
   onCancel,
 }: {
@@ -41,11 +43,14 @@ export function QuickTrade({
   cash: number
   /** The position clicked; '' = a new ticker. */
   symbol: string
+  /** Pre-filled from the plan's suggested trade. */
+  side?: Side
+  qty?: number
   onDone: (message: string) => void
   onCancel: () => void
 }) {
   const [nextKey, setNextKey] = useState(1)
-  const [lines, setLines] = useState<Line[]>([{ key: 0, symbol, side: 'buy', qty: '', price: priceText(symbol ? priceOf(symbol) : null), fee: '', autoPrice: true }])
+  const [lines, setLines] = useState<Line[]>([{ key: 0, symbol, side, qty: qty ? String(qty) : '', price: priceText(symbol ? priceOf(symbol) : null), fee: '', autoPrice: true }])
   const [on, setOn] = useState(centralDateStr(new Date()))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ line: number | null; message: string } | null>(null)
