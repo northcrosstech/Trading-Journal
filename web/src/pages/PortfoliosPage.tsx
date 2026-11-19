@@ -13,6 +13,8 @@ import { useWealthPortfolios } from '../lib/useWealthPortfolios'
 import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { DividendsCard } from '../components/DividendsCard'
+import { CombinedHoldingsSection } from '../components/CombinedHoldings'
+import { IncomeSection } from '../components/IncomeCard'
 import { GetPricesButton } from '../components/GetPricesButton'
 import { HealthCheckCard } from '../components/HealthCheckCard'
 import { BrokerageAllocationCard } from '../components/AllocationCards'
@@ -173,6 +175,10 @@ export function PortfoliosPage() {
               )
             })}
           </div>
+
+          <CombinedHoldingsSection perPortfolio={w.perPortfolio} combined={combined} openOptions={w.openOptions} />
+
+          <IncomeSection portfolioIds={w.activeIds} />
 
           <BrokerageAllocationCard perPortfolio={w.perPortfolio} options={w.openOptions} prices={w.prices} onChanged={w.load} />
 

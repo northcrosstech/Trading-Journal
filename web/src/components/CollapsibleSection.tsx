@@ -2,14 +2,28 @@ import { useState, type ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
 
 /** A part of a page that stays folded to one line until it's asked for, so the page leads
- * with the work. Whether it's open is remembered per browser under `storageKey`. Nothing
+ * with the work. Whether it's open is remembered per browser under `storageKey`; until a
+ * choice has been made it starts as `defaultOpen` says (folded unless told otherwise). Nothing
  * inside is drawn while it's folded. */
-export function CollapsibleSection({ storageKey, title, hint, children }: { storageKey: string; title: string; hint?: string; children: ReactNode }) {
+export function CollapsibleSection({
+  storageKey,
+  title,
+  hint,
+  defaultOpen = false,
+  children,
+}: {
+  storageKey: string
+  title: string
+  hint?: string
+  defaultOpen?: boolean
+  children: ReactNode
+}) {
   const [open, setOpen] = useState(() => {
     try {
-      return localStorage.getItem(storageKey) === '1'
+      const stored = localStorage.getItem(storageKey)
+      return stored === null ? defaultOpen : stored === '1'
     } catch {
-      return false
+      return defaultOpen
     }
   })
   const toggle = () => {
