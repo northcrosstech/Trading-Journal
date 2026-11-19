@@ -70,7 +70,7 @@ export function ResearchDrawer({
   async function editNumber(opts: { title: string; label: string; current: number | null; hint: string; min?: number; max?: number; prefix?: string; suffix?: string }) {
     const v = await dialog.form({
       title: opts.title,
-      description: 'Leave blank to go back to the automatic value.',
+      description: 'Leave blank to use the automatic value.',
       submitLabel: 'Save',
       fields: [
         {
@@ -178,7 +178,7 @@ export function ResearchDrawer({
                         </>
                       ) : !autoMoved(c.field, c.auto, c.value) ? (
                         <>
-                          Your {c.label} ({showValue(c.field, c.value)}) matches the automatic one now. Switch to automatic so it keeps updating.
+                          Your {c.label} ({showValue(c.field, c.value)}) matches the automatic one now. Use automatic so it keeps updating.
                         </>
                       ) : (
                         <>
@@ -187,10 +187,12 @@ export function ResearchDrawer({
                         </>
                       )}
                     </span>
+                    {/* The same two choices in every state: "Use automatic" drops your number,
+                        "Keep mine" keeps it. Only which one is highlighted changes. */}
                     <span className="flex gap-1.5">
                       {c.status === 'changed' && !autoMoved(c.field, c.auto, c.value) ? (
                         <Button size="sm" onClick={() => reset(c.field, c.label)}>
-                          Switch to automatic
+                          Use automatic
                         </Button>
                       ) : (
                         c.status === 'changed' && (
@@ -201,12 +203,12 @@ export function ResearchDrawer({
                       )}
                       {c.status === 'ended' && (
                         <Button size="sm" variant="ghost" onClick={() => reset(c.field, c.label)}>
-                          OK
+                          Use automatic
                         </Button>
                       )}
                       {(c.status === 'ended' || autoMoved(c.field, c.auto, c.value)) && (
                         <Button size="sm" onClick={() => keep(c)}>
-                          {c.status === 'ended' ? 'Use mine again' : 'Keep mine'}
+                          Keep mine
                         </Button>
                       )}
                     </span>
@@ -307,23 +309,19 @@ export function ResearchDrawer({
                     </span>
                     <IconButton title={`Edit ${p.label.toLowerCase()}`} onClick={() => editPart(p)} />
                   </div>
-                  <div className="mt-0.5 flex items-center gap-2 pl-23 text-xs text-neutral-500">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-23 text-xs text-neutral-500">
                     {p.detail}
                     {p.edited && (
                       <>
                         <Pill tone="violet">edited</Pill>
                         <span>automatic {p.auto ?? '—'}</span>
-                        <button
-                          className="inline-flex items-center gap-1 text-neutral-400 hover:text-white"
-                          title="Back to automatic"
+                        <ResetLink
                           onClick={() =>
                             p.key === 'economy'
                               ? user && save(setResearchSettings(user.id, { economy_override: null }), 'Economy score back to automatic')
                               : user && save(setResearchOverride(user.id, r.symbol, p.key as ResearchOverrideField, null), `${p.label} back to automatic`)
                           }
-                        >
-                          <RotateCcw size={11} /> Reset
-                        </button>
+                        />
                       </>
                     )}
                   </div>
@@ -402,18 +400,26 @@ export function ResearchDrawer({
 const showValue = (field: ResearchOverrideField, v: number | null) =>
   v === null ? '—' : field === 'eps' ? `$${fmt(v)}` : field === 'growth' ? `${fmt(v, 1)}%` : `${v} pts`
 
+/** Drops your number so the automatic one is used again. */
 function ResetLink({ onClick }: { onClick: () => void }) {
   return (
-    <button className="inline-flex items-center gap-1 text-neutral-400 hover:text-white" title="Back to automatic" onClick={onClick}>
-      <RotateCcw size={11} /> Reset
+    <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap text-neutral-400 hover:text-white" onClick={onClick}>
+      <RotateCcw size={11} /> Use automatic
     </button>
   )
 }
 
+/** The edit pencil: a 28px target, so it's easy to hit. */
 function IconButton({ title, onClick }: { title: string; onClick: () => void }) {
   return (
-    <button title={title} onClick={onClick} className="rounded-md p-1 text-neutral-600 transition hover:bg-(--card-raised) hover:text-white">
-      <Pencil size={12} />
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition hover:bg-(--card-raised) hover:text-white"
+    >
+      <Pencil size={14} />
     </button>
   )
 }

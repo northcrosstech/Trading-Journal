@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Landmark, PieChart } from 'lucide-react'
-import type { DividendInfo, InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
-import { fetchDividendInfo, fetchInstallmentPayments, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
+import { ArrowLeftRight, ChevronRight, Landmark, PieChart } from 'lucide-react'
+import type { AuditProblem, CspPosition, DividendInfo, InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
+import { fetchAuditProblems, fetchCsps, fetchDividendInfo, fetchInstallmentPayments, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
 import { FreedomGauge } from '../components/FreedomGauge'
-import { addMonths, categoryLabel, isDebt, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
+import { NeedsAttention } from '../components/NeedsAttention'
+import { addMonths, monthLabel, monthOf, monthTotals } from '../lib/networth'
 import { KIND_TONE, dayChangeLabel, kindLabel, signedCurrency as signed } from '../lib/portfolio'
 import { dividendRows } from '../lib/dividends'
+import { expiryItems, healthItems, priceItems } from '../lib/attention'
 import { centralDateStr, currency, percentFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
+import { useUrlState } from '../lib/useUrlState'
 import { useWealthPortfolios } from '../lib/useWealthPortfolios'
-import { AllocationDonut, NetWorthChart } from '../components/WealthCharts'
 import { PageHeader } from '../components/ui/PageHeader'
 import { StatCard } from '../components/ui/StatCard'
 import { Card } from '../components/ui/Card'
@@ -19,18 +21,28 @@ import { ButtonLink } from '../components/ui/Button'
 import { Pill } from '../components/ui/Pill'
 import { EmptyState } from '../components/ui/EmptyState'
 
-/** Wealth home: net worth, investments and dividend income on one screen, with links into
- * the detail pages. Read-only. */
+// The detail lives on its own page; Overview only points at it.
+const MORE = [
+  { to: '/networth', icon: Landmark, title: 'Net worth by month', sub: 'Balances, the year so far and where it sits' },
+  { to: '/portfolios', icon: PieChart, title: 'Allocation and targets', sub: 'What you hold and what is off target' },
+  { to: '/networth?view=cashflow', icon: ArrowLeftRight, title: 'Cash flow', sub: 'What came in, went out and was kept' },
+]
+
+/** Wealth home: how you are doing (freedom gauge, four headline numbers) and what needs you
+ * (month to close, things to fix), with links into the detail pages. Read-only. */
 export function WealthOverviewPage() {
   const today = centralDateStr(new Date())
   const month = monthOf(today)
-  const year = Number(today.slice(0, 4))
   const w = useWealthPortfolios()
   const [accounts, setAccounts] = useState<NetworthAccount[] | null>(null)
   const [balances, setBalances] = useState<NetworthBalance[]>([])
   const [dividends, setDividends] = useState<Map<string, DividendInfo>>(new Map())
   const [payments, setPayments] = useState<InstallmentPayment[]>([])
+  const [problems, setProblems] = useState<AuditProblem[] | null>(null)
+  const [csps, setCsps] = useState<CspPosition[]>([])
   const [error, setError] = useState<string | null>(null)
+  // /wealth?details=freedom opens the freedom details; closing them takes it off the link.
+  const [details, setDetails] = useUrlState<'' | 'freedom'>('details', '', ['', 'freedom'])
 
   useEffect(() => {
     Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchDividendInfo(), fetchInstallmentPayments()])
@@ -41,6 +53,13 @@ export function WealthOverviewPage() {
         setDividends(new Map(d.map((x) => [x.symbol, x])))
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    // Only feed the "Needs attention" list, so a failure here leaves the page as it is.
+    fetchAuditProblems()
+      .then(setProblems)
+      .catch(() => setProblems(null))
+    fetchCsps()
+      .then(setCsps)
+      .catch(() => setCsps([]))
   }, [])
 
   const portfolios = useMemo(() => w.portfolios ?? [], [w.portfolios])
@@ -49,30 +68,24 @@ export function WealthOverviewPage() {
     () => (accounts ? monthTotals(addMonths(month, -1), accounts, balances, portfolios, w.values) : null),
     [accounts, balances, portfolios, w.values, month],
   )
-  const bars = useMemo(
-    () =>
-      accounts
-        ? yearTotals(year, month, accounts, balances, portfolios, w.values).map((t) => ({
-            month: t.month,
-            label: monthLabel(t.month, 'short'),
-            net: t.net,
-            assets: t.assets,
-            debts: t.debts,
-          }))
-        : [],
-    [accounts, balances, portfolios, w.values, year, month],
-  )
   const projectedDividends = useMemo(
     () => dividendRows(w.activeHoldings, dividends, w.prices, Number(today.slice(5, 7))).reduce((s, r) => s + r.perYear, 0),
     [w.activeHoldings, dividends, w.prices, today],
   )
-
-  // Net worth by category for this month, largest first.
-  const byCategory = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const l of totals?.lines ?? []) m.set(l.category, (m.get(l.category) ?? 0) + l.amount)
-    return Array.from(m, ([category, amount]) => ({ category, amount })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
-  }, [totals])
+  // The month waiting to be closed is the banner's job, so it isn't repeated in this list.
+  const attention = useMemo(
+    () => [
+      ...healthItems(problems),
+      ...expiryItems(
+        today,
+        w.active,
+        w.openOptions,
+        csps.filter((c) => c.status === 'open'),
+      ),
+      ...priceItems(w.pending),
+    ],
+    [problems, today, w.active, w.openOptions, csps, w.pending],
+  )
 
   const loadError = error ?? w.error
   if (loadError) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load: {loadError}</div>
@@ -81,13 +94,14 @@ export function WealthOverviewPage() {
   const hasPrev = prev !== null && prev.lines.length > 0
   const change = hasPrev ? totals.net - prev!.net : null
   const nothingYet = totals.lines.length === 0 && w.active.length === 0
-  const maxCategory = Math.max(1, ...byCategory.map((c) => Math.abs(c.amount)))
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
       <PageHeader title="Wealth" subtitle={`${monthLabel(month)} · net worth, investments and income at a glance`} />
 
       <CloseMonthBanner accounts={accounts ?? []} balances={balances} payments={payments} />
+
+      <NeedsAttention items={attention} />
 
       {nothingYet ? (
         <Card>
@@ -100,17 +114,26 @@ export function WealthOverviewPage() {
                   Add a portfolio
                 </ButtonLink>
                 <ButtonLink to="/networth" icon={<Landmark size={16} />}>
-                  Add net worth accounts
+                  Add balances
                 </ButtonLink>
               </div>
             }
           >
-            Add your investment portfolios and the accounts you own or owe (home, cash, cards, loans) to see everything in one place.
+            Add your investment portfolios and the balances of what you own or owe (home, cash, cards, loans) to see everything in one place.
           </EmptyState>
         </Card>
       ) : (
         <>
-          <FreedomGauge today={today} month={month} accounts={accounts ?? []} balances={balances} portfolios={portfolios} values={w.values} />
+          <FreedomGauge
+            today={today}
+            month={month}
+            accounts={accounts ?? []}
+            balances={balances}
+            portfolios={portfolios}
+            values={w.values}
+            detailsOpen={details === 'freedom'}
+            onDetailsClose={details === 'freedom' ? () => setDetails(null) : undefined}
+          />
 
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <StatCard label="Net worth" value={currency(totals.net)} sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`} accent />
@@ -132,84 +155,50 @@ export function WealthOverviewPage() {
             <StatCard label="Dividend income" value={`${currency(projectedDividends)}/yr`} sub={`≈ ${currency(projectedDividends / 12)} a month`} />
           </div>
 
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
-            <Card
-              title={`Net worth · ${year}`}
-              subtitle="Month by month"
-              className="xl:col-span-3"
-              actions={
-                <ButtonLink to="/networth" size="sm" icon={<ArrowRight size={14} />}>
-                  Update balances
-                </ButtonLink>
-              }
-            >
-              <NetWorthChart data={bars} />
-            </Card>
-            <Card
-              title="Investments allocation"
-              className="xl:col-span-2"
-              actions={
-                <ButtonLink to="/portfolios" size="sm" icon={<ArrowRight size={14} />}>
-                  Portfolios
-                </ButtonLink>
-              }
-            >
-              {w.active.length === 0 ? (
-                <EmptyState title="No portfolios yet" action={<ButtonLink to="/portfolios" variant="primary" size="sm">Add a portfolio</ButtonLink>} />
-              ) : (
-                <AllocationDonut allocation={w.allocation} centerLabel="Invested" />
-              )}
-            </Card>
-          </div>
+          <nav aria-label="More detail" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {MORE.map(({ to, icon: Icon, title, sub }) => (
+              <Link
+                key={to}
+                to={to}
+                className="group flex items-center gap-3 rounded-xl border border-(--border) bg-(--card) px-4 py-3 transition hover:border-(--accent)/50 hover:bg-(--card-raised)"
+              >
+                <Icon size={18} className="shrink-0 text-(--accent-text)" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-neutral-100">{title}</span>
+                  <span className="block text-xs text-neutral-500">{sub}</span>
+                </span>
+                <ChevronRight size={16} className="shrink-0 text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300" />
+              </Link>
+            ))}
+          </nav>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <Card title="Where your net worth is" subtitle={monthLabel(month)}>
-              {byCategory.length === 0 ? (
-                <p className="text-sm text-neutral-500">No balances for this month yet.</p>
-              ) : (
-                <div className="flex flex-col gap-2.5">
-                  {byCategory.map((c) => {
-                    const debt = isDebt(c.category as NetworthAccount['category'])
-                    return (
-                      <div key={c.category} className="flex items-center gap-3 text-sm">
-                        <span className="w-40 shrink-0 text-neutral-300">{categoryLabel(c.category as NetworthAccount['category'])}</span>
-                        <span className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-800">
-                          <span
-                            className={`block h-full rounded-full ${debt ? 'bg-red-400/80' : 'bg-teal-400/80'}`}
-                            style={{ width: `${(Math.abs(c.amount) / maxCategory) * 100}%` }}
-                          />
-                        </span>
-                        <span className={`w-28 shrink-0 text-right font-medium tabular-nums ${debt ? 'text-red-300' : 'text-neutral-100'}`}>{currency(c.amount)}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </Card>
-            <Card title="Portfolios">
-              {w.perPortfolio.length === 0 ? (
-                <p className="text-sm text-neutral-500">No portfolios yet.</p>
-              ) : (
-                <div className="flex flex-col divide-y divide-(--border)">
-                  {w.perPortfolio.map(({ portfolio: p, snap }) => (
-                    <Link key={p.id} to={`/portfolios/${p.id}`} className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-3 transition hover:bg-(--card-raised)">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-white">{p.name}</span>
-                        <span className="mt-1 flex flex-wrap gap-1.5">
-                          <Pill tone={KIND_TONE[p.kind]}>{kindLabel(p.kind)}</Pill>
-                          {snap.cash < 0 && <Pill tone="amber">{currency(-snap.cash)} margin</Pill>}
-                        </span>
+          <Card title="Portfolios">
+            {w.perPortfolio.length === 0 ? (
+              <p className="text-sm text-neutral-500">
+                No portfolios yet.{' '}
+                <Link to="/portfolios" className="text-(--accent-text) hover:underline">
+                  Add a portfolio
+                </Link>
+              </p>
+            ) : (
+              <div className="flex flex-col divide-y divide-(--border)">
+                {w.perPortfolio.map(({ portfolio: p, snap }) => (
+                  <Link key={p.id} to={`/portfolios/${p.id}`} className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 transition hover:bg-(--card-raised)">
+                    <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="truncate text-sm font-medium text-white">{p.name}</span>
+                      <Pill tone={KIND_TONE[p.kind]}>{kindLabel(p.kind)}</Pill>
+                    </span>
+                    <span className="flex shrink-0 flex-col items-end sm:flex-row sm:items-baseline sm:gap-4">
+                      <span className="text-sm font-semibold tabular-nums text-white">{currency(snap.total)}</span>
+                      <span className={`text-xs tabular-nums whitespace-nowrap sm:w-44 sm:text-right ${toneClass(snap.dayChange)}`}>
+                        {signed(snap.dayChange)} {dayChangeLabel(snap.asOf) === 'Today' ? 'today' : dayChangeLabel(snap.asOf)}
                       </span>
-                      <span className="text-right">
-                        <span className="block text-sm font-semibold tabular-nums text-white">{currency(snap.total)}</span>
-                        <span className={`text-xs tabular-nums ${toneClass(snap.dayChange)}`}>{signed(snap.dayChange)} {dayChangeLabel(snap.asOf) === 'Today' ? 'today' : dayChangeLabel(snap.asOf)}</span>
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </Card>
-          </div>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </Card>
         </>
       )}
     </div>

@@ -5,11 +5,11 @@ import type { Holding } from '../lib/database.types'
 import { addToWatchlist, fetchFundamentals, fetchHoldings, fetchLatestPrices, fetchWatchlist, removeFromWatchlist, requestMarketData } from '../lib/wealthQueries'
 import { useResearch } from '../lib/useResearch'
 import type { Research } from '../lib/research'
-import { currency, dateFmt, priceFmt } from '../lib/format'
+import { currency, priceFmt } from '../lib/format'
 import { INPUT } from '../lib/ui'
 import { useDialog } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
-import { FairBar, ScoreBadge } from '../components/ResearchBits'
+import { FairBar, FairLegend, ScoreBadge } from '../components/ResearchBits'
 import { ResearchDrawer } from '../components/ResearchDrawer'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
@@ -23,6 +23,17 @@ type Sort = 'score' | 'value' | 'earnings'
 
 const POLL_MS = 10_000
 const POLL_TRIES = 18 // about 3 minutes: the worker paces Finnhub at ~1 call a second
+
+// One set of columns for the header and every row, so they line up. Below md a row stacks
+// into two columns and the header is hidden.
+const COLS =
+  'md:grid-cols-[minmax(0,1fr)_4.5rem_5rem_6.5rem_8rem_6.5rem_1rem] md:gap-x-3 xl:grid-cols-[minmax(0,1.4fr)_5.5rem_6rem_12rem_9rem_minmax(0,1fr)_1rem] xl:gap-x-4'
+
+/** "Nov 20": earnings dates are at most a few months out, so the year is left off. */
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
 
 /** One list of every ticker you hold or watch: price, fair value, how cheap it is, score and
  * the next earnings date. Clicking a row opens the full breakdown. */
@@ -93,7 +104,7 @@ export function ResearchPage() {
       title: 'Add to watchlist',
       description: 'Fair value, score and earnings date appear in about a minute.',
       submitLabel: 'Add',
-      fields: [{ name: 'symbol', label: 'Ticker', placeholder: 'e.g. NVDA', validate: (s) => (/^[A-Za-z.\-]{1,10}$/.test(s.trim()) ? null : 'Enter a ticker, e.g. NVDA') }],
+      fields: [{ name: 'symbol', label: 'Ticker', placeholder: 'e.g. NVDA', validate: (s) => (/^[A-Za-z.-]{1,10}$/.test(s.trim()) ? null : 'Enter a ticker, e.g. NVDA') }],
     })
     if (!v) return
     const symbol = v.symbol.trim().toUpperCase()
@@ -107,7 +118,7 @@ export function ResearchPage() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      toast(/research_watchlist/.test(msg) ? 'Run the research migration first' : msg, 'error')
+      toast(/research_watchlist/.test(msg) ? "This isn't set up yet." : msg, 'error')
     }
   }
 
@@ -170,6 +181,8 @@ export function ResearchPage() {
         </label>
       </div>
 
+      {loaded && ready && list.length > 0 && <FairLegend />}
+
       <Card flush>
         {!loaded || !ready ? (
           <div className="px-5 py-10 text-center text-sm text-neutral-500">Loading…</div>
@@ -186,49 +199,75 @@ export function ResearchPage() {
             Add tickers you're thinking about buying to see their fair value and score next to what you already own.
           </EmptyState>
         ) : (
-          <ul className="divide-y divide-(--border)">
-            {list.map((r) => (
-              <li key={r.symbol}>
-                <button onClick={() => setOpen(r.symbol)} className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-3.5 text-left transition hover:bg-white/2 md:grid-cols-[minmax(0,1.6fr)_6rem_6rem_9rem_9rem_minmax(0,1fr)_1rem]">
-                  <span className="min-w-0">
-                    <span className="flex items-center gap-2">
-                      <span className="font-semibold text-white">{r.symbol}</span>
-                      {show === 'all' && held.has(r.symbol) && <Pill tone="teal">Held</Pill>}
-                      {fetching.includes(r.symbol) && <Pill tone="amber">Fetching…</Pill>}
-                      {r.checks.length > 0 && (
-                        <Pill tone="amber" title="An edit of yours needs a look: open to see">
-                          Check edit{r.checks.length === 1 ? '' : 's'}
-                        </Pill>
+          <>
+            <div className={`hidden items-end border-b border-(--border) px-5 py-2.5 text-xs font-medium text-neutral-500 md:grid ${COLS}`}>
+              <span>Ticker</span>
+              <span className="text-right">Price</span>
+              <span className="text-right">Fair value</span>
+              <span>Price vs fair value</span>
+              <span>Score (out of 100)</span>
+              <span>Next earnings</span>
+              <span />
+            </div>
+            <ul className="divide-y divide-(--border)">
+              {list.map((r) => (
+                <li key={r.symbol}>
+                  <button onClick={() => setOpen(r.symbol)} className={`group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-3.5 text-left transition hover:bg-white/2 ${COLS}`}>
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="font-semibold text-white">{r.symbol}</span>
+                        {show === 'all' && held.has(r.symbol) && <Pill tone="teal">Held</Pill>}
+                        {fetching.includes(r.symbol) && <Pill tone="amber">Fetching…</Pill>}
+                        {r.checks.length > 0 && (
+                          <Pill tone="amber" title="An edit of yours needs a look: open to see">
+                            Check edit{r.checks.length === 1 ? '' : 's'}
+                          </Pill>
+                        )}
+                      </span>
+                      <span className="block truncate text-xs text-neutral-500">{r.name ?? (r.kind === 'etf' ? 'Fund (ETF)' : ' ')}</span>
+                    </span>
+                    <span className="text-right tabular-nums text-neutral-200 md:order-0 md:max-xl:text-sm">{r.price !== null ? priceFmt(r.price) : '—'}</span>
+                    {r.kind === 'etf' && r.fair === null ? (
+                      <span className="col-span-2 text-xs text-neutral-500 md:col-span-3">ETF · no fair value</span>
+                    ) : r.fair === null && r.total === null ? (
+                      <span className="col-span-2 text-xs text-neutral-500 md:col-span-3">{fetching.includes(r.symbol) ? 'Fetching data…' : 'No earnings data yet'}</span>
+                    ) : (
+                      <>
+                        <span className="text-right text-xs tabular-nums text-neutral-400 md:text-sm">
+                          {/* The column header says "Fair value" from md up. */}
+                          <span className="md:hidden">FV </span>
+                          {r.fair !== null ? currency(r.fair) : '—'}
+                        </span>
+                        <span className="justify-self-end md:justify-self-start">{r.pct !== null ? <FairBar pct={r.pct} /> : <span className="text-xs text-neutral-600">—</span>}</span>
+                        <span className="md:justify-self-start">
+                          <ScoreBadge r={r} />
+                        </span>
+                      </>
+                    )}
+                    <span className="justify-self-end text-xs md:justify-self-start">
+                      {/* More than a month out, the date shows only where it has its own column. */}
+                      {r.earnings ? (
+                        <span
+                          className={`items-center gap-1 whitespace-nowrap ${r.earnings.days <= 30 ? 'inline-flex' : 'hidden md:inline-flex'} ${
+                            r.earnings.days <= 7 ? 'text-amber-300' : r.earnings.days <= 30 ? 'text-neutral-400' : 'text-neutral-500'
+                          }`}
+                        >
+                          <CalendarClock size={12} className="shrink-0" />
+                          <span>
+                            <span className="md:hidden">Earnings </span>
+                            {shortDate(r.earnings.date)} · {r.earnings.days}d
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="hidden text-neutral-600 md:inline">—</span>
                       )}
                     </span>
-                    <span className="block truncate text-xs text-neutral-500">{r.name ?? (r.kind === 'etf' ? 'Fund (ETF)' : ' ')}</span>
-                  </span>
-                  <span className="text-right tabular-nums text-neutral-200 md:order-0">{r.price !== null ? priceFmt(r.price) : '—'}</span>
-                  {r.kind === 'etf' && r.fair === null ? (
-                    <span className="col-span-2 text-xs text-neutral-500 md:col-span-3">ETF · no fair value</span>
-                  ) : r.fair === null && r.total === null ? (
-                    <span className="col-span-2 text-xs text-neutral-500 md:col-span-3">{fetching.includes(r.symbol) ? 'Fetching data…' : 'No earnings data yet'}</span>
-                  ) : (
-                    <>
-                      <span className="text-right text-xs tabular-nums text-neutral-400 md:text-sm">{r.fair !== null ? `FV ${currency(r.fair)}` : 'FV —'}</span>
-                      <span className="justify-self-end md:justify-self-start">{r.pct !== null ? <FairBar pct={r.pct} /> : <span className="text-xs text-neutral-600">—</span>}</span>
-                      <span className="md:justify-self-start">
-                        <ScoreBadge r={r} />
-                      </span>
-                    </>
-                  )}
-                  <span className="justify-self-end text-xs md:justify-self-start">
-                    {r.earnings && r.earnings.days <= 30 && (
-                      <span className={`inline-flex items-center gap-1 ${r.earnings.days <= 7 ? 'text-amber-300' : 'text-neutral-400'}`}>
-                        <CalendarClock size={12} /> Earnings {dateFmt(r.earnings.date)} · {r.earnings.days}d
-                      </span>
-                    )}
-                  </span>
-                  <ChevronRight size={16} className="hidden text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300 md:block" />
-                </button>
-              </li>
-            ))}
-          </ul>
+                    <ChevronRight size={16} className="hidden text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300 md:block" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </Card>
 

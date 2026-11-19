@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Archive, ChevronRight, Plus, Wallet } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { PortfolioKind } from '../lib/database.types'
-import { createPortfolio, fetchLastEntries, updatePortfolio } from '../lib/wealthQueries'
+import { createPortfolio, fetchAuditProblems, fetchLastEntries, updatePortfolio } from '../lib/wealthQueries'
 import { KIND_TONE, PORTFOLIO_KINDS, dayChangeLabel, kindLabel, seriesFor, signedCurrency as signed, timeWeightedReturn } from '../lib/portfolio'
 import { centralDateStr, currency, dateFmt, percentFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
@@ -36,6 +36,14 @@ export function PortfoliosPage() {
       .then(setLastEntries)
       .catch(() => setLastEntries(new Map()))
   }, [w.portfolios])
+  // Where the Health check goes: up top when it has issues, a quiet line at the bottom when
+  // everything reconciles. Undefined while loading, null when the check isn't available.
+  const [healthIssues, setHealthIssues] = useState<number | null | undefined>(undefined)
+  useEffect(() => {
+    fetchAuditProblems()
+      .then((p) => setHealthIssues(p === null ? null : p.length))
+      .catch(() => setHealthIssues(null))
+  }, [])
 
   async function newPortfolio() {
     if (!user) return
@@ -120,6 +128,8 @@ export function PortfoliosPage() {
             <Kpi label="Realized gain" value={signed(w.realizedTotal)} tone={w.realizedTotal} sub="sales, options and puts" />
           </div>
 
+          {healthIssues != null && healthIssues > 0 && <HealthCheckCard />}
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {w.perPortfolio.map(({ portfolio: p, snap }) => {
               const ret = timeWeightedReturn(seriesFor(w.values, p.id))
@@ -164,15 +174,13 @@ export function PortfoliosPage() {
             })}
           </div>
 
-          <HealthCheckCard />
-
           <BrokerageAllocationCard perPortfolio={w.perPortfolio} options={w.openOptions} prices={w.prices} onChanged={w.load} />
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
             <Card title="Value" subtitle="All portfolios, at each trading day’s close" className="xl:col-span-3">
               <ValueHistoryChart data={w.series.map((s) => ({ date: s.date, total: s.total }))} />
             </Card>
-            <Card title="Allocation" subtitle="All portfolios combined" className="xl:col-span-2">
+            <Card title="Holdings breakdown" subtitle="All portfolios combined" className="xl:col-span-2">
               <AllocationDonut allocation={w.allocation} centerLabel="All portfolios" />
             </Card>
           </div>
@@ -182,6 +190,8 @@ export function PortfoliosPage() {
           </Card>
 
           <DividendsCard holdings={w.activeHoldings} prices={w.prices} holdingsValue={combined.holdingsValue} portfolioIds={w.activeIds} />
+
+          {healthIssues === 0 && <HealthCheckCard />}
         </>
       )}
 

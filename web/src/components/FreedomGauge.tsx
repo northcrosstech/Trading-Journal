@@ -77,6 +77,15 @@ function NumberField({ label, hint, value, onChange, placeholder, prefix, suffix
   )
 }
 
+type GaugeData = {
+  today: string
+  month: string
+  accounts: NetworthAccount[]
+  balances: NetworthBalance[]
+  portfolios: Portfolio[]
+  values: PortfolioDailyValue[]
+}
+
 /** Towards financial freedom: how much of the money you need to stop depending on a paycheck
  * you already have. Day trading plays no part in it. */
 export function FreedomGauge({
@@ -86,26 +95,23 @@ export function FreedomGauge({
   balances,
   portfolios,
   values,
-}: {
-  today: string
-  month: string
-  accounts: NetworthAccount[]
-  balances: NetworthBalance[]
-  portfolios: Portfolio[]
-  values: PortfolioDailyValue[]
+  detailsOpen = false,
+  onDetailsClose,
+}: GaugeData & {
+  /** Open the details drawer from outside (a link such as /wealth?details=freedom). */
+  detailsOpen?: boolean
+  onDetailsClose?: () => void
 }) {
-  const { user } = useAuth()
-  const toast = useToast()
   const [settings, setSettings] = useState<FreedomSettings>(FREEDOM_DEFAULTS)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [flows, setFlows] = useState<Pick<PortfolioActivity, 'portfolio_id' | 'kind' | 'external_flow' | 'occurred_on'>[]>([])
-  const [open, setOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ spending: '', otherBills: '', savings: '', rate: '', growth: '', coast: '' })
+  const [opened, setOpened] = useState(false)
 
   useEffect(() => {
     fetchFreedomSettings()
       .then(setSettings)
       .catch(() => {})
+      .finally(() => setSettingsLoaded(true))
     fetchExternalFlows()
       .then(setFlows)
       .catch(() => {})
@@ -119,66 +125,22 @@ export function FreedomGauge({
   const savings = settings.monthlySavings ?? savingsIdea.monthly
   const f = useMemo(() => freedomSummary(lines, spending, savings, settings), [lines, spending, savings, settings])
   const before = useMemo(() => (prevLines.length > 0 ? freedomSummary(prevLines, spending, savings, settings).progress : null), [prevLines, spending, savings, settings])
-  const history = useMemo(() => freedomHistory(month, accounts, balances, portfolios, values, spending, settings.withdrawalRate), [month, accounts, balances, portfolios, values, spending, settings.withdrawalRate])
 
-  function openDetails() {
-    setForm({
-      spending: settings.monthlySpending !== null ? String(settings.monthlySpending) : '',
-      otherBills: settings.otherBills ? String(settings.otherBills) : '',
-      savings: settings.monthlySavings !== null ? String(settings.monthlySavings) : '',
-      rate: String(settings.withdrawalRate),
-      growth: String(settings.realReturn),
-      coast: String(settings.coastYears),
-    })
-    setOpen(true)
-  }
-
-  const blankOr = (s: string) => (s.trim() === '' ? null : Number(s))
-  const next: FreedomSettings = {
-    monthlySpending: blankOr(form.spending),
-    otherBills: Number(form.otherBills) || 0,
-    monthlySavings: blankOr(form.savings),
-    withdrawalRate: Number(form.rate),
-    realReturn: Number(form.growth),
-    coastYears: Math.round(Number(form.coast)),
-  }
-  const valid =
-    Object.values(next).every((v) => v === null || Number.isFinite(v)) &&
-    form.rate.trim() !== '' &&
-    form.growth.trim() !== '' &&
-    form.coast.trim() !== '' &&
-    next.withdrawalRate >= 1 &&
-    next.withdrawalRate <= 10 &&
-    next.realReturn <= 15 &&
-    next.coastYears <= 60
-  const formIdea = suggestSpending(accounts, balances, month, Number(form.otherBills) || 0)
-
-  async function save() {
-    if (!user || !valid) return
-    setSaving(true)
-    try {
-      await saveFreedomSettings(user.id, next)
-      setSettings(next)
-      toast('Saved')
-      setOpen(false)
-    } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error')
-    } finally {
-      setSaving(false)
-    }
+  // A link that asks for the details waits for your saved inputs: the form must never open on
+  // the defaults, or saving it would replace what you had.
+  const open = opened || (detailsOpen && settingsLoaded)
+  const close = () => {
+    setOpened(false)
+    onDetailsClose?.()
   }
 
   const change = f.progress !== null && before !== null ? (f.progress - before) * 100 : null
-  const milestones = [
-    { label: 'Coast', detail: `${whole(f.coastNumber)}: growth alone gets you there in ${settings.coastYears} years`, done: f.money.money >= f.coastNumber },
-    ...[25, 50, 75, 100].map((p) => ({ label: `${p}%`, detail: whole((f.target * p) / 100), done: f.progress !== null && f.progress >= p / 100 })),
-  ]
 
   return (
     <Card
       title="Towards financial freedom"
       actions={
-        <Button size="sm" icon={<Settings2 size={14} />} onClick={openDetails}>
+        <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setOpened(true)}>
           Details
         </Button>
       }
@@ -186,7 +148,7 @@ export function FreedomGauge({
       {f.progress === null ? (
         <p className="text-sm text-neutral-400">
           Tell the gauge what you spend each month to see how close you are.{' '}
-          <button type="button" onClick={openDetails} className="text-(--accent-text) hover:underline">
+          <button type="button" onClick={() => setOpened(true)} className="text-(--accent-text) hover:underline">
             Enter your spending
           </button>
         </p>
@@ -212,81 +174,199 @@ export function FreedomGauge({
         </div>
       )}
 
-      <Drawer open={open} onClose={() => setOpen(false)} title="Towards financial freedom" subtitle="Your inputs, and how the numbers are worked out." width="max-w-lg">
-        <div className="flex flex-col gap-6 text-sm">
-          <section className="flex flex-col gap-3">
-            <h3 className={sectionTitle}>Spending</h3>
-            <div className="rounded-xl bg-(--card-raised) px-3 py-2.5 text-xs tabular-nums text-neutral-300">
-              <p className="flex justify-between"><span>Cards (average month-end balance, 12 months)</span><span>{whole(formIdea.cards)}</span></p>
-              <p className="flex justify-between"><span>Property tax + insurance (escrow)</span><span>{whole(formIdea.escrow)}</span></p>
-              <p className="flex justify-between"><span>Other bills</span><span>{whole(formIdea.otherBills)}</span></p>
-              <p className="mt-1 flex justify-between border-t border-(--border) pt-1 font-semibold text-neutral-100"><span>Suggested</span><span>{whole(formIdea.total)}</span></p>
-              {formIdea.notes.map((n) => (
-                <p key={n} className="mt-1 text-amber-300">{n}</p>
-              ))}
-            </div>
-            <NumberField label="Other bills per month" hint="Anything not on cards: utilities, upkeep, a car budget." prefix="$" value={form.otherBills} onChange={(v) => setForm((x) => ({ ...x, otherBills: v }))} placeholder="0" />
-            <NumberField label="My spending per month" hint="Leave blank to use the suggestion. Leave out loan and mortgage payments." prefix="$" value={form.spending} onChange={(v) => setForm((x) => ({ ...x, spending: v }))} placeholder={String(Math.round(formIdea.total))} />
-          </section>
-
-          <section className="flex flex-col gap-3">
-            <h3 className={sectionTitle}>Assumptions</h3>
-            <NumberField
-              label="My savings per month"
-              hint={`Leave blank to use the suggestion: ${whole(savingsIdea.monthly)}, your average kept${savingsIdea.months > 0 ? ` over ${savingsIdea.months} month${savingsIdea.months === 1 ? '' : 's'}` : ''}. Add 401k contributions if they aren't logged in a portfolio.`}
-              prefix="$"
-              value={form.savings}
-              onChange={(v) => setForm((x) => ({ ...x, savings: v }))}
-              placeholder={String(Math.round(savingsIdea.monthly))}
-            />
-            <NumberField label="Yearly withdrawal" hint="4% means a target of 25 × yearly spending. Between 1% and 10%." suffix="%" value={form.rate} onChange={(v) => setForm((x) => ({ ...x, rate: v }))} />
-            <NumberField label="Yearly growth after inflation" hint="An estimate, not a promise. Up to 15%." suffix="%" value={form.growth} onChange={(v) => setForm((x) => ({ ...x, growth: v }))} />
-            <NumberField label="Years until you’d stop working at the latest" hint="Used only for the Coast milestone." value={form.coast} onChange={(v) => setForm((x) => ({ ...x, coast: v.replace('.', '') }))} />
-            <div className="flex justify-end">
-              <Button variant="primary" onClick={save} disabled={!valid || saving}>
-                {saving ? 'Saving…' : 'Save'}
-              </Button>
-            </div>
-          </section>
-
-          {f.progress !== null && (
-            <>
-              <section>
-                <h3 className={sectionTitle}>Your target</h3>
-                <div className="flex flex-col gap-1 tabular-nums text-neutral-300">
-                  <p className="flex justify-between gap-3"><span>{whole(spending)}/mo × 12 ÷ {settings.withdrawalRate}%</span><span>{whole(f.target - f.money.mortgage)}</span></p>
-                  <p className="flex justify-between gap-3"><span>Mortgage to clear</span><span>{whole(f.money.mortgage)}</span></p>
-                  <p className="flex justify-between gap-3 border-t border-(--border) pt-1 font-semibold text-white"><span>Freedom number</span><span>{whole(f.target)}</span></p>
-                </div>
-              </section>
-
-              <Lines title="Counted" lines={f.money.counted} />
-              <Lines title="Subtracted" lines={f.money.subtracted} />
-              <Lines title="Left out" lines={f.money.left} />
-
-              <section>
-                <h3 className={sectionTitle}>Milestones</h3>
-                <ul className="flex flex-col gap-1.5">
-                  {milestones.map((m) => (
-                    <li key={m.label} className="flex items-center justify-between gap-3">
-                      <span className="text-neutral-300">
-                        <span className="font-medium text-neutral-100">{m.label}</span> · <span className="tabular-nums">{m.detail}</span>
-                      </span>
-                      {m.done && <Pill tone="green">reached</Pill>}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-
-              <section>
-                <h3 className={sectionTitle}>Progress by month</h3>
-                <FreedomHistoryChart data={history.map((p) => ({ ...p, label: monthLabel(p.month) }))} />
-                <p className="mt-1 text-xs text-neutral-500">Past months use today’s spending, so the line shows your money and mortgage changing, not your spending.</p>
-              </section>
-            </>
-          )}
-        </div>
-      </Drawer>
+      {open && (
+        <FreedomDetails
+          today={today}
+          month={month}
+          accounts={accounts}
+          balances={balances}
+          portfolios={portfolios}
+          values={values}
+          lines={lines}
+          settings={settings}
+          saved={{ spending, savings }}
+          savingsIdea={savingsIdea}
+          onSaved={setSettings}
+          onClose={close}
+        />
+      )}
     </Card>
+  )
+}
+
+/** The details drawer: your inputs on top, and under them the target, time estimate and
+ * milestones those inputs give. Mounted only while open, so the form always starts from the
+ * saved inputs. */
+function FreedomDetails({
+  today,
+  month,
+  accounts,
+  balances,
+  portfolios,
+  values,
+  lines,
+  settings,
+  saved,
+  savingsIdea,
+  onSaved,
+  onClose,
+}: GaugeData & {
+  lines: NetworthLine[]
+  settings: FreedomSettings
+  /** What the gauge uses now, for when a field can't be read as a number. */
+  saved: { spending: number; savings: number }
+  savingsIdea: { monthly: number; months: number }
+  onSaved: (next: FreedomSettings) => void
+  onClose: () => void
+}) {
+  const { user } = useAuth()
+  const toast = useToast()
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState(() => ({
+    spending: settings.monthlySpending !== null ? String(settings.monthlySpending) : '',
+    otherBills: settings.otherBills ? String(settings.otherBills) : '',
+    savings: settings.monthlySavings !== null ? String(settings.monthlySavings) : '',
+    rate: String(settings.withdrawalRate),
+    growth: String(settings.realReturn),
+    coast: String(settings.coastYears),
+  }))
+
+  const blankOr = (s: string) => (s.trim() === '' ? null : Number(s))
+  const next: FreedomSettings = {
+    monthlySpending: blankOr(form.spending),
+    otherBills: Number(form.otherBills) || 0,
+    monthlySavings: blankOr(form.savings),
+    withdrawalRate: Number(form.rate),
+    realReturn: Number(form.growth),
+    coastYears: Math.round(Number(form.coast)),
+  }
+  const valid =
+    Object.values(next).every((v) => v === null || Number.isFinite(v)) &&
+    form.rate.trim() !== '' &&
+    form.growth.trim() !== '' &&
+    form.coast.trim() !== '' &&
+    next.withdrawalRate >= 1 &&
+    next.withdrawalRate <= 10 &&
+    next.realReturn <= 15 &&
+    next.coastYears <= 60
+  const formIdea = suggestSpending(accounts, balances, month, Number(form.otherBills) || 0)
+  const changed = (Object.keys(next) as (keyof FreedomSettings)[]).some((k) => next[k] !== settings[k])
+
+  // Everything under the form follows what is typed, so a what-if needs no save. While a
+  // field can't be used, it stays on the saved inputs.
+  const using = valid ? next : settings
+  const spending = valid ? (next.monthlySpending ?? formIdea.total) : saved.spending
+  const savings = valid ? (next.monthlySavings ?? savingsIdea.monthly) : saved.savings
+  const rate = using.withdrawalRate
+  const f = freedomSummary(lines, spending, savings, using)
+  const history = useMemo(() => freedomHistory(month, accounts, balances, portfolios, values, spending, rate), [month, accounts, balances, portfolios, values, spending, rate])
+  const milestones = [
+    { label: 'Coast', detail: `${whole(f.coastNumber)}: growth alone gets you there in ${using.coastYears} years`, done: f.money.money >= f.coastNumber },
+    ...[25, 50, 75, 100].map((p) => ({ label: `${p}%`, detail: whole((f.target * p) / 100), done: f.progress !== null && f.progress >= p / 100 })),
+  ]
+
+  async function save() {
+    if (!user || !valid) return
+    setSaving(true)
+    try {
+      await saveFreedomSettings(user.id, next)
+      onSaved(next)
+      toast('Saved')
+      onClose()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Drawer open onClose={onClose} title="Towards financial freedom" subtitle="Your inputs, and what they add up to. The numbers below follow what you type." width="max-w-lg">
+      <div className="flex min-h-full flex-col gap-6 text-sm">
+        <section className="flex flex-col gap-3">
+          <h3 className={sectionTitle}>Spending</h3>
+          <div className="rounded-xl bg-(--card-raised) px-3 py-2.5 text-xs tabular-nums text-neutral-300">
+            <p className="flex justify-between"><span>Cards (average month-end balance, 12 months)</span><span>{whole(formIdea.cards)}</span></p>
+            <p className="flex justify-between"><span>Property tax + insurance (escrow)</span><span>{whole(formIdea.escrow)}</span></p>
+            <p className="flex justify-between"><span>Other bills</span><span>{whole(formIdea.otherBills)}</span></p>
+            <p className="mt-1 flex justify-between border-t border-(--border) pt-1 font-semibold text-neutral-100"><span>Suggested</span><span>{whole(formIdea.total)}</span></p>
+            {formIdea.notes.map((n) => (
+              <p key={n} className="mt-1 text-amber-300">{n}</p>
+            ))}
+          </div>
+          <NumberField label="Other bills per month" hint="Anything not on cards: utilities, upkeep, a car budget." prefix="$" value={form.otherBills} onChange={(v) => setForm((x) => ({ ...x, otherBills: v }))} placeholder="0" />
+          <NumberField label="My spending per month" hint="Leave blank to use the suggestion. Leave out loan and mortgage payments." prefix="$" value={form.spending} onChange={(v) => setForm((x) => ({ ...x, spending: v }))} placeholder={String(Math.round(formIdea.total))} />
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h3 className={sectionTitle}>Assumptions</h3>
+          <NumberField
+            label="My savings per month"
+            hint={`Leave blank to use the suggestion: ${whole(savingsIdea.monthly)}, your average kept${savingsIdea.months > 0 ? ` over ${savingsIdea.months} month${savingsIdea.months === 1 ? '' : 's'}` : ''}. Add 401k contributions if they aren't logged in a portfolio.`}
+            prefix="$"
+            value={form.savings}
+            onChange={(v) => setForm((x) => ({ ...x, savings: v }))}
+            placeholder={String(Math.round(savingsIdea.monthly))}
+          />
+          <NumberField label="Yearly withdrawal" hint="4% means a target of 25 × yearly spending. Between 1% and 10%." suffix="%" value={form.rate} onChange={(v) => setForm((x) => ({ ...x, rate: v }))} />
+          <NumberField label="Yearly growth after inflation" hint="An estimate, not a promise. Up to 15%." suffix="%" value={form.growth} onChange={(v) => setForm((x) => ({ ...x, growth: v }))} />
+          <NumberField label="Years until you’d stop working at the latest" hint="Used only for the Coast milestone." value={form.coast} onChange={(v) => setForm((x) => ({ ...x, coast: v.replace('.', '') }))} />
+        </section>
+
+        {f.progress === null ? (
+          <p className="text-neutral-500">Enter what you spend each month to see your target.</p>
+        ) : (
+          <>
+            <section>
+              <h3 className={sectionTitle}>With these inputs</h3>
+              <div className="flex flex-col gap-1 tabular-nums text-neutral-300">
+                <p className="flex justify-between gap-3"><span>{whole(spending)}/mo × 12 ÷ {rate}%</span><span>{whole(f.target - f.money.mortgage)}</span></p>
+                <p className="flex justify-between gap-3"><span>Mortgage to clear</span><span>{whole(f.money.mortgage)}</span></p>
+                <p className="flex justify-between gap-3 border-t border-(--border) pt-1 font-semibold text-white"><span>Freedom number</span><span>{whole(f.target)}</span></p>
+                <p className="flex justify-between gap-3"><span>You have</span><span>{whole(f.money.money)} · {Math.round(f.progress * 100)}%</span></p>
+                <p className="flex justify-between gap-3">
+                  <span>Time to get there{f.months !== 0 && f.months !== null ? `, saving ${whole(savings)}/mo` : ''}</span>
+                  <span className="text-right">{timeText(f.months, today)}</span>
+                </p>
+              </div>
+            </section>
+
+            <Lines title="Counted" lines={f.money.counted} />
+            <Lines title="Subtracted" lines={f.money.subtracted} />
+            <Lines title="Left out" lines={f.money.left} />
+
+            <section>
+              <h3 className={sectionTitle}>Milestones</h3>
+              <ul className="flex flex-col gap-1.5">
+                {milestones.map((m) => (
+                  <li key={m.label} className="flex items-center justify-between gap-3">
+                    <span className="text-neutral-300">
+                      <span className="font-medium text-neutral-100">{m.label}</span> · <span className="tabular-nums">{m.detail}</span>
+                    </span>
+                    {m.done && <Pill tone="green">reached</Pill>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section>
+              <h3 className={sectionTitle}>Progress by month</h3>
+              <FreedomHistoryChart data={history.map((p) => ({ ...p, label: monthLabel(p.month) }))} />
+              <p className="mt-1 text-xs text-neutral-500">Past months use today’s spending, so the line shows your money and mortgage changing, not your spending.</p>
+            </section>
+          </>
+        )}
+
+        {/* Stays at the bottom of the drawer while the results scroll, so Save is always in reach. */}
+        <div className="sticky bottom-0 -mx-5 -mb-5 mt-auto flex items-center justify-between gap-3 border-t border-(--border) bg-(--card) px-5 py-3">
+          <span className={`text-xs ${valid ? 'text-neutral-500' : 'text-amber-300'}`}>
+            {!valid ? 'Check the inputs above. Showing your saved numbers.' : changed ? 'Showing your changes. Not saved yet.' : 'Showing your saved inputs.'}
+          </span>
+          <Button variant="primary" onClick={save} disabled={!valid || saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </div>
+    </Drawer>
   )
 }

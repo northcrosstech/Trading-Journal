@@ -5,6 +5,7 @@ import { Pill, type PillTone } from './ui/Pill'
 
 export const PILL_TONE: Record<Tone, PillTone> = { green: 'green', neutral: 'neutral', amber: 'amber', red: 'red', teal: 'teal' }
 const BAR: Record<Tone, string> = { green: 'bg-emerald-400', neutral: 'bg-neutral-400', amber: 'bg-amber-400', red: 'bg-red-400', teal: 'bg-teal-400' }
+const WORD: Record<Tone, string> = { green: 'text-emerald-300', neutral: 'text-neutral-300', amber: 'text-amber-300', red: 'text-red-300', teal: 'text-teal-300' }
 const RING: Record<Tone, string> = {
   green: 'border-emerald-400/70 text-emerald-200',
   neutral: 'border-neutral-500 text-neutral-200',
@@ -34,16 +35,41 @@ export function ScoreBadge({ r, size = 'md', withLabel = true }: { r: Research; 
   )
 }
 
-/** Price as a share of fair value, as a short bar with the number. */
+/** Price as a share of fair value: a short bar, the number and the word for it ("82% · cheap").
+ * The bar is dropped at in-between widths, where the list's columns are tight. */
 export function FairBar({ pct }: { pct: number }) {
   const tone = fairTone(pct)
   return (
-    <span className="inline-flex items-center gap-2" title={`${pctText(pct)} of fair value — ${fairWord(pct)}`}>
-      <span className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-800">
+    <span className="inline-flex items-center gap-2" title={`Price is ${pctText(pct)} of fair value`}>
+      <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-neutral-800 md:max-xl:hidden">
         <span className={`block h-full rounded-full ${BAR[tone]}`} style={{ width: `${Math.min(pct / 1.5, 1) * 100}%` }} />
       </span>
-      <span className="w-11 text-right text-xs tabular-nums text-neutral-300">{pctText(pct)}</span>
+      <span className="whitespace-nowrap text-xs tabular-nums text-neutral-300">
+        {pctText(pct)} · <span className={WORD[tone]}>{fairWord(pct)}</span>
+      </span>
     </span>
+  )
+}
+
+const LEGEND: { tone: Tone; word: string; range: string }[] = [
+  { tone: 'green', word: 'cheap', range: 'under 85%' },
+  { tone: 'neutral', word: 'fair', range: '85–105%' },
+  { tone: 'amber', word: 'pricey', range: '105–130%' },
+  { tone: 'red', word: 'expensive', range: 'over 130%' },
+]
+
+/** One line saying what the valuation words mean. */
+export function FairLegend() {
+  return (
+    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+      <span>Price as a share of fair value:</span>
+      {LEGEND.map((l) => (
+        <span key={l.word} className="inline-flex items-center gap-1.5">
+          <span className={`h-1.5 w-1.5 rounded-full ${BAR[l.tone]}`} />
+          <span className={WORD[l.tone]}>{l.word}</span> {l.range}
+        </span>
+      ))}
+    </p>
   )
 }
 

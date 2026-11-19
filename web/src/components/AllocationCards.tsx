@@ -31,7 +31,7 @@ import {
   type TickerType,
 } from '../lib/allocationPlan'
 import { optionValue, kindLabel, type PortfolioSnapshot } from '../lib/portfolio'
-import { comparePlan, planTypeTargets, type PlanTarget } from '../lib/positionPlan'
+import { comparePlan, planActions, planTypeTargets, type PlanAction, type PlanRow, type PlanTarget } from '../lib/positionPlan'
 import { currency } from '../lib/format'
 import { INPUT_SM } from '../lib/ui'
 import { useToast } from '../lib/toastContext'
@@ -166,6 +166,78 @@ function MixRows({ mix, targets, tolerance, onTypeChange }: { mix: Mix; targets:
   )
 }
 
+const planPct = (n: number) => `${Number(n.toFixed(1))}%`
+
+/** The positions of one account that are off its plan, each with what to buy or trim in whole
+ * shares. A ticker row links to that portfolio with the buy/sell form open. */
+function OffPlanRows({ portfolio, rows, actions }: { portfolio: Portfolio; rows: PlanRow[]; actions: Map<string, PlanAction> }) {
+  const off = rows.filter((r) => r.status === 'over' || r.status === 'under' || r.status === 'missing')
+  if (off.length === 0) return <p className="py-1.5 text-xs text-emerald-300">Every position is on plan.</p>
+  const grid = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 py-2 text-sm sm:grid-cols-[6rem_minmax(0,1fr)_auto_3rem]'
+  return (
+    <ul className="divide-y divide-(--border)">
+      {off.map((r) => {
+        const a = r.kind === 'ticker' ? actions.get(r.symbol) : undefined
+        const trade = a && (a.kind === 'buy' || a.kind === 'trim') ? a : null
+        const cells = (
+          <>
+            <span className="truncate font-medium text-neutral-100">{r.symbol}</span>
+            <span className="col-start-1 row-start-2 text-xs tabular-nums text-neutral-400 sm:col-start-auto sm:row-start-auto">
+              now <span className="text-neutral-100">{planPct(r.pct)}</span> · target {planPct(r.target ?? 0)}
+            </span>
+            <span className="text-right text-xs tabular-nums text-amber-300">
+              {r.kind === 'cash' ? (
+                r.move > 0 ? (
+                  `Keep ${currency(r.move)} more cash`
+                ) : (
+                  `${currency(-r.move)} more cash than planned`
+                )
+              ) : trade ? (
+                <>
+                  {r.status === 'missing' && <span className="text-neutral-500">Not owned yet · </span>}
+                  <span className="font-medium">
+                    {trade.kind === 'buy' ? 'Buy' : 'Trim'}
+                    {trade.shares !== null && ` ${trade.shares} sh`}
+                  </span>
+                  <span className="text-neutral-500">
+                    {' '}
+                    ({currency(trade.dollars)}
+                    {trade.shares === null ? ', price pending' : ''})
+                  </span>
+                </>
+              ) : (
+                <span className="text-neutral-500">Less than one share off</span>
+              )}
+            </span>
+            <span className="inline-flex items-center justify-end gap-0.5 text-xs text-(--accent-text)">
+              {trade && (
+                <>
+                  Log <ChevronRight size={13} />
+                </>
+              )}
+            </span>
+          </>
+        )
+        return (
+          <li key={r.key}>
+            {trade ? (
+              <Link
+                to={`/portfolios/${portfolio.id}?log=trade`}
+                aria-label={`Log a ${trade.kind === 'buy' ? 'buy' : 'sale'} of ${r.symbol} in ${portfolio.name}`}
+                className={`${grid} -mx-2 rounded-lg px-2 transition hover:bg-(--card-raised)`}
+              >
+                {cells}
+              </Link>
+            ) : (
+              <div className={grid}>{cells}</div>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 function useTypeChanger(reload: () => void) {
   const { user } = useAuth()
   const toast = useToast()
@@ -177,7 +249,7 @@ function useTypeChanger(reload: () => void) {
       reload()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      toast(/ticker_types/.test(msg) ? 'Run the allocation migration first' : msg, 'error')
+      toast(/ticker_types/.test(msg) ? "This isn't set up yet." : msg, 'error')
     }
   }
 }
@@ -237,7 +309,7 @@ function TargetsDrawer({
       onClose()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      toast(/allocation_targets|target_pct|allocation_tolerance/.test(msg) ? 'Run the allocation migration first' : msg, 'error')
+      toast(/allocation_targets|target_pct|allocation_tolerance/.test(msg) ? "This isn't set up yet." : msg, 'error')
     } finally {
       setSaving(false)
     }
@@ -333,7 +405,8 @@ function PctInput({ value, onChange }: { value: string; onChange: (v: string) =>
 type PerPortfolio = { portfolio: Portfolio; snap: PortfolioSnapshot }
 
 /** Portfolios page: the split between brokerage accounts, and a line per account showing
- * whether its own mix is on target (open a line to see the mix). Mix targets are set on each
+ * whether it is on target. Open a line to see what is off: the positions off plan for an
+ * account with a position plan, the mix by type for the others. Targets are set on each
  * portfolio's page. */
 export function BrokerageAllocationCard({ perPortfolio, options, prices, onChanged }: { perPortfolio: PerPortfolio[]; options: OptionPosition[]; prices: Map<string, SymbolPrice>; onChanged: () => void }) {
   const symbols = useMemo(() => perPortfolio.flatMap((p) => p.snap.holdings.map((v) => v.holding.symbol)), [perPortfolio])
@@ -341,24 +414,16 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
   const changeType = useTypeChanger(data.reload)
   const [editing, setEditing] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
-  // Collapsed to its one-line summary unless you opened it last time (remembered per browser).
-  const [expanded, setExpanded] = useState(() => {
+  // Opens by itself when something is off target. Otherwise collapsed to its one-line summary
+  // unless you opened it last time (remembered per browser). Show/Hide wins for this visit.
+  const [keptOpen] = useState(() => {
     try {
       return localStorage.getItem('allocation-card-open') === '1'
     } catch {
       return false
     }
   })
-  const toggle = () => {
-    setExpanded((v) => {
-      try {
-        localStorage.setItem('allocation-card-open', v ? '0' : '1')
-      } catch {
-        // storage blocked: just don't remember
-      }
-      return !v
-    })
-  }
+  const [chosen, setChosen] = useState<boolean | null>(null)
 
   const brokerage = perPortfolio.filter((p) => !isRetirement(p.portfolio.kind))
   const retirement = perPortfolio.filter((p) => isRetirement(p.portfolio.kind))
@@ -375,7 +440,7 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
     // With a position plan, the plan is the target: positions are checked, and the mix by
     // type is what the plan adds up to.
     const targets = plan.length > 0 ? planTypeTargets(plan, data.typeOf) : (data.targets.get(p.portfolio.id) ?? null)
-    const off =
+    const planCmp =
       plan.length > 0
         ? comparePlan(
             p.snap.holdings.map((v) => ({ symbol: v.holding.symbol, value: v.value, price: v.price })),
@@ -383,20 +448,49 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
             p.snap.cash,
             plan,
             data.tolerance,
-          ).off
-        : targets
-          ? compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: mix.values[k] })), targets, data.tolerance).off
-          : null
-    return { p, targets, mix, off, byPosition: plan.length > 0 }
+          )
+        : null
+    const off = planCmp
+      ? planCmp.off
+      : targets
+        ? compareToTargets(ASSET_TYPES.map((k) => ({ key: k, label: k, value: mix.values[k] })), targets, data.tolerance).off
+        : null
+    // What to buy or trim per ticker, worked out the same way as on the portfolio's Positions tab.
+    const actions = planCmp ? new Map(planActions(planCmp.rows, (s) => prices.get(s)?.close ?? null).map((a) => [a.symbol, a])) : null
+    return { p, targets, mix, off, byPosition: plan.length > 0, planRows: planCmp?.rows ?? [], actions }
   })
   const off = (hasSplit ? split.off : 0) + accounts.reduce((s, a) => s + (a.off ?? 0), 0)
   const noTargets = !hasSplit && accounts.every((a) => a.targets === null)
 
   if (accounts.length === 0) return null
 
+  const expanded = chosen ?? (off > 0 || keptOpen)
+  const toggle = () => {
+    try {
+      localStorage.setItem('allocation-card-open', expanded ? '0' : '1')
+    } catch {
+      // storage blocked: just don't remember
+    }
+    setChosen(!expanded)
+  }
+
+  // The summary names each kind of target on its own: the split, position plans, mixes by type.
+  const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+  const offTotal = (list: typeof accounts) => list.reduce((s, a) => s + (a.off ?? 0), 0)
+  const summary: { text: string; ok: boolean }[] = []
+  if (hasSplit) summary.push(split.off === 0 ? { text: 'Split on target', ok: true } : { text: 'Split off target', ok: false })
+  const planned = accounts.filter((a) => a.byPosition)
+  const offPlan = planned.filter((a) => (a.off ?? 0) > 0)
+  if (planned.length > 0)
+    summary.push(offPlan.length === 0 ? { text: 'Positions on plan', ok: true } : { text: `${count(offPlan.length, 'account')} off plan (${count(offTotal(offPlan), 'position')})`, ok: false })
+  const mixed = accounts.filter((a) => !a.byPosition && a.targets !== null)
+  const offMix = mixed.filter((a) => (a.off ?? 0) > 0)
+  if (mixed.length > 0)
+    summary.push(offMix.length === 0 ? { text: 'Mix by type on target', ok: true } : { text: `${count(offMix.length, 'account')} off target by type (${count(offTotal(offMix), 'type')})`, ok: false })
+
   const accountList = (list: typeof accounts) => (
     <ul className="divide-y divide-(--border)">
-      {list.map(({ p, targets, mix, off: o, byPosition }) => (
+      {list.map(({ p, targets, mix, off: o, byPosition, planRows, actions }) => (
         <li key={p.portfolio.id} className="py-1">
           <button
             type="button"
@@ -413,15 +507,21 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
               ) : o === 0 ? (
                 <Pill tone="green">{byPosition ? 'On plan' : 'On target'}</Pill>
               ) : (
-                <Pill tone="amber">{byPosition ? `${o} position${o === 1 ? '' : 's'} off plan` : `${o} off target`}</Pill>
+                <Pill tone="amber">{byPosition ? `${count(o, 'position')} off plan` : `${count(o, 'type')} off target`}</Pill>
               )}
             </span>
           </button>
           {openId === p.portfolio.id && (
             <div className="pb-2 pl-5">
-              <MixRows mix={mix} targets={targets} tolerance={data.tolerance} onTypeChange={changeType} />
-              {mix.margin > 0 && <p className="mt-1 text-xs text-neutral-500">{currency(mix.margin)} of margin isn't counted in the mix.</p>}
-              <Link to={`/portfolios/${p.portfolio.id}`} className="mt-1 inline-block text-xs text-(--accent-text) hover:underline">
+              {byPosition && actions ? (
+                <OffPlanRows portfolio={p.portfolio} rows={planRows} actions={actions} />
+              ) : (
+                <>
+                  <MixRows mix={mix} targets={targets} tolerance={data.tolerance} onTypeChange={changeType} />
+                  {mix.margin > 0 && <p className="mt-1 text-xs text-neutral-500">{currency(mix.margin)} of margin isn't counted in the mix.</p>}
+                </>
+              )}
+              <Link to={`/portfolios/${p.portfolio.id}?tab=plan`} className="mt-1 inline-block text-xs text-(--accent-text) hover:underline">
                 {byPosition ? 'See its position plan' : targets ? 'Edit its targets' : 'Set its targets'} on {p.portfolio.name} › Plan
               </Link>
             </div>
@@ -433,7 +533,7 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
 
   return (
     <Card
-      title="Allocation"
+      title="Targets"
       flush={!expanded}
       subtitle={
         noTargets ? (
@@ -441,14 +541,20 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
         ) : off === 0 ? (
           <span className="text-emerald-300">Everything on target ({bandText(data.tolerance)})</span>
         ) : (
-          <span className="text-amber-300">
-            {off} {off === 1 ? 'thing' : 'things'} off target ({bandText(data.tolerance)})
-          </span>
+          <>
+            {summary.map((part, i) => (
+              <span key={part.text}>
+                {i > 0 && ' · '}
+                <span className={part.ok ? 'text-emerald-300' : 'text-amber-300'}>{part.text}</span>
+              </span>
+            ))}
+            {' · '}allowed drift {bandText(data.tolerance)}
+          </>
         )
       }
       actions={
         <>
-          {expanded && brokerage.length >= 2 && (
+          {brokerage.length >= 2 && (
             <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
               {hasSplit ? 'Edit split' : 'Set split'}
             </Button>
@@ -474,14 +580,14 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
         {brokerage.length > 0 && (
           <section>
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-              Brokerage accounts · mix by type <span className="font-normal normal-case text-neutral-600">· open one to see its mix</span>
+              Brokerage accounts <span className="font-normal normal-case text-neutral-600">· open one to see what’s off</span>
             </h3>
             {accountList(accounts.filter((a) => !isRetirement(a.p.portfolio.kind)))}
           </section>
         )}
         {retirement.length > 0 && (
           <section>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Retirement accounts · mix by type</h3>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Retirement accounts</h3>
             {accountList(accounts.filter((a) => isRetirement(a.p.portfolio.kind)))}
           </section>
         )}
