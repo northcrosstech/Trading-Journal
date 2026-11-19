@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { fetchAllRows } from './paging'
+import { INCOME_KINDS, type IncomeEntry } from './income'
 import type {
   AllocationTargetRow,
   TickerTypeRow,
@@ -389,6 +390,23 @@ export async function deleteDividendInfo(symbol: string) {
 export async function fetchDividendsReceived(since: string, portfolioId?: string): Promise<PortfolioActivity[]> {
   return fetchAllRows((from, to) => {
     let q = supabase.from('portfolio_activity').select('*').eq('kind', 'dividend').is('voided_at', null).gte('occurred_on', since).order('occurred_on').order('id')
+    if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+    return q.range(from, to)
+  })
+}
+
+/** Dividends and option premium entries (see lib/income.ts) since a date, for every
+ * portfolio or one. */
+export async function fetchIncomeEntries(since: string, portfolioId?: string): Promise<IncomeEntry[]> {
+  return fetchAllRows((from, to) => {
+    let q = supabase
+      .from('portfolio_activity')
+      .select('portfolio_id, occurred_on, kind, symbol, cash_change')
+      .in('kind', [...INCOME_KINDS])
+      .is('voided_at', null)
+      .gte('occurred_on', since)
+      .order('occurred_on')
+      .order('id')
     if (portfolioId) q = q.eq('portfolio_id', portfolioId)
     return q.range(from, to)
   })

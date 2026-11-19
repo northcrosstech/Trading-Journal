@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeftRight, ChevronRight, Landmark, PieChart } from 'lucide-react'
 import type { AuditProblem, CspPosition, DividendInfo, InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
-import { fetchAuditProblems, fetchCsps, fetchDividendInfo, fetchInstallmentPayments, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
+import { fetchAuditProblems, fetchCsps, fetchDividendInfo, fetchExternalFlows, fetchInstallmentPayments, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
 import { FreedomGauge } from '../components/FreedomGauge'
 import { NeedsAttention } from '../components/NeedsAttention'
+import { NetWorthChangeCard } from '../components/NetWorthChangeCard'
 import { addMonths, monthLabel, monthOf, monthTotals } from '../lib/networth'
 import { KIND_TONE, dayChangeLabel, kindLabel, signedCurrency as signed } from '../lib/portfolio'
 import { dividendRows } from '../lib/dividends'
 import { expiryItems, healthItems, priceItems } from '../lib/attention'
+import { cashFlowLink, netWorthChange, type ExternalFlow } from '../lib/netWorthChange'
 import { centralDateStr, currency, percentFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
 import { useUrlState } from '../lib/useUrlState'
@@ -28,7 +30,8 @@ const MORE = [
   { to: '/networth?view=cashflow', icon: ArrowLeftRight, title: 'Cash flow', sub: 'What came in, went out and was kept' },
 ]
 
-/** Wealth home: how you are doing (freedom gauge, four headline numbers) and what needs you
+/** Wealth home: how you are doing (freedom gauge, why last month's net worth changed, four
+ * headline numbers) and what needs you
  * (month to close, things to fix), with links into the detail pages. Read-only. */
 export function WealthOverviewPage() {
   const today = centralDateStr(new Date())
@@ -40,6 +43,8 @@ export function WealthOverviewPage() {
   const [payments, setPayments] = useState<InstallmentPayment[]>([])
   const [problems, setProblems] = useState<AuditProblem[] | null>(null)
   const [csps, setCsps] = useState<CspPosition[]>([])
+  // Null until loaded, and if the read fails: the "why it changed" card then stays off the page.
+  const [flows, setFlows] = useState<ExternalFlow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   // /wealth?details=freedom opens the freedom details; closing them takes it off the link.
   const [details, setDetails] = useUrlState<'' | 'freedom'>('details', '', ['', 'freedom'])
@@ -60,6 +65,9 @@ export function WealthOverviewPage() {
     fetchCsps()
       .then(setCsps)
       .catch(() => setCsps([]))
+    fetchExternalFlows()
+      .then(setFlows)
+      .catch(() => setFlows(null))
   }, [])
 
   const portfolios = useMemo(() => w.portfolios ?? [], [w.portfolios])
@@ -71,6 +79,12 @@ export function WealthOverviewPage() {
   const projectedDividends = useMemo(
     () => dividendRows(w.activeHoldings, dividends, w.prices, Number(today.slice(5, 7))).reduce((s, r) => s + r.perYear, 0),
     [w.activeHoldings, dividends, w.prices, today],
+  )
+  // Last month, the month Cash flow opens on: the latest one that can have all its balances in.
+  const lastMonth = addMonths(month, -1)
+  const lastChange = useMemo(
+    () => (accounts && w.portfolios && flows ? netWorthChange(lastMonth, accounts, balances, w.portfolios, w.values, flows) : null),
+    [accounts, balances, w.portfolios, w.values, flows, lastMonth],
   )
   // The month waiting to be closed is the banner's job, so it isn't repeated in this list.
   const attention = useMemo(
@@ -134,6 +148,8 @@ export function WealthOverviewPage() {
             detailsOpen={details === 'freedom'}
             onDetailsClose={details === 'freedom' ? () => setDetails(null) : undefined}
           />
+
+          {lastChange && <NetWorthChangeCard change={lastChange} allMonthsTo={cashFlowLink(lastMonth, month)} />}
 
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <StatCard label="Net worth" value={currency(totals.net)} sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`} accent />
