@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ClipboardList, NotebookPen, Plus, Settings2, X } from 'lucide-react'
 import type { Portfolio, TickerThesisRow } from '../lib/database.types'
 import { savePositionPlan, updatePortfolio } from '../lib/wealthQueries'
-import { comparePlan, suggestBuys, type PlanRow, type PlanTarget } from '../lib/positionPlan'
+import { comparePlan, suggestBuys, type PlanAction, type PlanRow, type PlanTarget } from '../lib/positionPlan'
+import { buyCandidates } from '../lib/buyCandidates'
+import type { Research } from '../lib/research'
 import { bandText } from '../lib/allocationPlan'
 import { centralDateStr, currency } from '../lib/format'
 import { INPUT, INPUT_SM } from '../lib/ui'
@@ -12,12 +14,14 @@ import { Button } from './ui/Button'
 import { Pill } from './ui/Pill'
 import { Drawer } from './ui/Drawer'
 import { SortTh } from './SortTh'
+import { BuyCandidates, PlanResearch } from './BuyCandidates'
 import { sortRows, useSort } from '../lib/useSort'
 
-const shares = (amount: number, price: number | null) => (price && price > 0 ? ` (${Number((amount / price).toFixed(amount / price >= 10 ? 1 : 2))} sh)` : '')
+const shares =(amount: number, price: number | null) => (price && price > 0 ? ` (${Number((amount / price).toFixed(amount / price >= 10 ? 1 : 2))} sh)` : '')
 const pct = (n: number) => `${Number(n.toFixed(1))}%`
-const PLAN_SORT_KEYS = ['symbol', 'target', 'now', 'drift', 'move'] as const
-const PLAN_ASC_FIRST = ['symbol'] as const
+const PLAN_SORT_KEYS = ['symbol', 'target', 'now', 'drift', 'move', 'fair'] as const
+// Text sorts A→Z first; price vs fair value sorts cheapest first.
+const PLAN_ASC_FIRST = ['symbol', 'fair'] as const
 
 /** Is a thesis due for review (its review date is today or past)? */
 export const reviewDue = (t: TickerThesisRow | undefined) => !!t?.review_on && t.review_on <= centralDateStr(new Date())
@@ -33,6 +37,9 @@ export function PositionPlanCard({
   plan,
   tolerance,
   theses,
+  research,
+  actions = null,
+  onBuy,
   onOpenTicker,
   onSaved,
 }: {
@@ -45,6 +52,12 @@ export function PositionPlanCard({
   plan: PlanTarget[]
   tolerance: number
   theses: Map<string, TickerThesisRow>
+  /** Fair value and score per ticker; with it, each line shows them. */
+  research?: Map<string, Research>
+  /** Whole shares to buy or trim per ticker, for the "Worth a look" list. */
+  actions?: Map<string, PlanAction> | null
+  /** Opens the buy form filled in with these shares. */
+  onBuy?: (symbol: string, shares: number) => void
   onOpenTicker: (symbol: string) => void
   onSaved: () => void
 }) {
@@ -67,10 +80,12 @@ export function PositionPlanCard({
         now: (r) => r.pct,
         drift: (r) => (planned(r) ? r.diff : null),
         move: (r) => (planned(r) ? r.move : null),
+        fair: (r) => research?.get(r.symbol)?.pct ?? null,
       },
     )
     return [...tickers, ...cmp.rows.filter((r) => r.kind !== 'ticker')]
-  }, [cmp, sort])
+  }, [cmp, sort, research])
+  const candidates = useMemo(() => (research ? buyCandidates(cmp.rows, actions, research) : []), [cmp, actions, research])
 
   return (
     <Card
@@ -97,8 +112,9 @@ export function PositionPlanCard({
     >
       {hasPlan ? (
         <>
+          <BuyCandidates items={candidates} onBuy={onBuy} />
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[40rem] text-sm">
+            <table className={`w-full text-sm ${research ? 'min-w-208' : 'min-w-[40rem]'}`}>
               <thead>
                 <tr className="border-b border-(--border) text-left text-xs uppercase tracking-wide text-neutral-500">
                   <SortTh k="symbol" sort={sort} onSort={onSort} className="px-5 py-2.5 font-medium">Ticker</SortTh>
@@ -106,12 +122,17 @@ export function PositionPlanCard({
                   <SortTh k="now" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right font-medium">Now</SortTh>
                   <th className="w-40 px-3 py-2.5 font-medium" />
                   <SortTh k="drift" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right font-medium" title="Over plan first">Drift</SortTh>
-                  <SortTh k="move" sort={sort} onSort={onSort} className="px-5 py-2.5 font-medium" title="Biggest buy first, biggest trim last">To get back on plan</SortTh>
+                  <SortTh k="move" sort={sort} onSort={onSort} className={`${research ? 'px-3' : 'px-5'} py-2.5 font-medium`} title="Biggest buy first, biggest trim last">To get back on plan</SortTh>
+                  {research && (
+                    <SortTh k="fair" sort={sort} onSort={onSort} className="px-5 py-2.5 font-medium" title="Price as a share of fair value, and the score out of 100, as on Research; cheapest first">
+                      Price vs fair value · score
+                    </SortTh>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {lines.map((r) => (
-                  <PlanLine key={r.key} r={r} thesis={theses.get(r.symbol)} onOpen={r.kind === 'ticker' ? () => onOpenTicker(r.symbol) : undefined} />
+                  <PlanLine key={r.key} r={r} thesis={theses.get(r.symbol)} research={research} onOpen={r.kind === 'ticker' ? () => onOpenTicker(r.symbol) : undefined} />
                 ))}
               </tbody>
             </table>
@@ -165,7 +186,7 @@ export function PositionPlanCard({
   )
 }
 
-function PlanLine({ r, thesis, onOpen }: { r: PlanRow; thesis: TickerThesisRow | undefined; onOpen?: () => void }) {
+function PlanLine({ r, thesis, research, onOpen }: { r: PlanRow; thesis: TickerThesisRow | undefined; research?: Map<string, Research>; onOpen?: () => void }) {
   const amber = r.status === 'over' || r.status === 'under' || r.status === 'missing'
   const fill = r.status === 'on' ? 'bg-emerald-400' : amber ? 'bg-amber-400' : 'bg-neutral-500'
   return (
@@ -196,7 +217,7 @@ function PlanLine({ r, thesis, onOpen }: { r: PlanRow; thesis: TickerThesisRow |
         </span>
       </td>
       <td className={`px-3 py-2.5 text-right tabular-nums ${amber ? 'text-amber-300' : 'text-neutral-500'}`}>{r.target === null ? '' : `${r.diff >= 0 ? '+' : '−'}${pct(Math.abs(r.diff))}`}</td>
-      <td className="px-5 py-2.5 text-xs">
+      <td className={`${research ? 'px-3' : 'px-5'} py-2.5 text-xs`}>
         {r.status === 'unplanned' ? (
           <span className="text-neutral-500">not in your plan · {currency(r.value)}</span>
         ) : r.status === 'on' ? (
@@ -217,6 +238,7 @@ function PlanLine({ r, thesis, onOpen }: { r: PlanRow; thesis: TickerThesisRow |
           </span>
         )}
       </td>
+      {research && <td className="px-5 py-2.5">{r.kind === 'ticker' && <PlanResearch r={research.get(r.symbol)} />}</td>}
     </tr>
   )
 }

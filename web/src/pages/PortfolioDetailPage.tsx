@@ -51,6 +51,7 @@ import { sortRows, useSort } from '../lib/useSort'
 import { GetPricesButton } from '../components/GetPricesButton'
 import { OptionsCard } from '../components/OptionsCard'
 import { ActivityTable } from '../components/ActivityTable'
+import { MoversStrip } from '../components/MoversStrip'
 import { ResearchPills } from '../components/ResearchBits'
 import { QuickTrade, type QuickLine } from '../components/QuickTrade'
 import { PlanNotesCard, PositionPlanCard, reviewDue } from '../components/PositionPlan'
@@ -186,6 +187,7 @@ function HoldingsTable({
   theses,
   actions,
   offOnly,
+  focus,
 }: {
   views: HoldingView[]
   total: number
@@ -203,8 +205,20 @@ function HoldingsTable({
   /** What to do per ticker to get back on plan; null = no plan. */
   actions: Map<string, PlanAction> | null
   offOnly: boolean
+  /** Scrolls to a holding's row (by its id) and highlights it. Pass a new object each time. */
+  focus?: { id: string } | null
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [flash, setFlash] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focus) return
+    const el = document.getElementById(`holding-row-${focus.id}`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlash(focus.id)
+    const t = setTimeout(() => setFlash(null), 2500)
+    return () => clearTimeout(t)
+  }, [focus])
   const { state: sort, toggle: onSort } = useSort('holdings', HOLDING_SORT_KEYS, HOLDING_ASC_FIRST)
   const hasPlan = actions !== null
   const cols = hasPlan ? 11 : 10
@@ -275,11 +289,12 @@ function HoldingsTable({
             ) : (
               <tr
                 key={v.holding.id}
+                id={`holding-row-${v.holding.id}`}
                 onClick={() => onTrading(trading === v.holding.symbol ? null : v.holding.symbol)}
                 tabIndex={0}
                 onKeyDown={rowKeys(() => onTrading(trading === v.holding.symbol ? null : v.holding.symbol))}
                 title={`Log a buy or sale of ${v.holding.symbol}`}
-                className={`group cursor-pointer border-b border-(--border) transition last:border-0 hover:bg-white/2 ${ROW_FOCUS} ${trading === v.holding.symbol ? 'bg-white/3' : ''}`}
+                className={`group cursor-pointer border-b border-(--border) transition last:border-0 hover:bg-white/2 ${ROW_FOCUS} ${flash === v.holding.id ? 'bg-amber-500/10' : trading === v.holding.symbol ? 'bg-white/3' : ''}`}
               >
                 <td className="px-5 py-3 font-semibold text-white">
                   {v.holding.symbol}
@@ -433,6 +448,8 @@ export function PortfolioDetailPage() {
   // True once something was typed into the quick form, so closing it asks first.
   const dirty = useRef(false)
   const [focusLine, setFocusLine] = useState<{ key: string } | null>(null)
+  // The holdings row a "biggest gains and losses" chip points at.
+  const [focusHolding, setFocusHolding] = useState<{ id: string } | null>(null)
   // "Off plan only" on the holdings table, remembered per browser.
   const [offOnly, setOffOnly] = useState(() => {
     try {
@@ -544,8 +561,16 @@ export function PortfolioDetailPage() {
   )
   const series = useMemo(() => (portfolioId ? seriesFor(values, portfolioId) : []), [values, portfolioId])
   const pending = useMemo(() => unpricedSymbols(holdings, openCsps, prices, openOptions), [holdings, openCsps, prices, openOptions])
-  // Fair value and score per holding, compared with the price the holdings table shows.
-  const researchPrices = useMemo(() => new Map((snap?.holdings ?? []).filter((v) => v.price !== null).map((v) => [v.holding.symbol, v.price as number])), [snap])
+  // Fair value and score per holding, compared with the price the holdings table shows. A plan
+  // ticker not owned yet is compared with its latest close, as the Research page does.
+  const researchPrices = useMemo(() => {
+    const m = new Map((snap?.holdings ?? []).filter((v) => v.price !== null).map((v) => [v.holding.symbol, v.price as number]))
+    for (const t of plan) {
+      const close = prices.get(t.symbol)?.close
+      if (close !== undefined && !holdings.some((h) => h.symbol === t.symbol)) m.set(t.symbol, close)
+    }
+    return m
+  }, [snap, plan, prices, holdings])
   // Plan tickers you don't own yet get research too (opened from the plan).
   const holdingSymbols = useMemo(() => [...holdings.map((h) => h.symbol), ...plan.map((t) => t.symbol)], [holdings, plan])
   const planTargets = useMemo(() => new Map(plan.map((t) => [t.symbol, t.pct])), [plan])
@@ -668,7 +693,10 @@ export function PortfolioDetailPage() {
       if (!(await okToDiscard())) return
       showTrade(null)
     }
-    if (v !== 'positions') setFocusLine(null)
+    if (v !== 'positions') {
+      setFocusLine(null)
+      setFocusHolding(null)
+    }
     setTab(v)
   }
   const openDrawer = (action: LogAction, initial?: OptionFormInitial) => {
@@ -947,6 +975,8 @@ export function PortfolioDetailPage() {
               ) : undefined
             }
           >
+            {/* With "Off plan only" on, a chip's row may be hidden, so the chips don't link. */}
+            <MoversStrip views={snap.holdings} asOf={snap.asOf} onShow={offOnly && actions ? undefined : (id) => setFocusHolding({ id })} />
             {snap.holdings.length === 0 ? (
               <>
                 {trading !== null && <div className="border-y border-(--border) bg-(--accent-soft)/40 px-5 py-3">{quickForm(trading)}</div>}
@@ -982,6 +1012,7 @@ export function PortfolioDetailPage() {
                 theses={theses}
                 actions={actions}
                 offOnly={offOnly}
+                focus={focusHolding}
               />
             )}
           </Card>
@@ -1025,6 +1056,9 @@ export function PortfolioDetailPage() {
             plan={plan}
             tolerance={tolerance}
             theses={theses}
+            research={research.rows}
+            actions={actions}
+            onBuy={(symbol, shares) => openTrade(symbol, [{ symbol, side: 'buy', qty: shares }])}
             onOpenTicker={setResearchOpen}
             onSaved={load}
           />
