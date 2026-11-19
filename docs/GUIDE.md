@@ -25,12 +25,19 @@ The sidebar switch at the top flips between two separate areas:
 | Side | For | Pages |
 |---|---|---|
 | **Trading** | Day trades: syncing, reviewing and learning from them | Today, Journal, Review, Trades, Insights, Settings |
-| **Wealth** | Long-term money: what you own, what you owe, and your investments | Overview, Portfolios, Net worth, Cash flow, Research, Settings |
+| **Wealth** | Long-term money: what you own, what you owe, and your investments | Overview, Portfolios (each one listed by name), Net worth (with a Cash flow tab), Research, Settings |
 
 **The two never mix.** Day-trading results don't feed into portfolios or net worth, so a
 good or bad trading week never distorts your long-term picture.
 
 Each person signs in with their own login and only ever sees their own data.
+
+### Getting around
+
+- **Log** (top of the Wealth sidebar, or press **L**): pick a portfolio and the quick buy/sell form opens. On a portfolio page it opens for that portfolio straight away. The picker can also open the Deposit or Option form.
+- **Search** (**Ctrl+K**, or the Search row in the sidebar): type a page, a portfolio or a ticker you hold.
+- **Switching sides** takes you back to the page you left on that side, and the app opens on the side you used last.
+- **Settings** has a Trading group and a Wealth group, and opens on the side you came from.
 
 ---
 
@@ -40,9 +47,9 @@ Each person signs in with their own login and only ever sees their own data.
 |---|---|---|
 | **Every trading day** | Nothing to do. Trades sync every 15 minutes in market hours; prices and research update at 4:45 PM New York time | Automatic |
 | **After trading** | Review closed trades: whose idea it was, what went well or badly, the setup | Review |
-| **When you buy, sell or move money** in a portfolio | Record it as an entry so cash and shares stay right | Portfolio page → actions |
+| **When you buy, sell or move money** in a portfolio | Record it as an entry so cash and shares stay right | **Log** in the sidebar (or press L), or the Log menu on the portfolio page |
 | **Start of each month** (by the 15th) | **Close last month:** enter each account's balance as of the last day, mark payments paid, then press Close | The amber "Close {month}" banner, then the close card on Net worth |
-| **Now and then** | Glance at the Health check and the Allocation card | Portfolios |
+| **Now and then** | Glance at "Needs attention" on Overview and the Targets card on Portfolios | Overview, Portfolios |
 
 ### Closing a month
 
@@ -50,8 +57,10 @@ Net worth is built from month-end balances, so each month needs closing once it'
 
 - **From the 1st,** an amber banner appears: *"Close October · 5 of 8 balances confirmed"*. After the 15th it's marked overdue, but nothing closes by itself.
 - **Use the balance on the last day of the month** from each statement. Debts are entered as positive numbers; the app subtracts them.
-- **Save only writes what you changed.** A number carried from last month stays marked "carried" until you edit it or tick **unchanged**. Accounts with a carried number don't count as done.
-- **Mark each payment paid** under Monthly payments.
+- **While a month is waiting to be closed,** Net worth leads with the close card, then Balances, then Monthly payments. The headline numbers, yearly chart and composition sit below in a collapsed **Breakdown** section. The close card shows progress ("6 of 8 balances · 3 of 4 payments"), and each line jumps to the first thing still missing.
+- **Type down the column:** Enter moves to the next balance, and Enter on the last one saves. What you have typed stays put while you mark payments or add an account.
+- **Save only writes what you changed or confirmed.** A number carried from last month stays marked "carried" until you type in it, press Enter in it, or tick **unchanged**. Accounts with a carried number don't count as done.
+- **Mark payments paid** under Monthly payments: one click per payment, or **Mark all paid**. Each shows an Undo for a few seconds. To record a different amount or date, use the row's menu. The card's title names both months ("October statements · due in November").
 - **Press Close** in the month-end close card on Net worth. Months close in order, and a closed month's balances and payments are locked.
 - **To correct a closed month, press Reopen** and give a reason. Later closed months reopen with it. Fix the numbers, then close them again in order. Every close and reopen is kept in the month's history.
 - **What a correction changes:** that month's cash flow and the next month's. Balances already saved for later months stay as they are; a later month without its own balance carries the new number.
@@ -101,11 +110,11 @@ Things to know about synced trades:
 
 | Page | What it shows |
 |---|---|
-| **Overview** | Net worth and its change from last month, investments, dividend income, a month-by-month chart, allocation, where your net worth is, and each portfolio. The close banner shows here too |
-| **Net worth** | Everything you own minus everything you owe, by month. Accounts, monthly balances, a yearly chart, what's in each category, and Monthly payments |
-| **Cash flow** | What you kept each month, worked out from balances alone (no income entry): cash saved + invested + debt paid down, reconciled to the change in net worth |
-| **Portfolios** | Each portfolio's value and day change, the Health check, and Allocation |
-| **Portfolio page** | Holdings, Activity, options, sold puts, dividends, performance, and that portfolio's own mix |
+| **Overview** | The freedom gauge, four headline numbers, a **Needs attention** list (Health check problems, options about to expire, tickers waiting for a price), links to the detail pages, and each portfolio. The close banner shows here too |
+| **Net worth** | Everything you own minus everything you owe, by month. Two tabs: **Balances** (monthly balances, Monthly payments, the month-end close, and a Breakdown section with the yearly chart and what's in each category) and **Cash flow**. One month stepper at the top serves both |
+| **Cash flow** (a tab on Net worth) | What you kept each month, worked out from balances alone (no income entry): cash saved + invested + debt paid down, reconciled to the change in net worth |
+| **Portfolios** | Each portfolio's value and day change, the Health check, **Targets** (are you on target across accounts) and **Holdings breakdown** |
+| **Portfolio page** | Four tabs: **Positions** (stocks, funds and options), **Plan**, **Performance** (value, returns, dividends) and **Activity**. A strip at the top appears only when something needs you: positions off plan, an option about to expire, a ticker waiting for a price, or numbers that don't match the entries |
 | **Research** | Fair value, score and next earnings date for everything you hold, plus a watchlist |
 
 ### How investments reach net worth
@@ -123,17 +132,27 @@ The holding's pencil edits only a manual price. That's what keeps every number t
 
 | You did | Use | Effect on returns |
 |---|---|---|
-| Put money in / took money out | **Cash → Deposit / Withdraw** | None: it's your money, not a gain |
-| Bought shares | **Click the position** (or Trade → Buy) | None: cash became shares |
-| Already owned shares before using the app | **Add existing** | None: counted as money in |
-| Sold shares | **Click the position** (or Trade → Sell) | The gain or loss counts |
-| Got a dividend | **Cash → Dividend** | Counts as earnings |
-| Moved shares between portfolios | **Transfer** | None on either side |
-| Stock split (or reverse split) | **Split** | None: shares × ratio, cost ÷ ratio |
-| Broker's cash differs, or you're on margin | **Set balance** (negative for margin) | None as a correction; ticked as interest or fees it lowers returns |
-| Options and sold puts | The **Options** and **Cash-secured puts** cards | Premiums and closes count |
+| Put money in / took money out | **Log → Deposit / Withdraw**, or click the **Cash** card | None: it's your money, not a gain |
+| Bought shares | **Click the position** (or Log → Buy or sell) | None: cash became shares |
+| Already owned shares before using the app | **Log → Shares I already own** | None: counted as money in |
+| Sold shares | **Click the position** (or Log → Buy or sell) | The gain or loss counts |
+| Got a dividend | **Log → Dividend**, or **Record** on the Performance tab | Counts as earnings |
+| Moved shares between portfolios | **Log → Transfer** | None on either side |
+| Stock split (or reverse split) | **Log → Stock split** | None: shares × ratio, cost ÷ ratio |
+| Broker's cash differs, or you're on margin | **Log → Match broker balance** (negative for margin) | None as a correction; ticked as interest or fees it lowers returns |
+| Options and sold puts | **Log → Option**, or the **Options** card on Positions | Premiums and closes count |
 
 **Option prices are per share,** as brokers quote them (e.g. 4.20). The app multiplies by 100 × contracts.
+
+### Options as one position
+
+The Options card groups by stock, then by contract. Cash-secured puts and other options are in the same list.
+
+- **Each stock has a line** showing the shares you hold, how many are covered by sold calls, how many are free, and the last price.
+- **Each contract is one line.** Buy the same contract twice and it shows as "×2" with the totals. Open the line to see each purchase with its own date, price and menu.
+- **+ Add** opens the option form filled in with that contract, so you type only the contracts and the price.
+- **Actions on a contract line cover every purchase in it:** Update price, Sell to close or Buy back, Expired worthless, Assigned, Exercise. Each asks for a date. If one purchase can't be saved, a note on the card says which were recorded and which weren't.
+- **Selling part of a position isn't possible yet.** A close takes a whole purchase; use that purchase's own menu.
 
 ### Logging buys and sells from your positions
 
@@ -141,7 +160,7 @@ The quickest way to record trades:
 
 1. **Click a position.** A form opens under it with the ticker, today's date and the last price filled in.
 2. **Pick Bought or Sold** and type the shares. **All** fills in your whole position for a sale. Change the price to your fill price, and add the fee if there was one.
-3. **More than one trade?** Press **Add another** for a new line (any ticker, bought or sold). For a ticker you don't hold yet, use **New ticker** above the table.
+3. **More than one trade?** Press **Add another** for a new line (any ticker, bought or sold), or **paste rows** copied from your broker or a spreadsheet (ticker, shares, price; the word "sold" or a negative share count marks a sale). Each row becomes a line for you to check. For a ticker you don't hold yet, use **New ticker** above the table.
 4. **Check the cash before → after** at the bottom against your broker, then press **Log**.
 
 Every line is saved together, or none are: if one line has a problem (e.g. selling more than you hold), nothing is saved and that line is marked. Each line still becomes its own Activity entry, so you can edit or undo any one later.
@@ -153,7 +172,8 @@ Every line is saved together, or none are: if one line has a problem (e.g. selli
 ### Fixing a mistake
 
 - **Edit** an entry to correct it, or **Undo** to reverse it. Nothing is deleted: the original stays as history ("Show undone or edited entries").
-- **Undo newest first for a ticker.** An entry that changed a holding can only be undone while it's the newest entry for that ticker in that portfolio.
+- **Undo newest first for a ticker.** An entry that changed a holding can only be undone while it's the newest entry for that ticker in that portfolio. Entries that can't be changed show a lock; click it to see why ("2 newer VOO entries: undo those first").
+- **A refused change keeps what you typed.** The form stays open with the reason.
 - **Options and puts** have their own Edit and Undo. Undo reopens a closed one, or removes an open one.
 - **Transfers can't be undone;** transfer the shares back instead.
 
@@ -190,10 +210,10 @@ either one for the full breakdown and "How this is calculated".
 
 80+ is **Strong**, 70–79 **Good**, 60–69 **Fair**, under 60 **Weak**.
 
-- **Override any part** (EPS, growth or a score part) from the breakdown. **Reset** puts the automatic number back.
+- **Override any part** (EPS, growth or a score part) from the breakdown. **Use automatic** puts the automatic number back.
 - **Edits keep up with the data:**
   - Each edit remembers the automatic number it replaced. If that number moves (EPS by more than 2%, growth by more than half a point, any change in score points), the breakdown says so, e.g. *"Growth: automatic is now 13.9% (was 20% when you edited)"*, with **Use automatic** or **Keep mine**. The ticker gets a **Check edit** pill on the Research list and a **check** pill on holdings.
-  - **EPS edits end 3 days after the company's next earnings report,** because EPS changes then. The automatic EPS comes back and the breakdown tells you, with **Use mine again** if you still want yours.
+  - **EPS edits end 3 days after the company's next earnings report,** because EPS changes then. The automatic EPS comes back and the breakdown tells you, with **Keep mine** if you still want yours.
   - If your number matches the automatic one, you're asked to switch to automatic so it keeps updating.
 - **ETFs and loss-making companies** get no fair value or score, because there are no positive earnings to value.
 - **Everything is automatic:** company data from Finnhub, analysts' forecasts from Financial Modeling Prep and economic numbers from FRED, refreshed daily. A new ticker fills in with "Get prices now", or at 4:45 PM.
@@ -202,7 +222,7 @@ either one for the full breakdown and "How this is calculated".
 
 ## Towards financial freedom
 
-The gauge at the top of **Wealth** shows how much of the money you need to stop depending on a paycheck you already have. Press **Details** to see the breakdown or change your inputs.
+The gauge at the top of **Wealth** shows how much of the money you need to stop depending on a paycheck you already have. Press **Details** to see the breakdown or change your inputs. The target, milestones and time estimate follow what you type, before you save.
 
 - **Freedom money** = brokerage + retirement + cash and emergency fund − cards, car loans, margin and other debts. Retirement money counts in full, before taxes. The home, cars and miscellaneous items are left out. Day trading plays no part in it.
 - **Freedom number** = ongoing spending × 12 ÷ your withdrawal rate (4% means 25 times), plus your mortgage balance as a one-time cost. Every mortgage payment lowers it, and the mortgage payment itself stays out of spending.
@@ -218,20 +238,20 @@ Two kinds of targets:
 
 | Target | Where you set it | Covers |
 |---|---|---|
-| **Split** | Portfolios page → Allocation → **Edit split** | How brokerage money divides between brokerage accounts (e.g. Long Term 90%, Equity Trades 10%) |
+| **Split** | Portfolios page → Targets → **Edit split** | How brokerage money divides between brokerage accounts (e.g. Long Term 90%, Equity Trades 10%) |
 | **Position plan** | Each portfolio's page → **Plan** → **Set / Edit plan** | A target % per ticker in that account (e.g. VOO 40%, NVDA 20%) |
 | **Mix by type** | Each portfolio's page → **Plan** → **Set / Edit targets** | That one account's ETFs / Stocks / Bonds / Options / Cash. With a position plan, this is worked out from the plan instead |
 
 Retirement accounts are never in the split, because money can't move freely in or out of them.
-The Allocation card on Portfolios lists every account with **On target**, **N off target** or
-**No targets**; open a line to see that account's mix, with the dollars to add or trim.
+The Targets card on Portfolios opens by itself when something is off target. It lists every account with **On target**, **N off target** or
+**No targets**; open a line to see the positions that are off plan and what to buy or trim (or, for an account without a position plan, its mix by type).
 
 - **Types:** ETFs, Stocks, Bonds, Options, Cash.
 - **Not counted:** margin, and sold options (covered calls, sold puts), which are obligations rather than holdings.
 - **How types are detected:** from the exchange's own listing. ETFs count as ETF; ETFs whose names say bond, treasury or T-bill count as Bond; stocks, ADRs and REITs count as Stock.
 - **To change a ticker's type,** open its type row (e.g. ETFs) and pick a type next to it.
 - **Position plan:** enter a ticker and its % on each row (**+ Add ticker** for more); whatever doesn't add up to 100% stays as cash. Save is blocked while a row is missing its ticker or %, a ticker is listed twice, or the total is over 100%. Each ticker shows its target, where it is now, and what to buy or trim. Tickers you hold but didn't plan show "not in your plan"; planned tickers you don't own yet show "not owned yet". The holdings table shows each ticker's target under its weight.
-- **On the Positions tab,** each holding shows its weight → target and what to do: **▲ Buy 5 sh** or **▼ Trim 9 sh** (whole shares, rounded down, back to the exact target), **✓ On plan**, or **Not in plan**. Click the action to open the trade already filled in. Planned tickers you don't own yet are listed at the bottom, and **Off plan only** hides everything that needs nothing.
+- **On the Positions tab,** each holding shows its weight → target and what to do: **▲ Buy 5 sh** or **▼ Trim 9 sh** (whole shares, rounded down, back to the exact target), **✓ On plan**, or **Not in plan**. Click the action to open the trade already filled in, or press **Log all** beside the off-plan summary to open every suggested trade in one form (sales first). Planned tickers you don't own yet are listed at the bottom, and **Off plan only** hides everything that needs nothing.
 - **Sorting:** click any column header on Positions, Plan, Options, Dividends or Activity to sort by it. Click again to flip the order, and a third time to go back to the default (positions by value). Each table remembers your choice on that device. Empty values always sort last; on Plan, the Options and Cash rows stay at the bottom.
 - **Add money** (Plan tab): type an amount and it suggests buys only, nothing sold, going first to whatever is furthest below its target. It uses the account's free cash first; anything more counts as new money.
 - **Plan notes** (Plan tab): your rules for the account. Saved as you type.
@@ -243,14 +263,14 @@ The Allocation card on Portfolios lists every account with **On target**, **N of
 
 ## 8. Health check: what each warning means
 
-The Health check card on Portfolios re-adds every number from the Activity history and
+The Health check (on Portfolios, in "Needs attention" on Overview, and at the top of the portfolio it concerns) re-adds every number from the Activity history and
 lists anything that doesn't match. **No warnings means every share, cost and cash figure is
 backed by entries.**
 
 | Warning | Means | Do |
 |---|---|---|
 | **Shares** / **Average cost** | A holding differs from what its entries add up to | Find the missing or wrong entry in Activity; edit or add it |
-| **Cash** | Cash differs from the sum of entries | Usually an entry was missed. **Set balance** to the broker's number also fixes it, as a recorded correction |
+| **Cash** | Cash differs from the sum of entries | Usually an entry was missed. **Match broker balance** to the broker's number also fixes it, as a recorded correction |
 | **Position** | An option or put has a missing or extra open/close entry | Undo and redo that position |
 | **Covered call** | Open covered calls need more shares than you hold | Check the share entries or the call's contracts |
 | **Price** | A ticker that used to price has fallen behind | Possibly delisted or renamed: set a manual price, or sell / transfer it |
