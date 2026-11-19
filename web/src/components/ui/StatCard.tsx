@@ -44,7 +44,7 @@ export function StatCard({
       </div>
       <div className={`mt-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight tabular-nums sm:text-2xl ${valueColor}`}>
         {tone != null && tone !== 0 && (tone > 0 ? <TrendingUp size={18} className="shrink-0" /> : <TrendingDown size={18} className="shrink-0" />)}
-        <span className="min-w-0 break-words">{value}</span>
+        <span className="min-w-0 wrap-break-word">{value}</span>
       </div>
       {(chip || sub) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-neutral-500">

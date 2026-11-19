@@ -114,7 +114,7 @@ export function PositionPlanCard({
         <>
           <BuyCandidates items={candidates} onBuy={onBuy} />
           <div className="overflow-x-auto">
-            <table className={`w-full text-sm ${research ? 'min-w-208' : 'min-w-[40rem]'}`}>
+            <table className={`w-full text-sm ${research ? 'min-w-208' : 'min-w-160'}`}>
               <thead>
                 <tr className="border-b border-(--border) text-left text-xs uppercase tracking-wide text-neutral-500">
                   <SortTh k="symbol" sort={sort} onSort={onSort} className="px-5 py-2.5 font-medium">Ticker</SortTh>

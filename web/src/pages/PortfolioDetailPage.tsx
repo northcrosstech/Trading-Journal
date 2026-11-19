@@ -1120,7 +1120,7 @@ function CashCard({ label, value, sub, warning = false, onClick }: { label: stri
       className="group relative block h-full w-full overflow-hidden rounded-2xl border border-(--border) bg-(--card) p-4 text-left transition hover:border-(--accent)/50 focus-visible:border-(--accent) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent-soft)"
     >
       <span className="block text-xs font-medium text-neutral-400">{label}</span>
-      <span className={`mt-1.5 block break-words text-lg font-semibold tracking-tight tabular-nums sm:text-2xl ${warning ? 'text-amber-300' : 'text-white'}`}>{value}</span>
+      <span className={`mt-1.5 block wrap-break-word text-lg font-semibold tracking-tight tabular-nums sm:text-2xl ${warning ? 'text-amber-300' : 'text-white'}`}>{value}</span>
       <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-neutral-500">
         <span className="min-w-0">{sub}</span>
         <span className="inline-flex items-center gap-0.5 font-medium text-(--accent-text) group-hover:underline">

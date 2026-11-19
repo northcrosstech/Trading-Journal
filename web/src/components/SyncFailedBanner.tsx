@@ -37,7 +37,7 @@ export function SyncFailedBanner({ sync }: { sync: SyncState }) {
       <div className="flex min-w-0 flex-1 items-start gap-2.5">
         <AlertTriangle size={16} className="mt-0.5 shrink-0 text-(--status-critical)" />
         <div className="min-w-0">
-          <p className="line-clamp-2 break-words" title={log.message ?? undefined}>
+          <p className="line-clamp-2 wrap-break-word" title={log.message ?? undefined}>
             <span className="font-medium">The last sync failed ({dateTimeFmt(log.ran_at)}).</span>
             {log.message && <span className="text-red-300/80"> {log.message}</span>}
           </p>
