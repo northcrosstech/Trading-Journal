@@ -1,5 +1,5 @@
 import type { CloseLogRow, InstallmentPayment, NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, PortfolioActivity, PortfolioDailyValue } from './database.types'
-import { addMonths, isDebt, isOpenIn, monthOf, monthTotals } from './networth'
+import { addMonths, isDebt, isOpenIn, monthOf, monthTotals, portfolioCountsIn } from './networth'
 import { expectedPayment, hasPaymentPlan } from './installments'
 
 /** Everyday money: what a month's change in these balances means you kept (or used). */
@@ -71,7 +71,7 @@ export function monthCashFlow(
     else if (isDebt(a.category)) debtPaidDown -= delta
   }
 
-  const active = portfolios.filter((p) => !p.archived)
+  const active = portfolios.filter((p) => portfolioCountsIn(p, month))
   const inMonth = (d: string) => d >= month && d < next
   let invested = 0
   let investmentGrowth = 0

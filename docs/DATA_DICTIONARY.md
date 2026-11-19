@@ -232,7 +232,8 @@ An investment account you track (separate from the trading journal's `accounts`)
 | `name` | text | e.g. "Long Term". |
 | `kind` | text | `brokerage` · `401k` · `traditional_ira` · `roth_ira` — which net-worth line it fills. The three retirement kinds are never part of the brokerage allocation split. |
 | `cash` | numeric | Cash in the portfolio. Moved by deposits, withdrawals, dividends, buys, sells, options and Set balance. **Negative = margin used**, shown in net worth as a Margin loans debt. |
-| `archived` | boolean | Archived portfolios aren't priced and leave net worth. |
+| `archived` | boolean | Archived portfolios aren't priced, and leave net worth and cash flow from the month they were archived. Earlier months keep their value. |
+| `archived_on` | date | The day it was archived (US Central); null while active. Set by a trigger when `archived` changes, never by the app. |
 | `target_pct` | numeric | Brokerage only: this portfolio's target share of all brokerage money (0–100). Null = no target. |
 | `notes` | text | Plan notes: your rules for this account (Plan tab). Up to 10,000 characters. |
 
@@ -473,14 +474,14 @@ Trading functions run as the calling user (so RLS applies) unless marked otherwi
 
 | Function | Called by | What it does |
 |---|---|---|
-| `upsert_trade_bundle` | Worker | Writes one trade + its fills + options_detail atomically, deduplicated by `trade_key`. **Security definer.** Skips outcome fields when `manually_closed`. |
-| `portfolio_buy` | Buy, Add existing | Adds shares (blends avg cost). Buy takes cash (plus an optional fee, added to cost); Add existing records money in. |
+| `upsert_trade_bundle` | Worker | Writes one trade + its fills + options_detail atomically, deduplicated by `trade_key`. **Security definer; callable by the service role only.** Skips outcome fields when `manually_closed`. |
+| `portfolio_buy` | Buy, Shares I already own | Adds shares (blends avg cost). Buy takes cash (plus an optional fee, added to cost); Shares I already own records money in at the latest saved close, else at `p_market_price` (today's price, typed in the form), else at the average cost. |
 | `portfolio_sell` | Sell | Removes shares, adds proceeds to cash, records realized gain. Refuses shares covering open calls. |
 | `portfolio_trades` | Positions → Log | Several buys and sells (each with a fee) in one save, all or none; a failing line comes back as "Line 2 (VOO): …". |
 | `portfolio_transfer` | Transfer | Moves shares to another portfolio (or out) with avg cost carried over; money out/in on each side. |
 | `portfolio_cash` | Cash tab | Deposit / withdrawal / dividend. |
-| `csp_open` / `csp_resolve` | Cash-secured puts | Sell a put; resolve as expired / closed / assigned. |
-| `option_open` / `option_close` | Options card | Buy call/put or sell covered call; resolve as closed / expired / exercised / assigned. |
+| `csp_open` / `csp_resolve` | Cash-secured puts | Sell a put; resolve as expired / closed / assigned. `p_contracts` resolves only part: the sale is first split in two (see `option_close`). |
+| `option_open` / `option_close` | Options card | Buy call/put or sell covered call; resolve as closed / expired / exercised / assigned. `p_contracts` resolves only part: the opening entry is voided and re-entered as two purchases with the same price and date (the part and the rest), then the part is resolved. Every purchase keeps exactly one opening and one closing entry. |
 | `portfolio_set_cash` | Set balance | Sets cash to the broker's number (negative for margin) as a `cash_adjust` entry. |
 | `portfolio_split` | Split | Multiplies shares by the ratio and divides average cost by it. |
 | `portfolio_entry_edit` | Activity → Edit | Voids a buy / sell / add existing / cash entry and records the corrected one, linked by `replaced_by`. |
@@ -511,12 +512,13 @@ Left over from earlier versions. Nothing in the website or worker reads or write
 | `playbook_rule_groups`, `playbook_rules`, `trade_rule_checks` | Per-setup rule checklists | On |
 | `daily_rules`, `daily_rule_checks` | Daily discipline checklist | On |
 | `missed_trades` | Missed-trade log | On |
-| `backup_strategies_20260711`, `backup_trade_strategies_20260711`, `backup_rules_20260711`, `backup_trade_rules_20260711`, `backup_daily_plan_strategies_20260711` | Snapshots taken before the July 2026 playbooks migration | **Off** |
+| `backup_strategies_20260711`, `backup_trade_strategies_20260711`, `backup_rules_20260711`, `backup_trade_rules_20260711`, `backup_daily_plan_strategies_20260711` | Snapshots taken before the July 2026 playbooks migration | On, no policies |
 
-> **⚠ Security:** the five `backup_*` tables have no row-level security, and as of
-> 2026-10-22 four of them can be read by **anyone holding the website's public key** — no
-> sign-in needed. They hold old strategy/rule names. Nothing references them, so the fix
-> is to drop them (Supabase SQL editor):
+> **Security:** the five `backup_*` tables were created without row-level security.
+> Migration `20261119010000_security_lockdown.sql` turns it on with no policies and removes
+> the public and signed-in roles' rights, so only the owner and the worker can reach them.
+> They hold old strategy/rule names and nothing references them; to remove them for good
+> (Supabase SQL editor):
 >
 > ```sql
 > drop table if exists backup_strategies_20260711, backup_trade_strategies_20260711,

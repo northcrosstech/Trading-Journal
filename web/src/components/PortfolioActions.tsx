@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Holding, OptionPosition, Portfolio } from '../lib/database.types'
-import { portfolioBuy, portfolioCash, portfolioSetCash, portfolioSplit, portfolioTransfer } from '../lib/wealthQueries'
+import { fetchLatestPrices, portfolioBuy, portfolioCash, portfolioSetCash, portfolioSplit, portfolioTransfer, type SymbolPrice } from '../lib/wealthQueries'
 import { centralDateStr, currency } from '../lib/format'
 import { INPUT, LABEL } from '../lib/ui'
 import { LOG_HINT, type LogAction } from '../lib/logActions'
@@ -67,8 +67,27 @@ export function PortfolioActions({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [priceToday, setPriceToday] = useState('')
+  // Shares I already own: the saved close for the ticker typed. undefined = still looking.
+  const [saved, setSaved] = useState<{ symbol: string; price: SymbolPrice | null } | undefined>(undefined)
+
   const sym = symbol.trim().toUpperCase()
   const held = holdings.find((h) => h.symbol === sym)
+
+  useEffect(() => {
+    if (action !== 'existing' || !sym) return
+    let stale = false
+    const t = setTimeout(() => {
+      fetchLatestPrices([sym])
+        .then((m) => !stale && setSaved({ symbol: sym, price: m.get(sym) ?? null }))
+        .catch(() => !stale && setSaved(undefined))
+    }, 350)
+    return () => {
+      stale = true
+      clearTimeout(t)
+    }
+  }, [action, sym])
+  const savedPrice = saved && saved.symbol === sym ? saved.price : undefined
 
   async function submit() {
     setError(null)
@@ -107,12 +126,16 @@ export function PortfolioActions({
         if (!sym) throw new Error('Enter a ticker.')
         if (q === null || q <= 0) throw new Error('Enter a quantity above zero.')
         if (p === null || p < 0) throw new Error('Enter your average cost per share.')
-        await portfolioBuy({ portfolioId, symbol: sym, quantity: q, price: p, fromCash: false, on, fee: 0 })
+        // Only asked for (and only sent) when no close is saved for the ticker.
+        const today = savedPrice === null && priceToday.trim() !== '' ? num(priceToday) : null
+        if (savedPrice === null && priceToday.trim() !== '' && (today === null || today < 0)) throw new Error('Enter today’s price per share, or leave it blank.')
+        await portfolioBuy({ portfolioId, symbol: sym, quantity: q, price: p, fromCash: false, on, fee: 0, marketPrice: today })
         message = `Added ${fmtQty(q)} ${sym}`
       }
       setSymbol('')
       setQty('')
       setPrice('')
+      setPriceToday('')
       setAmount('')
       onDone(message)
     } catch (e) {
@@ -239,6 +262,19 @@ export function PortfolioActions({
               <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} className={INPUT} />
             </Field>
           </div>
+          {sym && savedPrice === null && (
+            <Field
+              label={`${sym} price today (per share)`}
+              hint={`No price is saved for ${sym} yet. Enter today’s price so the gap between it and your cost isn’t counted as a gain this portfolio made. Left blank, your average cost is used.`}
+            >
+              <input inputMode="decimal" value={priceToday} onChange={(e) => setPriceToday(e.target.value)} className={INPUT} />
+            </Field>
+          )}
+          {sym && savedPrice && (
+            <p className="-mt-2 text-xs text-neutral-500">
+              Counted as money in at the last saved close, {currency(savedPrice.close)} a share.
+            </p>
+          )}
           {dateField}
         </div>
       )}

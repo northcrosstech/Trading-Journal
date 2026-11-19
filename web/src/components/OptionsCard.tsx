@@ -43,7 +43,8 @@ type Lot = {
   tags: Tag[]
   extra?: string
   setMark: (mark: number | null) => Promise<unknown>
-  resolve: (outcome: Outcome, on: string, price?: number) => Promise<unknown>
+  /** `contracts` closes only that many of this lot; left out, the whole lot. */
+  resolve: (outcome: Outcome, on: string, price?: number, contracts?: number) => Promise<unknown>
   edit: () => void
   remove: () => void
 }
@@ -80,6 +81,9 @@ type Row = {
 
 /** A contract line, or one lot of it, that an action applies to. */
 type Target = Pick<Row, 'symbol' | 'name' | 'strike' | 'long' | 'isCsp' | 'canExercise' | 'canAssign' | 'expiration'> & { lots: Lot[] }
+
+/** One lot an action runs on, and how many of its contracts (left out: all of them). */
+type Step = { lot: Lot; take?: number }
 
 /** What was saved when an action ran over several lots and one of them failed. */
 type Batch = { done: Lot[]; failed: { lot: Lot; message: string } | null; rest: Lot[] }
@@ -278,26 +282,29 @@ export function OptionsCard({
   }
 
   /** Asks once, then runs `each` on every lot in order (oldest first), stopping at the first
-   * that fails. If nothing was saved the dialog stays open with the reason and what was
-   * typed; if some lots were saved, it closes and the card says which were and which weren't. */
+   * that fails. `plan` narrows that to some lots, or part of one, from what was typed. If
+   * nothing was saved the dialog stays open with the reason and what was typed; if some
+   * lots were saved, it closes and the card says which were and which weren't. */
   async function act(
     t: Target,
     what: string,
     form: Omit<FormOptions, 'onSubmit'>,
-    each: (lot: Lot, values: Record<string, string>) => Promise<unknown>,
+    each: (lot: Lot, values: Record<string, string>, take?: number) => Promise<unknown>,
     doneMessage: string,
+    plan: (values: Record<string, string>) => Step[] = () => t.lots.map((lot) => ({ lot })),
   ) {
     const out: { batch: Batch | null } = { batch: null }
     const v = await dialog.form({
       ...form,
       onSubmit: async (values) => {
+        const steps = plan(values)
         const done: Lot[] = []
-        for (const [i, lot] of t.lots.entries()) {
+        for (const [i, step] of steps.entries()) {
           try {
-            await each(lot, values)
-            done.push(lot)
+            await each(step.lot, values, step.take)
+            done.push(step.lot)
           } catch (e) {
-            out.batch = { done, failed: { lot, message: errorText(e) }, rest: t.lots.slice(i + 1) }
+            out.batch = { done, failed: { lot: step.lot, message: errorText(e) }, rest: steps.slice(i + 1).map((x) => x.lot) }
             if (done.length === 0) throw e
             return
           }
@@ -327,6 +334,49 @@ export function OptionsCard({
   const sharedMark = (t: Target) => (t.lots.every((l) => l.mark === t.lots[0].mark) ? t.lots[0].mark : null)
   const allLots = (t: Target, sentence: string) => (t.lots.length > 1 ? sentence : undefined)
 
+  /** "Contracts" on the closing dialogs, filled in with all of them. Not shown for a single
+   * contract, where there is nothing to choose. */
+  const countField = (t: Target): DialogField[] => {
+    const total = contractsOf(t)
+    if (total <= 1) return []
+    return [
+      {
+        name: 'contracts',
+        label: 'Contracts',
+        type: 'number',
+        defaultValue: String(total),
+        hint: t.lots.length > 1 ? `You have ${total}. For fewer, the oldest purchases go first.` : `You have ${total}.`,
+        validate: (s) => (Number.isInteger(Number(s)) && Number(s) >= 1 && Number(s) <= total ? null : `Enter a whole number from 1 to ${total}`),
+      },
+    ]
+  }
+
+  /** The lots a closing action touches for the count typed, oldest first: whole lots until
+   * the count runs out, then part of the next one. */
+  const oldestFirst =
+    (t: Target) =>
+    (values: Record<string, string>): Step[] => {
+      let left = values.contracts ? Number(values.contracts) : contractsOf(t)
+      const steps: Step[] = []
+      for (const lot of t.lots) {
+        if (left <= 0) break
+        const take = Math.min(left, lot.contracts)
+        steps.push(take === lot.contracts ? { lot } : { lot, take })
+        left -= take
+      }
+      return steps
+    }
+
+  /** Shares and dollars for every contract of the target, plus the per-contract figures
+   * when the count can be lowered. */
+  const sharesAtStrike = (t: Target) => {
+    const total = contractsOf(t)
+    return {
+      n: total * OPTION_MULTIPLIER,
+      each: total > 1 ? ` (${OPTION_MULTIPLIER} shares and ${currency(t.strike * OPTION_MULTIPLIER)} per contract)` : '',
+    }
+  }
+
   const updatePrice = (t: Target) =>
     act(
       t,
@@ -347,15 +397,13 @@ export function OptionsCard({
       t.long ? 'Sell to close' : 'Buy back',
       {
         title: `${t.long ? 'Sell' : 'Buy back'} ${t.name} ×${contractsOf(t)}`,
-        description: allLots(
-          t,
-          `All ${t.lots.length} lots are ${t.long ? 'sold' : 'bought back'} at this price. To close just one, open the lots and use that lot’s menu.`,
-        ),
+        description: allLots(t, `All ${t.lots.length} lots are ${t.long ? 'sold' : 'bought back'} at this price unless you lower the count.`),
         submitLabel: 'Save',
-        fields: [priceField(sharedMark(t), false), dateField(today)],
+        fields: [priceField(sharedMark(t), false), ...countField(t), dateField(today)],
       },
-      (lot, v) => lot.resolve('closed', v.on, parseAmount(v.price)!),
+      (lot, v, take) => lot.resolve('closed', v.on, parseAmount(v.price)!, take),
       `${t.name} ${t.long ? 'sold' : 'bought back'}`,
+      oldestFirst(t),
     )
 
   const expire = (t: Target) =>
@@ -364,48 +412,51 @@ export function OptionsCard({
       'Expired worthless',
       {
         title: `${t.name} expired worthless?`,
-        description: `${t.long ? 'Records the premium paid as a loss.' : 'You keep the full premium.'}${t.lots.length > 1 ? ` Applies to all ${t.lots.length} lots.` : ''}`,
+        description: `${t.long ? 'Records the premium paid as a loss.' : 'You keep the full premium.'}${t.lots.length > 1 ? ` Applies to all ${t.lots.length} lots unless you lower the count.` : ''}`,
         submitLabel: 'Mark expired',
-        fields: [dateField(resolveDate(t.expiration))],
+        fields: [...countField(t), dateField(resolveDate(t.expiration))],
       },
-      (lot, v) => lot.resolve('expired', v.on),
+      (lot, v, take) => lot.resolve('expired', v.on, undefined, take),
       `${t.name} marked expired`,
+      oldestFirst(t),
     )
 
   const exercise = (t: Target) => {
-    const n = contractsOf(t) * OPTION_MULTIPLIER
+    const { n, each } = sharesAtStrike(t)
     return act(
       t,
       'Exercise',
       {
         title: `Exercise ${t.name}?`,
-        description: `Buys ${n} ${t.symbol} at ${t.strike} — ${currency(t.strike * n)} from cash. Their cost basis includes the premium you paid.${t.lots.length > 1 ? ` Applies to all ${t.lots.length} lots.` : ''}`,
+        description: `Buys ${n} ${t.symbol} at ${t.strike} — ${currency(t.strike * n)} from cash${each}. Their cost basis includes the premium you paid.`,
         submitLabel: 'Exercise',
         tone: 'warning',
-        fields: [dateField(resolveDate(t.expiration))],
+        fields: [...countField(t), dateField(resolveDate(t.expiration))],
       },
-      (lot, v) => lot.resolve('exercised', v.on),
+      (lot, v, take) => lot.resolve('exercised', v.on, undefined, take),
       `${t.name} exercised`,
+      oldestFirst(t),
     )
   }
 
   const assign = (t: Target) => {
-    const n = contractsOf(t) * OPTION_MULTIPLIER
+    const { n, each } = sharesAtStrike(t)
     const what = t.isCsp
-      ? `Buys ${n} ${t.symbol} at ${t.strike} — ${currency(t.lots.reduce((s, l) => s + l.collateral, 0))} from cash. Cost basis is strike minus the premium.`
-      : `Sells ${n} ${t.symbol} at ${t.strike} — ${currency(t.strike * n)} to cash.`
+      ? `Buys ${n} ${t.symbol} at ${t.strike} — ${currency(t.lots.reduce((s, l) => s + l.collateral, 0))} from cash${each}. Cost basis is strike minus the premium.`
+      : `Sells ${n} ${t.symbol} at ${t.strike} — ${currency(t.strike * n)} to cash${each}.`
     return act(
       t,
       'Assigned',
       {
         title: `${t.name} assigned?`,
-        description: `${what}${t.lots.length > 1 ? ` Applies to all ${t.lots.length} lots.` : ''}`,
+        description: what,
         submitLabel: 'Mark assigned',
         tone: 'warning',
-        fields: [dateField(resolveDate(t.expiration))],
+        fields: [...countField(t), dateField(resolveDate(t.expiration))],
       },
-      (lot, v) => lot.resolve('assigned', v.on),
+      (lot, v, take) => lot.resolve('assigned', v.on, undefined, take),
       `${t.name} assigned`,
+      oldestFirst(t),
     )
   }
 
@@ -445,7 +496,8 @@ export function OptionsCard({
         collateral: 0,
         tags,
         setMark: (mark) => setOptionMark(o.id, mark),
-        resolve: (outcome, on, price) => optionClose(outcome === 'closed' ? { optionId: o.id, outcome, price, on } : { optionId: o.id, outcome, on }),
+        resolve: (outcome, on, price, contracts) =>
+          optionClose(outcome === 'closed' ? { optionId: o.id, outcome, price, on, contracts } : { optionId: o.id, outcome, on, contracts }),
         edit: () => editOption(o),
         remove: () => deletePosition(name, { optionId: o.id }),
       }
@@ -468,9 +520,9 @@ export function OptionsCard({
       tags: [],
       extra: `${currency(cspCollateral(c))} set aside · ${pct(cspAnnualizedYield(c))}/yr`,
       setMark: (mark) => setCspMark(c.id, mark),
-      resolve: (outcome, on, price) => {
+      resolve: (outcome, on, price, contracts) => {
         if (outcome === 'exercised') return Promise.reject(new Error('A sold put can’t be exercised.'))
-        return cspResolve(outcome === 'closed' ? { cspId: c.id, outcome, price, on } : { cspId: c.id, outcome, on })
+        return cspResolve(outcome === 'closed' ? { cspId: c.id, outcome, price, on, contracts } : { cspId: c.id, outcome, on, contracts })
       },
       edit: () => editCsp(c),
       remove: () => deletePosition(name, { cspId: c.id }),

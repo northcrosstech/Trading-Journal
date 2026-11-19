@@ -625,7 +625,7 @@ export function PortfolioDetailPage() {
       !p.archived &&
       !(await dialog.confirm({
         title: `Archive “${p.name}”?`,
-        message: 'It stops being priced and leaves Net worth. You can unarchive it any time.',
+        message: 'It stops being priced and leaves Net worth from this month on. Earlier months keep its value. You can unarchive it any time.',
         confirmLabel: 'Archive',
         tone: 'warning',
       }))

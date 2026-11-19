@@ -373,6 +373,8 @@ export type PortfolioRow = {
   kind: PortfolioKind
   cash: number
   archived: boolean
+  /** The day it was archived (yyyy-mm-dd), null while active. Absent until migration 20261119020000. */
+  archived_on?: string | null
   /** Brokerage only: % of all brokerage money. Absent until migration 20261101010000_allocation. */
   target_pct?: number | null
   /** Plan notes. Absent until migration 20261107010000_position_plans. */

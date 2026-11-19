@@ -54,6 +54,14 @@ export function isOpenIn(a: Pick<NetworthAccount, 'opened_month' | 'closed_month
   return a.opened_month <= month && (a.closed_month === null || month < a.closed_month)
 }
 
+/** Whether a portfolio counts toward a month. An archived one leaves from the month it was
+ * archived and keeps its place in the months before, so past months don't change. Without
+ * an archive date (before migration 20261119020000) an archived portfolio counts in none. */
+export function portfolioCountsIn(p: Pick<Portfolio, 'archived' | 'archived_on'>, month: string): boolean {
+  if (!p.archived) return true
+  return !!p.archived_on && month < monthOf(p.archived_on)
+}
+
 export type NetworthLine = {
   key: string
   name: string
@@ -97,7 +105,7 @@ export function monthTotals(
   }
 
   for (const p of portfolios) {
-    if (p.archived) continue
+    if (!portfolioCountsIn(p, month)) continue
     let best: PortfolioDailyValue | null = null
     for (const v of dailyValues) {
       if (v.portfolio_id !== p.id || v.value_date >= nextMonth) continue

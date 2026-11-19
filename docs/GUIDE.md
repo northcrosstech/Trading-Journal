@@ -59,6 +59,8 @@ Net worth is built from month-end balances, so each month needs closing once it'
 - **Use the balance on the last day of the month** from each statement. Debts are entered as positive numbers; the app subtracts them.
 - **While a month is waiting to be closed,** Net worth leads with the close card, then Balances, then Monthly payments. The headline numbers, yearly chart and composition sit below in a collapsed **Breakdown** section. The close card shows progress ("6 of 8 balances · 3 of 4 payments"), and each line jumps to the first thing still missing.
 - **Type down the column:** Enter moves to the next balance, and Enter on the last one saves. What you have typed stays put while you mark payments or add an account.
+- **Typed balances wait for you.** Leave Net worth before saving and they are still there, marked unsaved, when you come back in the same browser tab. Closing the tab drops them.
+- **Archiving a portfolio doesn't rewrite the past.** It leaves Net worth and Cash flow from the month you archive it; earlier months keep its value.
 - **Save only writes what you changed or confirmed.** A number carried from last month stays marked "carried" until you type in it, press Enter in it, or tick **unchanged**. Accounts with a carried number don't count as done.
 - **Mark payments paid** under Monthly payments: one click per payment, or **Mark all paid**. Each shows an Undo for a few seconds. To record a different amount or date, use the row's menu. The card's title names both months ("October statements · due in November").
 - **Press Close** in the month-end close card on Net worth. Months close in order, and a closed month's balances and payments are locked.
@@ -102,6 +104,7 @@ Marking a payment paid doesn't change any balance. Balances always come from you
 
 Things to know about synced trades:
 - **Multi-leg Webull orders** (strangles, spreads) are skipped; enter them by hand.
+- **A failed sync says so.** The sidebar reads "Sync failed" and a red banner appears above the Trading pages with the reason and a **Sync now** button.
 - **An option that expired worthless** has no closing order at Webull. Close it by hand on its trade page. Once you do, the sync stops changing it.
 
 ---
@@ -112,7 +115,7 @@ Things to know about synced trades:
 |---|---|
 | **Overview** | The freedom gauge, four headline numbers, a **Needs attention** list (Health check problems, options about to expire, tickers waiting for a price), links to the detail pages, and each portfolio. The close banner shows here too |
 | **Net worth** | Everything you own minus everything you owe, by month. Two tabs: **Balances** (monthly balances, Monthly payments, the month-end close, and a Breakdown section with the yearly chart and what's in each category) and **Cash flow**. One month stepper at the top serves both |
-| **Cash flow** (a tab on Net worth) | What you kept each month, worked out from balances alone (no income entry): cash saved + invested + debt paid down, reconciled to the change in net worth |
+| **Cash flow** (a tab on Net worth) | What you kept each month, worked out from balances alone (no income entry): cash saved + invested + debt paid down, reconciled to the change in net worth. Opens on last month, the latest one with a full set of balances |
 | **Portfolios** | Each portfolio's value and day change, the Health check, **Targets** (are you on target across accounts) and **Holdings breakdown** |
 | **Portfolio page** | Four tabs: **Positions** (stocks, funds and options), **Plan**, **Performance** (value, returns, dividends) and **Activity**. A strip at the top appears only when something needs you: positions off plan, an option about to expire, a ticker waiting for a price, or numbers that don't match the entries |
 | **Research** | Fair value, score and next earnings date for everything you hold, plus a watchlist |
@@ -134,7 +137,7 @@ The holding's pencil edits only a manual price. That's what keeps every number t
 |---|---|---|
 | Put money in / took money out | **Log → Deposit / Withdraw**, or click the **Cash** card | None: it's your money, not a gain |
 | Bought shares | **Click the position** (or Log → Buy or sell) | None: cash became shares |
-| Already owned shares before using the app | **Log → Shares I already own** | None: counted as money in |
+| Already owned shares before using the app | **Log → Shares I already own** | None: counted as money in at the last saved price. If the app has no price for the ticker yet, the form asks for today's price |
 | Sold shares | **Click the position** (or Log → Buy or sell) | The gain or loss counts |
 | Got a dividend | **Log → Dividend**, or **Record** on the Performance tab | Counts as earnings |
 | Moved shares between portfolios | **Log → Transfer** | None on either side |
@@ -152,7 +155,7 @@ The Options card groups by stock, then by contract. Cash-secured puts and other 
 - **Each contract is one line.** Buy the same contract twice and it shows as "×2" with the totals. Open the line to see each purchase with its own date, price and menu.
 - **+ Add** opens the option form filled in with that contract, so you type only the contracts and the price.
 - **Actions on a contract line cover every purchase in it:** Update price, Sell to close or Buy back, Expired worthless, Assigned, Exercise. Each asks for a date. If one purchase can't be saved, a note on the card says which were recorded and which weren't.
-- **Selling part of a position isn't possible yet.** A close takes a whole purchase; use that purchase's own menu.
+- **To close only some contracts, lower the count.** Sell to close, Buy back, Expired worthless, Assigned and Exercise each have a **Contracts** box filled in with all of them. Type a smaller number and the oldest purchases go first, each at its own cost. When that takes only part of a purchase, the purchase is split in two: Activity shows the original crossed out and replaced by two entries with the same date and price. Undoing the close later leaves those two as open purchases, shown as one line.
 
 ### Logging buys and sells from your positions
 
@@ -311,6 +314,7 @@ banner with a **Get prices now** button instead.
 
 | Symptom | Likely cause |
 |---|---|
+| A red "The last sync failed" banner on the Trading pages | The latest sync run ended in an error; the banner shows the reason. Press **Sync now** to retry. If it keeps failing, the Webull approval may have lapsed: check `fly logs` |
 | "Synced" time is old | Outside market hours (normal), or the worker is down: check `fly logs` |
 | A page says a table or column doesn't exist | A migration hasn't been run yet |
 | Research or allocation cards are empty | Research migration not run, `FINNHUB_API_KEY` not set, or the first daily run hasn't happened yet |
