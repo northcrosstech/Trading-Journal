@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './auth/RequireAuth'
 import { LoginPage } from './auth/LoginPage'
@@ -9,7 +9,6 @@ import { ReviewChecklistProvider } from './components/ReviewChecklistProvider'
 import { DialogProvider } from './components/ui/DialogProvider'
 import { ToastProvider } from './components/ui/ToastProvider'
 import { WealthOverviewPage } from './pages/WealthOverviewPage'
-import { CashFlowPage } from './pages/CashFlowPage'
 import { ResearchPage } from './pages/ResearchPage'
 import { TodayPage } from './pages/TodayPage'
 import { TradeLogPage } from './pages/TradeLogPage'
@@ -25,6 +24,14 @@ import { SettingsPage } from './pages/SettingsPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfoliosPage } from './pages/PortfoliosPage'
 import { PortfolioDetailPage } from './pages/PortfolioDetailPage'
+
+/** Cash flow is a view of the Net worth page now; old links land there, keeping ?month=. */
+function CashFlowRedirect() {
+  const [params] = useSearchParams()
+  const next = new URLSearchParams(params)
+  next.set('view', 'cashflow')
+  return <Navigate to={`/networth?${next}`} replace />
+}
 
 function App() {
   return (
@@ -60,11 +67,11 @@ function App() {
             <Route path="/calendar" element={<Navigate to="/journal" replace />} />
             <Route path="/insights" element={<InsightsPage />} />
             <Route path="/stats" element={<Navigate to="/insights" replace />} />
-            <Route path="/playbooks/*" element={<Navigate to="/settings" replace />} />
+            <Route path="/playbooks/*" element={<Navigate to="/settings?group=trading" replace />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/wealth" element={<WealthOverviewPage />} />
             <Route path="/networth" element={<NetWorthPage />} />
-            <Route path="/cashflow" element={<CashFlowPage />} />
+            <Route path="/cashflow" element={<CashFlowRedirect />} />
             <Route path="/research" element={<ResearchPage />} />
             <Route path="/portfolios" element={<PortfoliosPage />} />
             <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />

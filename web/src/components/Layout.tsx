@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeftRight, BarChart3, BookOpen, CalendarCheck, ClipboardCheck, Landmark, LayoutDashboard, LineChart, ListOrdered, LogOut, Menu, PieChart, Settings, Telescope, X } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, matchPath, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { BarChart3, BookOpen, CalendarCheck, ClipboardCheck, Landmark, LayoutDashboard, LineChart, ListOrdered, LogOut, Menu, PieChart, Plus, Search, Settings, Telescope, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useAccountFilter } from '../accounts/AccountContext'
+import type { Portfolio } from '../lib/database.types'
+import { fetchPortfolios } from '../lib/wealthQueries'
+import { SEARCH_SHORTCUT, isPlainKey, isSearchShortcut, isTyping, overlayOpen } from '../lib/shortcuts'
+import { HOME, readLastPath, readStoredWorkspace, storeLastPath, storeWorkspace, workspaceFor, type Workspace } from '../lib/workspace'
 import { SyncStatus } from './SyncStatus'
-
-type Workspace = 'trading' | 'wealth'
+import { SearchDialog } from './SearchDialog'
+import { LogPicker, type LogKind } from './LogPicker'
+import { Button } from './ui/Button'
 
 // Trading: the daily loop, in order -- plan + trade (Today) -> review -> learn (Insights).
+// Wealth: Cash flow is a view of Net worth, so it has no entry of its own.
 const NAV: Record<Workspace, { to: string; label: string; icon: typeof BookOpen; end?: boolean }[]> = {
   trading: [
     { to: '/', label: 'Today', icon: CalendarCheck, end: true },
@@ -20,29 +26,20 @@ const NAV: Record<Workspace, { to: string; label: string; icon: typeof BookOpen;
     { to: '/wealth', label: 'Overview', icon: LayoutDashboard, end: true },
     { to: '/portfolios', label: 'Portfolios', icon: PieChart },
     { to: '/networth', label: 'Net worth', icon: Landmark },
-    { to: '/cashflow', label: 'Cash flow', icon: ArrowLeftRight },
     { to: '/research', label: 'Research', icon: Telescope },
   ],
 }
-const HOME: Record<Workspace, string> = { trading: '/', wealth: '/wealth' }
-const WEALTH_PREFIXES = ['/wealth', '/portfolios', '/networth', '/cashflow', '/research']
-const SHARED_PREFIXES = ['/settings', '/accounts']
-const STORAGE_KEY = 'tj.workspace'
 
-function readStoredWorkspace(): Workspace {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === 'wealth' ? 'wealth' : 'trading'
-  } catch {
-    return 'trading'
-  }
-}
+/** Portfolios listed by name in the sidebar before it falls back to an "All portfolios" link. */
+const MAX_LISTED = 8
 
-/** Which area a path belongs to; shared pages (Settings) keep whichever area you came from. */
-function workspaceFor(path: string, fallback: Workspace): Workspace {
-  if (WEALTH_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) return 'wealth'
-  if (SHARED_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) return fallback
-  return 'trading'
-}
+const NAV_ITEM = 'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition'
+const NAV_ACTIVE = 'bg-(--accent-soft) text-(--accent-text)'
+const NAV_IDLE = 'text-neutral-400 hover:bg-(--card) hover:text-neutral-100'
+
+// True until the first screen of this page load has been shown. Only then may opening the
+// app at "/" continue in Wealth; after that "/" is always Today.
+let freshOpen = true
 
 function AccountSwitcher() {
   const { accounts, selectedAccountId, setSelectedAccountId } = useAccountFilter()
@@ -69,9 +66,25 @@ function AccountSwitcher() {
   )
 }
 
-function Sidebar({ workspace, onNavigate }: { workspace: Workspace; onNavigate: () => void }) {
+function Sidebar({
+  workspace,
+  portfolios,
+  onNavigate,
+  onSearch,
+  onLog,
+}: {
+  workspace: Workspace
+  /** Open portfolios, listed under the Portfolios link in Wealth. */
+  portfolios: Portfolio[]
+  onNavigate: () => void
+  onSearch: () => void
+  onLog: () => void
+}) {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const listed = workspace === 'wealth' ? portfolios.slice(0, MAX_LISTED) : []
+  const openListed = listed.some((p) => pathname === `/portfolios/${p.id}`)
 
   return (
     <div className="flex h-full flex-col">
@@ -85,13 +98,14 @@ function Sidebar({ workspace, onNavigate }: { workspace: Workspace; onNavigate: 
         </div>
       </div>
 
-      <div className="mx-3 mb-4 grid grid-cols-2 rounded-xl border border-(--border) bg-(--card) p-1">
+      <div className="mx-3 mb-3 grid grid-cols-2 rounded-xl border border-(--border) bg-(--card) p-1">
         {(['trading', 'wealth'] as const).map((w) => (
           <button
             key={w}
             onClick={() => {
               onNavigate()
-              navigate(HOME[w])
+              // The other area opens where you left it; the one you're in goes to its first page.
+              navigate(w === workspace ? HOME[w] : (readLastPath(w) ?? HOME[w]))
             }}
             className={`rounded-lg py-1.5 text-xs font-semibold capitalize transition ${
               workspace === w ? (w === 'trading' ? 'bg-blue-500/15 text-blue-300' : 'bg-teal-500/15 text-teal-300') : 'text-neutral-500 hover:text-neutral-200'
@@ -102,6 +116,18 @@ function Sidebar({ workspace, onNavigate }: { workspace: Workspace; onNavigate: 
         ))}
       </div>
 
+      <button
+        onClick={() => {
+          onNavigate()
+          onSearch()
+        }}
+        className="mx-3 mb-3 flex items-center gap-2 rounded-lg border border-(--border) bg-(--card) px-2.5 py-2 text-xs text-neutral-500 transition hover:border-(--border-strong) hover:text-neutral-200"
+      >
+        <Search size={14} className="shrink-0" />
+        <span className="flex-1 text-left">Search</span>
+        <kbd className="hidden rounded border border-neutral-700 px-1 font-sans text-[10px] lg:inline">{SEARCH_SHORTCUT}</kbd>
+      </button>
+
       {workspace === 'trading' && (
         <>
           <AccountSwitcher />
@@ -109,35 +135,64 @@ function Sidebar({ workspace, onNavigate }: { workspace: Workspace; onNavigate: 
         </>
       )}
 
-      <nav className="mt-1 flex flex-1 flex-col gap-0.5 px-3">
-        {NAV[workspace].map(({ to, label, icon: Icon, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                isActive ? 'bg-(--accent-soft) text-(--accent-text)' : 'text-neutral-400 hover:bg-(--card) hover:text-neutral-100'
-              }`
-            }
-          >
-            <Icon size={17} />
-            {label}
-          </NavLink>
-        ))}
+      {workspace === 'wealth' && (
+        <Button
+          variant="primary"
+          icon={<Plus size={16} />}
+          className="mx-3 mb-3"
+          title="Log a buy, sell, deposit, dividend or option"
+          onClick={() => {
+            onNavigate()
+            onLog()
+          }}
+        >
+          Log
+          <kbd className="ml-auto hidden rounded border border-white/30 px-1.5 font-sans text-[10px] text-white/80 lg:inline">L</kbd>
+        </Button>
+      )}
+
+      <nav className="mt-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3">
+        {NAV[workspace].map(({ to, label, icon: Icon, end }) => {
+          const hasList = to === '/portfolios' && listed.length > 0
+          return (
+            <div key={to} className="flex flex-col gap-0.5">
+              <NavLink
+                to={to}
+                end={end}
+                onClick={onNavigate}
+                // With one of the listed portfolios open, its own line carries the highlight.
+                className={({ isActive }) => `${NAV_ITEM} ${isActive && !(hasList && openListed) ? NAV_ACTIVE : isActive ? 'text-neutral-100 hover:bg-(--card)' : NAV_IDLE}`}
+              >
+                <Icon size={17} />
+                {label}
+              </NavLink>
+              {hasList && (
+                <div className="mb-1 ml-5 flex flex-col gap-0.5 border-l border-(--border) pl-2">
+                  {listed.map((p) => (
+                    <NavLink
+                      key={p.id}
+                      to={`/portfolios/${p.id}`}
+                      onClick={onNavigate}
+                      title={p.name}
+                      className={({ isActive }) => `truncate rounded-md px-2.5 py-1.5 text-[13px] transition ${isActive ? NAV_ACTIVE : 'text-neutral-500 hover:bg-(--card) hover:text-neutral-100'}`}
+                    >
+                      {p.name}
+                    </NavLink>
+                  ))}
+                  {portfolios.length > MAX_LISTED && (
+                    <Link to="/portfolios" onClick={onNavigate} className="rounded-md px-2.5 py-1.5 text-xs text-neutral-500 transition hover:bg-(--card) hover:text-neutral-100">
+                      All portfolios ({portfolios.length})
+                    </Link>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </nav>
 
       <div className="border-t border-(--border) px-3 py-3">
-        <NavLink
-          to="/settings"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            `mb-1 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              isActive ? 'bg-(--accent-soft) text-(--accent-text)' : 'text-neutral-400 hover:bg-(--card) hover:text-neutral-100'
-            }`
-          }
-        >
+        <NavLink to="/settings" onClick={onNavigate} className={({ isActive }) => `mb-1 ${NAV_ITEM} ${isActive ? NAV_ACTIVE : NAV_IDLE}`}>
           <Settings size={17} />
           Settings
         </NavLink>
@@ -154,22 +209,102 @@ function Sidebar({ workspace, onNavigate }: { workspace: Workspace; onNavigate: 
 
 export function Layout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const [stored, setStored] = useState<Workspace>(readStoredWorkspace)
-  const workspace = workspaceFor(location.pathname, stored)
+  // Opening the app at "/" when Wealth was the last area used continues in Wealth. Tied to
+  // the very first location of the load, so a later click on Today always opens Today.
+  const [fresh] = useState(() =>
+    freshOpen && location.pathname === '/' && !location.search && !location.hash && stored === 'wealth'
+      ? { key: location.key, to: readLastPath('wealth') ?? HOME.wealth }
+      : null,
+  )
+  const redirecting = fresh !== null && location.key === fresh.key
+  const workspace = redirecting ? 'wealth' : workspaceFor(location.pathname, stored)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
+  // Open (not archived) portfolios; null until loaded, and again if a load fails.
+  const [portfolios, setPortfolios] = useState<Portfolio[] | null>(null)
+  const [portfoliosFailed, setPortfoliosFailed] = useState(false)
+
+  useEffect(() => {
+    freshOpen = false
+  }, [])
 
   useEffect(() => {
     if (workspace !== stored) setStored(workspace)
-    try {
-      localStorage.setItem(STORAGE_KEY, workspace)
-    } catch {
-      /* private mode -- the area just won't be remembered */
-    }
+    storeWorkspace(workspace)
     // On <html> so slide-in panels and dialogs (rendered outside this tree) get the area's accent too.
     document.documentElement.dataset.workspace = workspace
   }, [workspace, stored])
 
+  // Each area remembers its last page, so the Trading / Wealth switch returns to it.
+  useEffect(() => storeLastPath(workspace, location.pathname, location.search), [workspace, location.pathname, location.search])
+
   useEffect(() => setMenuOpen(false), [location.pathname])
+
+  // Loaded only in Wealth, and again on each page change (and when the Log picker opens) so a
+  // new or renamed portfolio shows up.
+  const inWealth = workspace === 'wealth'
+  useEffect(() => {
+    if (!inWealth) return
+    let live = true
+    fetchPortfolios()
+      .then((all) => {
+        if (!live) return
+        setPortfolios(all.filter((p) => !p.archived))
+        setPortfoliosFailed(false)
+      })
+      .catch(() => {
+        if (!live) return
+        setPortfolios(null)
+        setPortfoliosFailed(true)
+      })
+    return () => {
+      live = false
+    }
+  }, [inWealth, location.pathname, logOpen])
+
+  /** Log: straight to the quick form of the portfolio on screen, or of the only portfolio;
+   * otherwise ask which one. */
+  const startLog = useCallback(() => {
+    const here = matchPath('/portfolios/:portfolioId', location.pathname)?.params.portfolioId
+    const id = here ?? (portfolios?.length === 1 ? portfolios[0].id : undefined)
+    if (id) navigate(`/portfolios/${id}?log=trade`)
+    else setLogOpen(true)
+  }, [location.pathname, portfolios, navigate])
+
+  const closeSearch = useCallback(() => setSearchOpen(false), [])
+  const closeLog = useCallback(() => setLogOpen(false), [])
+
+  function pickLog(portfolioId: string, kind: LogKind) {
+    setLogOpen(false)
+    navigate(`/portfolios/${portfolioId}?log=${kind}`)
+  }
+
+  // Search: Ctrl+K (Cmd+K on a Mac), everywhere. Log: L, in Wealth. Neither opens over
+  // another dialog or drawer, and L is left alone while typing.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.repeat) return
+      if (isSearchShortcut(e)) {
+        // Always ours, so the browser's own Ctrl+K never fires halfway through a form.
+        e.preventDefault()
+        if (searchOpen) setSearchOpen(false)
+        else if (!overlayOpen()) setSearchOpen(true)
+      } else if (inWealth && isPlainKey(e, 'l') && !isTyping(e.target) && !overlayOpen()) {
+        e.preventDefault()
+        setMenuOpen(false)
+        startLog()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [searchOpen, inWealth, startLog])
+
+  const sidebar = (onNavigate: () => void) => (
+    <Sidebar workspace={workspace} portfolios={portfolios ?? []} onNavigate={onNavigate} onSearch={() => setSearchOpen(true)} onLog={startLog} />
+  )
 
   return (
     <div className="min-h-screen bg-(--bg) text-neutral-100">
@@ -193,19 +328,29 @@ export function Layout() {
             <button onClick={() => setMenuOpen(false)} aria-label="Close menu" className="absolute right-3 top-4 rounded-md p-1 text-neutral-500 hover:text-white">
               <X size={18} />
             </button>
-            <Sidebar workspace={workspace} onNavigate={() => setMenuOpen(false)} />
+            {sidebar(() => setMenuOpen(false))}
           </aside>
         </div>
       )}
 
       <div className="flex">
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r border-(--border) bg-(--bg) lg:block">
-          <Sidebar workspace={workspace} onNavigate={() => {}} />
-        </aside>
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          <Outlet />
-        </main>
+        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r border-(--border) bg-(--bg) lg:block">{sidebar(() => {})}</aside>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{redirecting ? <Navigate to={fresh.to} replace /> : <Outlet context={workspace} />}</main>
       </div>
+
+      <SearchDialog open={searchOpen} workspace={workspace} onClose={closeSearch} />
+      {logOpen && (
+        <LogPicker
+          portfolios={portfolios}
+          failed={portfoliosFailed}
+          onPick={pickLog}
+          onCreate={() => {
+            setLogOpen(false)
+            navigate('/portfolios')
+          }}
+          onClose={closeLog}
+        />
+      )}
     </div>
   )
 }
