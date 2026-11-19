@@ -153,9 +153,7 @@ The two trigger endpoints have separate locks and cooldowns, so a trade sync and
 
 **The portfolio ledger is locked.** Signed-in users can read their portfolio tables but can't insert, update or delete holdings, activity, options, puts or cash directly. Every change goes through a database function (`security definer`) that checks ownership and writes the ledger entry. The only direct edits allowed are a portfolio's name, type, archived flag and target %, a holding's manual price, and an option's or put's current price (mark). Activity is append-only: undo marks an entry voided rather than deleting it. Details in [DATA_FLOWS.md](DATA_FLOWS.md#7-rules-that-keep-the-data-consistent).
 
-> **⚠ Known gap:** the five `backup_*_20260711` tables have no row-level security and can
-> be read with the public key. See the end of [DATA_DICTIONARY.md](DATA_DICTIONARY.md)
-> for the one-line fix.
+**The sync's write function is worker-only.** `upsert_trade_bundle` runs as the database owner and trusts the `user_id` in its payload, so only the service role may call it (migration `20261119010000_security_lockdown.sql`). The same migration closes the five `backup_*_20260711` tables: row-level security on, no policies, no rights for the public or signed-in roles.
 
 ---
 
