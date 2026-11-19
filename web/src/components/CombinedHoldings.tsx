@@ -7,7 +7,6 @@ import { LARGE_POSITION_SHARE, TOP_HOLDINGS, combinedHoldings, type CombinedHold
 import { currency, percentFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
 import { sortRows, useSort } from '../lib/useSort'
-import { CollapsibleSection } from './CollapsibleSection'
 import { SortTh } from './SortTh'
 import { Card } from './ui/Card'
 import { Pill } from './ui/Pill'
@@ -15,7 +14,6 @@ import { Pill } from './ui/Pill'
 type PerPortfolio = { portfolio: Portfolio; snap: PortfolioSnapshot }
 type Props = { perPortfolio: PerPortfolio[]; combined: PortfolioSnapshot; openOptions: OptionPosition[] }
 
-const STORAGE_KEY = 'portfolios-what-i-own-open'
 const SORT_KEYS = ['holding', 'shares', 'value', 'share', 'gain', 'gainPct', 'portfolios'] as const
 const ASC_FIRST = ['holding'] as const
 
@@ -24,28 +22,17 @@ const sharePct = (n: number | null) => (n === null ? '—' : `${(n * 100).toFixe
 const wholePct = (n: number) => `${Math.round(n * 100)}%`
 const largePct = wholePct(LARGE_POSITION_SHARE)
 
-/** "What I own": every ticker added up across the active portfolios, in a section that is
- * open to begin with once there are two or more portfolios. */
-export function CombinedHoldingsSection({ perPortfolio, combined, openOptions }: Props) {
-  const n = perPortfolio.length
-  return (
-    <CollapsibleSection storageKey={STORAGE_KEY} defaultOpen={n >= 2} title="What I own" hint={n > 1 ? `Every ticker added up across your ${n} portfolios` : 'Every ticker, with cash and options, in one table'}>
-      <CombinedHoldingsCard perPortfolio={perPortfolio} combined={combined} openOptions={openOptions} />
-    </CollapsibleSection>
-  )
-}
-
 function Summary({ data }: { data: CombinedHoldings }) {
   const { top } = data
   if (!top) {
     return data.tickers.length > 0 && data.total <= 0 ? (
-      <p className="px-5 pb-3 pt-4 text-sm text-neutral-400">Percentages are left out: what you owe is more than what you hold, so there is no total to take a share of.</p>
+      <p className="px-5 pb-3 text-sm text-neutral-400">Percentages are left out: what you owe is more than what you hold, so there is no total to take a share of.</p>
     ) : null
   }
   const priced = data.tickers.filter((t) => t.value !== null).length
   const num = (s: string) => <span className="font-medium tabular-nums text-white">{s}</span>
   return (
-    <p className="px-5 pb-3 pt-4 text-sm text-neutral-300" title="Of the combined value of all portfolios, cash included">
+    <p className="px-5 pb-3 text-sm text-neutral-300" title="Of the combined value of all portfolios, cash included">
       {top.count === 1 ? (
         <>
           {top.symbol} is {num(wholePct(top.symbolShare))} of your investments.
@@ -104,7 +91,9 @@ function PartRow({ row, part }: { row: CombinedRow; part: CombinedPart }) {
   )
 }
 
-function CombinedHoldingsCard({ perPortfolio, combined, openOptions }: Props) {
+/** "What I own": every ticker added up across the active portfolios, with options and cash
+ * underneath, in one sortable table. */
+export function CombinedHoldingsCard({ perPortfolio, combined, openOptions }: Props) {
   const data = useMemo(() => combinedHoldings(perPortfolio, combined, openOptions), [perPortfolio, combined, openOptions])
   const { state: sort, toggle: onSort } = useSort('combined-holdings', SORT_KEYS, ASC_FIRST)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -133,7 +122,12 @@ function CombinedHoldingsCard({ perPortfolio, combined, openOptions }: Props) {
   const negativeLine = (data.cash.value ?? 0) < 0 || (data.options?.value ?? 0) < 0
 
   return (
-    <Card flush className="overflow-hidden">
+    <Card
+      flush
+      className="overflow-hidden"
+      title="What I own"
+      subtitle={perPortfolio.length > 1 ? `Every ticker added up across your ${perPortfolio.length} portfolios` : 'Every ticker, with options and cash'}
+    >
       <Summary data={data} />
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

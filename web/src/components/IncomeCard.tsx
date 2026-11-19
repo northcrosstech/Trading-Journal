@@ -6,7 +6,6 @@ import { INCOME_FULL_MONTHS, incomeSince, incomeSummary, type IncomeMonth, type 
 import { SLICE_COLORS } from '../lib/allocation'
 import { monthLabel } from '../lib/networth'
 import { centralDateStr, compactCurrency, currency } from '../lib/format'
-import { CollapsibleSection } from './CollapsibleSection'
 import { Card } from './ui/Card'
 
 type ChartMonth = IncomeMonth & { label: string }
@@ -88,10 +87,14 @@ function Figure({ label, note, totals }: { label: string; note?: string; totals:
 
 const Swatch = ({ color, opacity = 1 }: { color: string; opacity?: number }) => <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: color, opacity }} />
 
+const TITLE = 'Income received'
+const SUBTITLE = 'Dividends and option premium, month by month'
+
 /** Income from investments across the given portfolios: dividends received and option
  * premium (net of buy-backs) for the last 12 full months and the current one, with the
- * year so far, the 12-month total and the monthly average. */
-export function IncomeCard({ portfolioIds }: { portfolioIds: Set<string> }) {
+ * year so far, the 12-month total and the monthly average. A new `refreshKey` reads the
+ * entries again (after a dividend is recorded on the same page). */
+export function IncomeCard({ portfolioIds, refreshKey = 0 }: { portfolioIds: Set<string>; refreshKey?: number }) {
   const today = centralDateStr(new Date())
   const since = incomeSince(today)
   const [entries, setEntries] = useState<IncomeEntry[] | null>(null)
@@ -100,17 +103,17 @@ export function IncomeCard({ portfolioIds }: { portfolioIds: Set<string> }) {
     fetchIncomeEntries(since)
       .then(setEntries)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }, [since])
+  }, [since, refreshKey])
 
   const mine = useMemo(() => (entries ?? []).filter((e) => portfolioIds.has(e.portfolio_id)), [entries, portfolioIds])
   const summary = useMemo(() => incomeSummary(mine, today), [mine, today])
   const bars: ChartMonth[] = summary.months.map((m, i) => ({ ...m, label: axisLabel(m.month, i === 0) }))
 
-  if (error) return <Card><p className="text-sm text-red-400">Failed to load income: {error}</p></Card>
-  if (entries === null) return <Card><p className="text-sm text-neutral-500">Loading income…</p></Card>
+  if (error) return <Card title={TITLE}><p className="text-sm text-red-400">Couldn’t load income: {error}</p></Card>
+  if (entries === null) return <Card title={TITLE} subtitle={SUBTITLE}><div className="h-44 animate-pulse rounded-xl bg-(--card-raised)" role="status" aria-label="Loading income" /></Card>
   if (mine.length === 0)
     return (
-      <Card>
+      <Card title={TITLE}>
         <p className="py-6 text-center text-sm text-neutral-500">
           No income recorded since {monthYear(summary.firstMonth)}. Dividends you record and premium from options you sell show up here, month by month.
         </p>
@@ -118,7 +121,7 @@ export function IncomeCard({ portfolioIds }: { portfolioIds: Set<string> }) {
     )
 
   return (
-    <Card>
+    <Card title={TITLE} subtitle={SUBTITLE}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
         <div className="grid shrink-0 grid-cols-3 gap-4 lg:w-72 lg:grid-cols-1 lg:gap-3">
           <Figure label={`${today.slice(0, 4)} so far`} totals={summary.yearToDate} />
@@ -155,14 +158,5 @@ export function IncomeCard({ portfolioIds }: { portfolioIds: Set<string> }) {
         </div>
       </div>
     </Card>
-  )
-}
-
-/** The Income card in a fold of its own, so it only loads when asked for. */
-export function IncomeSection({ portfolioIds }: { portfolioIds: Set<string> }) {
-  return (
-    <CollapsibleSection storageKey="portfolios-income-open" title="Income" hint="Dividends and option premium, month by month">
-      <IncomeCard portfolioIds={portfolioIds} />
-    </CollapsibleSection>
   )
 }

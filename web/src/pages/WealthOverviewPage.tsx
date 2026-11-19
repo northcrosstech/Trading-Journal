@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeftRight, ChevronRight, Landmark, PieChart } from 'lucide-react'
+import { Landmark, PieChart } from 'lucide-react'
 import type { AuditProblem, CspPosition, DividendInfo, InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
 import { fetchAuditProblems, fetchCsps, fetchDividendInfo, fetchExternalFlows, fetchInstallmentPayments, fetchNetworthAccounts, fetchNetworthBalances } from '../lib/wealthQueries'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
@@ -13,6 +13,7 @@ import { dividendRows } from '../lib/dividends'
 import { expiryItems, healthItems, priceItems } from '../lib/attention'
 import { cashFlowLink, netWorthChange, type ExternalFlow } from '../lib/netWorthChange'
 import { centralDateStr, currency, percentFmt } from '../lib/format'
+import { PageError, PageLoading } from '../components/ui/PageState'
 import { toneClass } from '../lib/ui'
 import { useUrlState } from '../lib/useUrlState'
 import { useWealthPortfolios } from '../lib/useWealthPortfolios'
@@ -23,16 +24,10 @@ import { ButtonLink } from '../components/ui/Button'
 import { Pill } from '../components/ui/Pill'
 import { EmptyState } from '../components/ui/EmptyState'
 
-// The detail lives on its own page; Overview only points at it.
-const MORE = [
-  { to: '/networth', icon: Landmark, title: 'Net worth by month', sub: 'Balances, the year so far and where it sits' },
-  { to: '/portfolios', icon: PieChart, title: 'Allocation and targets', sub: 'What you hold and what is off target' },
-  { to: '/networth?view=cashflow', icon: ArrowLeftRight, title: 'Cash flow', sub: 'What came in, went out and was kept' },
-]
-
-/** Wealth home: how you are doing (freedom gauge, why last month's net worth changed, four
- * headline numbers) and what needs you
- * (month to close, things to fix), with links into the detail pages. Read-only. */
+/** Wealth home: what needs you (month to close, things to fix) and how you are doing (freedom
+ * gauge, three headline numbers, why last month's net worth changed, each portfolio). The
+ * detail lives on its own pages: each headline number is a link to the page behind it, and
+ * the change card links to Cash flow. Read-only. */
 export function WealthOverviewPage() {
   const today = centralDateStr(new Date())
   const month = monthOf(today)
@@ -49,7 +44,7 @@ export function WealthOverviewPage() {
   // /wealth?details=freedom opens the freedom details; closing them takes it off the link.
   const [details, setDetails] = useUrlState<'' | 'freedom'>('details', '', ['', 'freedom'])
 
-  useEffect(() => {
+  const load = useCallback(() => {
     Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchDividendInfo(), fetchInstallmentPayments()])
       .then(([a, b, d, ip]) => {
         setAccounts(a)
@@ -69,6 +64,7 @@ export function WealthOverviewPage() {
       .then(setFlows)
       .catch(() => setFlows(null))
   }, [])
+  useEffect(load, [load])
 
   const portfolios = useMemo(() => w.portfolios ?? [], [w.portfolios])
   const totals = useMemo(() => (accounts ? monthTotals(month, accounts, balances, portfolios, w.values) : null), [accounts, balances, portfolios, w.values, month])
@@ -102,8 +98,19 @@ export function WealthOverviewPage() {
   )
 
   const loadError = error ?? w.error
-  if (loadError) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load: {loadError}</div>
-  if (!totals || !w.portfolios) return <div className="text-neutral-500">Loading…</div>
+  if (loadError)
+    return (
+      <PageError
+        what="your overview"
+        message={loadError}
+        onRetry={() => {
+          setError(null)
+          load()
+          w.retry()
+        }}
+      />
+    )
+  if (!totals || !w.portfolios) return <PageLoading label="Loading your overview" tiles={3} />
 
   const hasPrev = prev !== null && prev.lines.length > 0
   const change = hasPrev ? totals.net - prev!.net : null
@@ -149,44 +156,34 @@ export function WealthOverviewPage() {
             onDetailsClose={details === 'freedom' ? () => setDetails(null) : undefined}
           />
 
-          {lastChange && <NetWorthChangeCard change={lastChange} allMonthsTo={cashFlowLink(lastMonth, month)} />}
-
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <StatCard label="Net worth" value={currency(totals.net)} sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`} accent />
+          {/* Each number opens the page that explains it. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatCard
-              label="Change from last month"
-              value={change === null ? '—' : signed(change)}
-              tone={change}
-              chip={change !== null && prev!.net !== 0 ? percentFmt(change / Math.abs(prev!.net)) : undefined}
+              label="Net worth"
+              value={currency(totals.net)}
+              chip={change === null ? undefined : `${signed(change)} since ${monthLabel(lastMonth).split(' ')[0]}`}
               chipTone={change}
-              sub={change === null ? 'needs last month’s balances' : undefined}
+              sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`}
+              accent
+              to="/networth"
             />
             <StatCard
               label="Investments"
+              to="/portfolios"
               value={currency(w.combined.total)}
               chip={w.combined.total - w.combined.dayChange > 0 ? percentFmt(w.combined.dayChange / (w.combined.total - w.combined.dayChange)) : undefined}
               chipTone={w.combined.dayChange}
               sub={dayChangeLabel(w.combined.asOf) === 'Today' ? 'today' : `last close · ${dayChangeLabel(w.combined.asOf)}`}
             />
-            <StatCard label="Dividend income" value={`${currency(projectedDividends)}/yr`} sub={`≈ ${currency(projectedDividends / 12)} a month`} />
+            <StatCard
+              label="Expected dividends"
+              value={`${currency(projectedDividends)}/yr`}
+              sub={`≈ ${currency(projectedDividends / 12)} a month`}
+              to="/portfolios?tab=income"
+            />
           </div>
 
-          <nav aria-label="More detail" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {MORE.map(({ to, icon: Icon, title, sub }) => (
-              <Link
-                key={to}
-                to={to}
-                className="group flex items-center gap-3 rounded-xl border border-(--border) bg-(--card) px-4 py-3 transition hover:border-(--accent)/50 hover:bg-(--card-raised)"
-              >
-                <Icon size={18} className="shrink-0 text-(--accent-text)" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-neutral-100">{title}</span>
-                  <span className="block text-xs text-neutral-500">{sub}</span>
-                </span>
-                <ChevronRight size={16} className="shrink-0 text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300" />
-              </Link>
-            ))}
-          </nav>
+          {lastChange && <NetWorthChangeCard change={lastChange} allMonthsTo={cashFlowLink(lastMonth, month)} />}
 
           <Card title="Portfolios">
             {w.perPortfolio.length === 0 ? (

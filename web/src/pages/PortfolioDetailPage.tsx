@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { Archive, ArchiveRestore, ChevronDown, Pencil, Plus, Wallet } from 'lucide-react'
+import { ChevronDown, MoreHorizontal, Pencil, Plus, Wallet } from 'lucide-react'
 import type { AuditProblem, CspPosition, Holding, OptionPosition, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind, TickerThesisRow } from '../lib/database.types'
 import {
   fetchActivity,
@@ -46,6 +46,8 @@ import { DropMenu } from '../components/DropMenu'
 import { AttentionButton, AttentionStrip, type AttentionItem } from '../components/AttentionStrip'
 import type { OptionFormInitial } from '../components/OptionTradeForm'
 import { DividendsCard } from '../components/DividendsCard'
+import { IncomeCard } from '../components/IncomeCard'
+import { PageError, PageLoading } from '../components/ui/PageState'
 import { SortTh } from '../components/SortTh'
 import { sortRows, useSort } from '../lib/useSort'
 import { GetPricesButton } from '../components/GetPricesButton'
@@ -68,9 +70,9 @@ import { Tabs } from '../components/ui/Tabs'
 import { Drawer } from '../components/ui/Drawer'
 import { EmptyState } from '../components/ui/EmptyState'
 
-type View = 'positions' | 'plan' | 'performance' | 'activity'
-// Dividends used to be a tab of its own; old links to it land on Performance, where it lives now.
-const TABS_IN_LINK = ['positions', 'plan', 'performance', 'activity', 'dividends'] as const
+type View = 'positions' | 'plan' | 'performance' | 'income' | 'activity'
+// Dividends used to be a tab of its own; old links to it land on Income, where it lives now.
+const TABS_IN_LINK = ['positions', 'plan', 'performance', 'income', 'activity', 'dividends'] as const
 
 /** Inline manual price for a holding -- for funds with no public ticker (many 401k funds).
  * Shares and average cost only change through Activity entries (Buy, Sell, Shares I already
@@ -435,7 +437,7 @@ export function PortfolioDetailPage() {
   const [error, setError] = useState<string | null>(null)
   // The tab lives in the link (?tab=plan), so Back, refresh and links from other pages land on it.
   const [tab, setTab] = useUrlState('tab', 'positions', TABS_IN_LINK)
-  const view: View = tab === 'dividends' ? 'performance' : tab
+  const view: View = tab === 'dividends' ? 'income' : tab
   const [params, setParams] = useSearchParams()
   // The form open in the drawer (from the Log menu), and the contract an option form starts on.
   const [drawer, setDrawer] = useState<LogAction | null>(null)
@@ -560,6 +562,8 @@ export function PortfolioDetailPage() {
     [portfolio, holdings, openCsps, prices, openOptions],
   )
   const series = useMemo(() => (portfolioId ? seriesFor(values, portfolioId) : []), [values, portfolioId])
+  // This portfolio alone, in the shape the Income card takes.
+  const ownId = useMemo(() => new Set(portfolioId ? [portfolioId] : []), [portfolioId])
   const pending = useMemo(() => unpricedSymbols(holdings, openCsps, prices, openOptions), [holdings, openCsps, prices, openOptions])
   // Fair value and score per holding, compared with the price the holdings table shows. A plan
   // ticker not owned yet is compared with its latest close, as the Research page does.
@@ -602,8 +606,18 @@ export function PortfolioDetailPage() {
   // positive cash) -- so a negative cash balance can't inflate them past 100%.
   const allocationTotal = allocation.total
 
-  if (error) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">{error}</div>
-  if (portfolio === undefined || !snap) return <div className="text-neutral-500">Loading portfolio…</div>
+  if (error)
+    return (
+      <PageError
+        what="this portfolio"
+        message={error}
+        onRetry={() => {
+          setError(null)
+          load()
+        }}
+      />
+    )
+  if (portfolio === undefined || !snap) return <PageLoading label="Loading portfolio" tiles={5} />
   if (portfolio === null)
     return (
       <div className="text-neutral-400">
@@ -723,7 +737,8 @@ export function PortfolioDetailPage() {
     const v = snap.holdings.find((x) => x.holding.symbol === s)
     return v?.price ?? prices.get(s)?.close ?? null
   }
-  const lastEntry = activity.find((a) => a.voided_at === null)?.created_at ?? null
+  // Entries that still count (not undone).
+  const liveEntries = activity.filter((a) => a.voided_at === null).length
   const planSummary = actions && {
     off: [...actions.values()].filter((a) => a.kind === 'buy' || a.kind === 'trim').length,
     buy: [...actions.values()].filter((a) => a.kind === 'buy').reduce((s, a) => s + a.dollars, 0),
@@ -831,12 +846,24 @@ export function PortfolioDetailPage() {
         }
         actions={
           <>
-            <Button variant="ghost" icon={<Pencil size={15} />} onClick={editPortfolio}>
-              Edit
-            </Button>
-            <Button variant="ghost" icon={p.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />} onClick={toggleArchive}>
-              {p.archived ? 'Unarchive' : 'Archive'}
-            </Button>
+            {/* Rare actions sit behind "…", so Log is the one button in the header. */}
+            <DropMenu
+              variant="ghost"
+              label="More: rename, change type or archive"
+              title="Rename, change type or archive"
+              groups={[
+                {
+                  items: [
+                    { label: 'Rename or change type', onClick: editPortfolio },
+                    p.archived
+                      ? { label: 'Unarchive', hint: 'Price it again and count it in Net worth', onClick: toggleArchive }
+                      : { label: 'Archive', hint: 'Stop pricing it; it leaves Net worth from this month', onClick: toggleArchive },
+                  ],
+                },
+              ]}
+            >
+              <MoreHorizontal size={18} />
+            </DropMenu>
             <DropMenu
               variant="primary"
               icon={<Plus size={16} />}
@@ -918,7 +945,8 @@ export function PortfolioDetailPage() {
           { value: 'positions', label: 'Positions', count: snap.holdings.length + optionLines.length },
           { value: 'plan', label: 'Plan' },
           { value: 'performance', label: 'Performance' },
-          { value: 'activity', label: 'Activity', count: activity.filter((a) => a.voided_at === null).length },
+          { value: 'income', label: 'Income' },
+          { value: 'activity', label: 'Activity', count: liveEntries },
         ]}
         value={view}
         onChange={changeView}
@@ -932,30 +960,9 @@ export function PortfolioDetailPage() {
               snap.holdings.length > 0 ? (
                 <>
                   {`${snap.holdings.length} holding${snap.holdings.length === 1 ? '' : 's'} · ${currency(snap.holdingsValue)}`}
+                  {/* What to buy or trim, and "Log all", are in the strip at the top of the page. */}
                   {planSummary &&
-                    (planSummary.off === 0 ? (
-                      <span className="text-emerald-300"> · on plan</span>
-                    ) : (
-                      <span className="text-amber-300">
-                        {` · ${planSummary.off} off plan`}
-                        {planSummary.buy > 0 && ` · buy ${currency(planSummary.buy)}`}
-                        {planSummary.trim > 0 && ` · trim ${currency(planSummary.trim)}`}
-                        {logAllLines.length > 0 && (
-                          <>
-                            {' · '}
-                            <button
-                              type="button"
-                              onClick={logAll}
-                              title="Opens the form with one line per suggested buy or trim, sells first. Check the prices, then press Log."
-                              className="rounded font-medium text-(--accent-text) underline decoration-dotted underline-offset-2 hover:decoration-solid"
-                            >
-                              Log all
-                            </button>
-                          </>
-                        )}
-                      </span>
-                    ))}
-                  {` · click a row to log a buy or sale${lastEntry ? ` · last entry ${dateFmt(centralDateStr(new Date(lastEntry)))}` : ''}`}
+                    (planSummary.off === 0 ? <span className="text-emerald-300"> · on plan</span> : <span className="text-amber-300">{` · ${planSummary.off} off plan`}</span>)}
                 </>
               ) : undefined
             }
@@ -1041,6 +1048,12 @@ export function PortfolioDetailPage() {
           <Card title="Returns">
             <ReturnsRow series={series} />
           </Card>
+        </div>
+      )}
+
+      {view === 'income' && (
+        <div className="flex flex-col gap-6">
+          <IncomeCard portfolioIds={ownId} refreshKey={liveEntries} />
           <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} showEmpty />
         </div>
       )}

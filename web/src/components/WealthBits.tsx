@@ -12,6 +12,7 @@ export function Kpi({
   chipTone,
   accent,
   warning,
+  to,
 }: {
   label: string
   value: string
@@ -21,8 +22,9 @@ export function Kpi({
   chipTone?: number | null
   accent?: boolean
   warning?: boolean
+  to?: string
 }) {
-  return <StatCard label={label} value={value} sub={sub} tone={tone} chip={chip} chipTone={chipTone} accent={accent} warning={warning} />
+  return <StatCard label={label} value={value} sub={sub} tone={tone} chip={chip} chipTone={chipTone} accent={accent} warning={warning} to={to} />
 }
 
 function ReturnCell({ label, value, note }: { label: string; value: number | null; note?: string }) {

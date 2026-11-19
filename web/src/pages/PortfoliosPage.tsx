@@ -13,8 +13,8 @@ import { useWealthPortfolios } from '../lib/useWealthPortfolios'
 import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
 import { DividendsCard } from '../components/DividendsCard'
-import { CombinedHoldingsSection } from '../components/CombinedHoldings'
-import { IncomeSection } from '../components/IncomeCard'
+import { CombinedHoldingsCard } from '../components/CombinedHoldings'
+import { IncomeCard } from '../components/IncomeCard'
 import { GetPricesButton } from '../components/GetPricesButton'
 import { HealthCheckCard } from '../components/HealthCheckCard'
 import { BrokerageAllocationCard } from '../components/AllocationCards'
@@ -23,15 +23,28 @@ import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Pill } from '../components/ui/Pill'
 import { EmptyState } from '../components/ui/EmptyState'
+import { Tabs } from '../components/ui/Tabs'
+import { PageError, PageLoading } from '../components/ui/PageState'
+import { useUrlState } from '../lib/useUrlState'
 
 const pctChip = (n: number, base: number) => (base > 0 ? percentFmt(n / base) : undefined)
 
+// The same names as the tabs of a single portfolio, so both levels read alike.
+const VIEWS = ['summary', 'positions', 'plan', 'performance', 'income'] as const
+type View = (typeof VIEWS)[number]
+
+/** Wealth → Portfolios: all portfolios together. The headline numbers stay on top; under
+ * them one tab at a time (kept in the link as ?tab=): Summary (one card per portfolio),
+ * Positions (every ticker added up), Plan (targets), Performance and Income. */
 export function PortfoliosPage() {
   const { user } = useAuth()
   const dialog = useDialog()
   const toast = useToast()
   const w = useWealthPortfolios()
   const [showArchived, setShowArchived] = useState(false)
+  const [view, setView] = useUrlState<View>('tab', 'summary', VIEWS)
+  // How many targets are off, reported by the Targets card for the Plan tab's label.
+  const [offTarget, setOffTarget] = useState(0)
   const [lastEntries, setLastEntries] = useState<Map<string, string>>(new Map())
   useEffect(() => {
     fetchLastEntries()
@@ -68,17 +81,49 @@ export function PortfoliosPage() {
     }
   }
 
-  if (w.error) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load portfolios: {w.error}</div>
-  if (!w.portfolios) return <div className="text-neutral-500">Loading portfolios…</div>
+  if (w.error) return <PageError what="portfolios" message={w.error} onRetry={w.retry} />
+  if (!w.portfolios) return <PageLoading label="Loading portfolios" />
 
   const { combined, active } = w
   const archived = w.portfolios.filter((p) => p.archived)
+  const archivedList = archived.length > 0 && (
+    <div className="text-sm">
+      <button onClick={() => setShowArchived((v) => !v)} className="inline-flex items-center gap-1.5 text-neutral-500 transition hover:text-neutral-200">
+        <Archive size={15} />
+        {showArchived ? 'Hide' : 'Show'} {archived.length} archived portfolio{archived.length === 1 ? '' : 's'}
+      </button>
+      {showArchived && (
+        <div className="mt-3 flex flex-col gap-2">
+          {archived.map((p) => (
+            <div key={p.id} className="flex items-center justify-between rounded-xl border border-(--border) bg-(--card) px-4 py-3">
+              <Link to={`/portfolios/${p.id}`} className="text-neutral-300 hover:text-white">
+                {p.name}
+              </Link>
+              <Button
+                size="sm"
+                onClick={() =>
+                  updatePortfolio(p.id, { archived: false })
+                    .then(() => {
+                      toast(`Restored “${p.name}”`)
+                      w.load()
+                    })
+                    .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
+                }
+              >
+                Unarchive
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
       <PageHeader
         title="Portfolios"
-        subtitle="Long-term investments, valued at each trading day’s close."
+        subtitle="All your long-term investments together, valued at each trading day’s close."
         actions={
           <Button variant="primary" icon={<Plus size={16} />} onClick={newPortfolio}>
             New portfolio
@@ -96,23 +141,26 @@ export function PortfoliosPage() {
       )}
 
       {active.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={<Wallet size={22} />}
-            title="No portfolios yet"
-            action={
-              <Button variant="primary" icon={<Plus size={16} />} onClick={newPortfolio}>
-                Create your first portfolio
-              </Button>
-            }
-          >
-            Add a brokerage, 401k or IRA, then bring in the shares and cash you already hold.
-          </EmptyState>
-        </Card>
+        <>
+          <Card>
+            <EmptyState
+              icon={<Wallet size={22} />}
+              title="No portfolios yet"
+              action={
+                <Button variant="primary" icon={<Plus size={16} />} onClick={newPortfolio}>
+                  Create your first portfolio
+                </Button>
+              }
+            >
+              Add a brokerage, 401k or IRA, then bring in the shares and cash you already hold.
+            </EmptyState>
+          </Card>
+          {archivedList}
+        </>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Kpi label="Total value" value={currency(combined.total)} sub={`${active.length} portfolio${active.length === 1 ? '' : 's'}`} accent />
+            <Kpi label="Investments" value={currency(combined.total)} sub={`${active.length} portfolio${active.length === 1 ? '' : 's'}`} accent />
             <Kpi
               label={dayChangeLabel(combined.asOf) === 'Today' ? 'Today' : `Last close · ${dayChangeLabel(combined.asOf)}`}
               value={signed(combined.dayChange)}
@@ -132,106 +180,110 @@ export function PortfoliosPage() {
 
           {healthIssues != null && healthIssues > 0 && <HealthCheckCard />}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {w.perPortfolio.map(({ portfolio: p, snap }) => {
-              const ret = timeWeightedReturn(seriesFor(w.values, p.id))
-              return (
-                <Link
-                  key={p.id}
-                  to={`/portfolios/${p.id}`}
-                  className="group flex flex-col gap-3 rounded-2xl border border-(--border) bg-(--card) p-5 transition hover:border-(--accent)/50 hover:bg-(--card-raised)"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-base font-semibold text-white">{p.name}</div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Pill tone={KIND_TONE[p.kind]}>{kindLabel(p.kind)}</Pill>
-                        <span className="text-xs text-neutral-500">
-                          {snap.holdings.length} holding{snap.holdings.length === 1 ? '' : 's'}
-                        </span>
-                        {snap.unpriced > 0 && <Pill tone="amber">{snap.unpriced} price pending</Pill>}
-                        {snap.cash < 0 && <Pill tone="amber">{currency(-snap.cash)} margin</Pill>}
+          <Tabs<View>
+            tabs={[
+              { value: 'summary', label: 'Summary', count: active.length },
+              { value: 'positions', label: 'Positions' },
+              {
+                value: 'plan',
+                label: (
+                  <>
+                    Plan
+                    {offTarget > 0 && (
+                      <span className="rounded-full bg-amber-500/15 px-1.5 text-[11px] font-medium tabular-nums text-amber-300" title={`${offTarget} off target`}>
+                        {offTarget} off
+                      </span>
+                    )}
+                  </>
+                ),
+              },
+              { value: 'performance', label: 'Performance' },
+              { value: 'income', label: 'Income' },
+            ]}
+            value={view}
+            onChange={setView}
+          />
+
+          {view === 'summary' && (
+            <>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {w.perPortfolio.map(({ portfolio: p, snap }) => {
+                  const ret = timeWeightedReturn(seriesFor(w.values, p.id))
+                  return (
+                    <Link
+                      key={p.id}
+                      to={`/portfolios/${p.id}`}
+                      className="group flex flex-col gap-3 rounded-2xl border border-(--border) bg-(--card) p-5 transition hover:border-(--accent)/50 hover:bg-(--card-raised)"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-base font-semibold text-white">{p.name}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <Pill tone={KIND_TONE[p.kind]}>{kindLabel(p.kind)}</Pill>
+                            <span className="text-xs text-neutral-500">
+                              {snap.holdings.length} holding{snap.holdings.length === 1 ? '' : 's'}
+                            </span>
+                            {snap.unpriced > 0 && <Pill tone="amber">{snap.unpriced} price pending</Pill>}
+                            {snap.cash < 0 && <Pill tone="amber">{currency(-snap.cash)} margin</Pill>}
+                          </div>
+                          {lastEntries.get(p.id) && <div className="mt-1 text-xs text-neutral-500">Last entry {dateFmt(centralDateStr(new Date(lastEntries.get(p.id)!)))}</div>}
+                        </div>
+                        <ChevronRight size={18} className="mt-1 shrink-0 text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300" />
                       </div>
-                      {lastEntries.get(p.id) && <div className="mt-1 text-xs text-neutral-500">Last entry {dateFmt(centralDateStr(new Date(lastEntries.get(p.id)!)))}</div>}
-                    </div>
-                    <ChevronRight size={18} className="mt-1 shrink-0 text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-neutral-300" />
-                  </div>
-                  <div className="text-2xl font-semibold tracking-tight tabular-nums text-white">{currency(snap.total)}</div>
-                  <div className="grid grid-cols-3 gap-2 border-t border-(--border) pt-3 text-xs">
-                    <div>
-                      <div className="text-neutral-500">{dayChangeLabel(snap.asOf)}</div>
-                      <div className={`mt-0.5 font-medium tabular-nums ${toneClass(snap.dayChange)}`}>{signed(snap.dayChange)}</div>
-                    </div>
-                    <div>
-                      <div className="text-neutral-500">Unrealized</div>
-                      <div className={`mt-0.5 font-medium tabular-nums ${toneClass(snap.unrealized)}`}>{signed(snap.unrealized)}</div>
-                    </div>
-                    <div>
-                      <div className="text-neutral-500">Since start</div>
-                      <div className={`mt-0.5 font-medium tabular-nums ${toneClass(ret?.cumulative)}`}>{ret ? percentFmt(ret.cumulative) : '—'}</div>
-                    </div>
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
-
-          <CombinedHoldingsSection perPortfolio={w.perPortfolio} combined={combined} openOptions={w.openOptions} />
-
-          <IncomeSection portfolioIds={w.activeIds} />
-
-          <BrokerageAllocationCard perPortfolio={w.perPortfolio} options={w.openOptions} prices={w.prices} onChanged={w.load} />
-
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
-            <Card title="Value" subtitle="All portfolios, at each trading day’s close" className="xl:col-span-3">
-              <ValueHistoryChart data={w.series.map((s) => ({ date: s.date, total: s.total }))} />
-            </Card>
-            <Card title="Holdings breakdown" subtitle="All portfolios combined" className="xl:col-span-2">
-              <AllocationDonut allocation={w.allocation} centerLabel="All portfolios" />
-            </Card>
-          </div>
-
-          <Card title="Returns" subtitle="All portfolios combined">
-            <ReturnsRow series={w.series} />
-          </Card>
-
-          <DividendsCard holdings={w.activeHoldings} prices={w.prices} holdingsValue={combined.holdingsValue} portfolioIds={w.activeIds} />
-
-          {healthIssues === 0 && <HealthCheckCard />}
-        </>
-      )}
-
-      {archived.length > 0 && (
-        <div className="text-sm">
-          <button onClick={() => setShowArchived((v) => !v)} className="inline-flex items-center gap-1.5 text-neutral-500 transition hover:text-neutral-200">
-            <Archive size={15} />
-            {showArchived ? 'Hide' : 'Show'} {archived.length} archived portfolio{archived.length === 1 ? '' : 's'}
-          </button>
-          {showArchived && (
-            <div className="mt-3 flex flex-col gap-2">
-              {archived.map((p) => (
-                <div key={p.id} className="flex items-center justify-between rounded-xl border border-(--border) bg-(--card) px-4 py-3">
-                  <Link to={`/portfolios/${p.id}`} className="text-neutral-300 hover:text-white">
-                    {p.name}
-                  </Link>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      updatePortfolio(p.id, { archived: false })
-                        .then(() => {
-                          toast(`Restored “${p.name}”`)
-                          w.load()
-                        })
-                        .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
-                    }
-                  >
-                    Unarchive
-                  </Button>
-                </div>
-              ))}
-            </div>
+                      <div className="text-2xl font-semibold tracking-tight tabular-nums text-white">{currency(snap.total)}</div>
+                      <div className="grid grid-cols-3 gap-2 border-t border-(--border) pt-3 text-xs">
+                        <div>
+                          <div className="text-neutral-500">{dayChangeLabel(snap.asOf)}</div>
+                          <div className={`mt-0.5 font-medium tabular-nums ${toneClass(snap.dayChange)}`}>{signed(snap.dayChange)}</div>
+                        </div>
+                        <div>
+                          <div className="text-neutral-500">Unrealized</div>
+                          <div className={`mt-0.5 font-medium tabular-nums ${toneClass(snap.unrealized)}`}>{signed(snap.unrealized)}</div>
+                        </div>
+                        <div>
+                          <div className="text-neutral-500">Since start</div>
+                          <div className={`mt-0.5 font-medium tabular-nums ${toneClass(ret?.cumulative)}`}>{ret ? percentFmt(ret.cumulative) : '—'}</div>
+                        </div>
+                      </div>
+                    </Link>
+                  )
+                })}
+              </div>
+              {healthIssues === 0 && <HealthCheckCard />}
+              {archivedList}
+            </>
           )}
-        </div>
+
+          {view === 'positions' && <CombinedHoldingsCard perPortfolio={w.perPortfolio} combined={combined} openOptions={w.openOptions} />}
+
+          {/* Kept on the page while another tab shows, so the Plan tab can say how many targets are off. */}
+          <div className={view === 'plan' ? '' : 'hidden'}>
+            <BrokerageAllocationCard perPortfolio={w.perPortfolio} options={w.openOptions} prices={w.prices} onChanged={w.load} onOff={setOffTarget} />
+          </div>
+
+          {view === 'performance' && (
+            <>
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+                <Card title="Value" subtitle="All portfolios, at each trading day’s close" className="xl:col-span-3">
+                  <ValueHistoryChart data={w.series.map((s) => ({ date: s.date, total: s.total }))} />
+                </Card>
+                <Card title="Allocation" subtitle="All portfolios combined" className="xl:col-span-2">
+                  <AllocationDonut allocation={w.allocation} centerLabel="All portfolios" />
+                </Card>
+              </div>
+              <Card title="Returns" subtitle="All portfolios combined">
+                <ReturnsRow series={w.series} />
+              </Card>
+            </>
+          )}
+
+          {view === 'income' && (
+            <>
+              <IncomeCard portfolioIds={w.activeIds} />
+              <DividendsCard holdings={w.activeHoldings} prices={w.prices} holdingsValue={combined.holdingsValue} portfolioIds={w.activeIds} />
+            </>
+          )}
+        </>
       )}
     </div>
   )

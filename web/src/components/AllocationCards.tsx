@@ -404,26 +404,28 @@ function PctInput({ value, onChange }: { value: string; onChange: (v: string) =>
 
 type PerPortfolio = { portfolio: Portfolio; snap: PortfolioSnapshot }
 
-/** Portfolios page: the split between brokerage accounts, and a line per account showing
- * whether it is on target. Open a line to see what is off: the positions off plan for an
- * account with a position plan, the mix by type for the others. Targets are set on each
- * portfolio's page. */
-export function BrokerageAllocationCard({ perPortfolio, options, prices, onChanged }: { perPortfolio: PerPortfolio[]; options: OptionPosition[]; prices: Map<string, SymbolPrice>; onChanged: () => void }) {
+/** Portfolios page, Plan tab: the split between brokerage accounts, and a line per account
+ * showing whether it is on target. Open a line to see what is off: the positions off plan for
+ * an account with a position plan, the mix by type for the others. Targets are set on each
+ * portfolio's page. `onOff` is told how many things are off target, for the tab's label. */
+export function BrokerageAllocationCard({
+  perPortfolio,
+  options,
+  prices,
+  onChanged,
+  onOff,
+}: {
+  perPortfolio: PerPortfolio[]
+  options: OptionPosition[]
+  prices: Map<string, SymbolPrice>
+  onChanged: () => void
+  onOff?: (count: number) => void
+}) {
   const symbols = useMemo(() => perPortfolio.flatMap((p) => p.snap.holdings.map((v) => v.holding.symbol)), [perPortfolio])
   const data = useAllocationData(symbols)
   const changeType = useTypeChanger(data.reload)
   const [editing, setEditing] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
-  // Opens by itself when something is off target. Otherwise collapsed to its one-line summary
-  // unless you opened it last time (remembered per browser). Show/Hide wins for this visit.
-  const [keptOpen] = useState(() => {
-    try {
-      return localStorage.getItem('allocation-card-open') === '1'
-    } catch {
-      return false
-    }
-  })
-  const [chosen, setChosen] = useState<boolean | null>(null)
 
   const brokerage = perPortfolio.filter((p) => !isRetirement(p.portfolio.kind))
   const retirement = perPortfolio.filter((p) => isRetirement(p.portfolio.kind))
@@ -461,18 +463,9 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
   })
   const off = (hasSplit ? split.off : 0) + accounts.reduce((s, a) => s + (a.off ?? 0), 0)
   const noTargets = !hasSplit && accounts.every((a) => a.targets === null)
+  useEffect(() => onOff?.(off), [off, onOff])
 
   if (accounts.length === 0) return null
-
-  const expanded = chosen ?? (off > 0 || keptOpen)
-  const toggle = () => {
-    try {
-      localStorage.setItem('allocation-card-open', expanded ? '0' : '1')
-    } catch {
-      // storage blocked: just don't remember
-    }
-    setChosen(!expanded)
-  }
 
   // The summary names each kind of target on its own: the split, position plans, mixes by type.
   const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -534,7 +527,6 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
   return (
     <Card
       title="Targets"
-      flush={!expanded}
       subtitle={
         noTargets ? (
           'Each account by type, and how brokerage money splits between accounts. Set targets to see what to rebalance.'
@@ -553,19 +545,13 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
         )
       }
       actions={
-        <>
-          {brokerage.length >= 2 && (
-            <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
-              {hasSplit ? 'Edit split' : 'Set split'}
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" icon={<ChevronDown size={14} className={`transition ${expanded ? 'rotate-180' : ''}`} />} onClick={toggle}>
-            {expanded ? 'Hide' : 'Show'}
+        brokerage.length >= 2 ? (
+          <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setEditing(true)}>
+            {hasSplit ? 'Edit split' : 'Set split'}
           </Button>
-        </>
+        ) : undefined
       }
     >
-      {expanded && (
       <div className="flex flex-col gap-5">
         {brokerage.length >= 2 && (
           <section>
@@ -592,7 +578,6 @@ export function BrokerageAllocationCard({ perPortfolio, options, prices, onChang
           </section>
         )}
       </div>
-      )}
 
       <TargetsDrawer
         open={editing}

@@ -31,6 +31,7 @@ import { BalancesTable, type BalancesTableHandle } from '../components/BalancesT
 import { ManageAccounts } from '../components/ManageAccounts'
 import { MonthStepper } from '../components/MonthStepper'
 import { CollapsibleSection } from '../components/CollapsibleSection'
+import { PageError, PageLoading } from '../components/ui/PageState'
 import { Kpi } from '../components/WealthBits'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
@@ -117,11 +118,12 @@ export function NetWorthPage() {
     void load()
   }, [load])
   useEffect(() => {
-    if ((view !== 'cashflow' && recapMonth === null) || flows !== null) return
+    // A failed read waits for "Try again", which clears the error.
+    if ((view !== 'cashflow' && recapMonth === null) || flows !== null || flowsError !== null) return
     fetchExternalFlows()
       .then(setFlows)
       .catch((e) => setFlowsError(errorMessage(e)))
-  }, [view, recapMonth, flows])
+  }, [view, recapMonth, flows, flowsError])
 
   const startCloseFrom = useStartCloseFrom(load)
 
@@ -155,8 +157,18 @@ export function NetWorthPage() {
   }, [accounts, currentMonth])
   const closedMonths = useMemo(() => new Set(book.closedAt.keys()), [book])
 
-  if (error) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load net worth: {error}</div>
-  if (!accounts || !totals) return <div className="text-neutral-500">Loading net worth…</div>
+  if (error)
+    return (
+      <PageError
+        what="net worth"
+        message={error}
+        onRetry={() => {
+          setError(null)
+          void load()
+        }}
+      />
+    )
+  if (!accounts || !totals) return <PageLoading label="Loading net worth" />
 
   const hasPrev = prev !== null && prev.lines.length > 0
   const hasYearStart = yearStart !== null && yearStart.lines.length > 0
@@ -369,7 +381,7 @@ export function NetWorthPage() {
 
       {view === 'cashflow' &&
         (flowsError ? (
-          <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load cash flow: {flowsError}</div>
+          <PageError what="cash flow" message={flowsError} onRetry={() => setFlowsError(null)} />
         ) : flows === null ? (
           <div className="text-neutral-500">Loading cash flow…</div>
         ) : (

@@ -17,7 +17,8 @@ import { currency } from './format'
 /** Everything the Portfolios overview and the Wealth overview need about your portfolios:
  * loads once, then derives per-portfolio and combined snapshots, the combined daily value
  * series, realized gains, allocation and tickers still waiting for a price. Archived
- * portfolios are excluded from every figure. `load` re-fetches after a change. */
+ * portfolios are excluded from every figure. `load` re-fetches after a change; `retry` does
+ * the same after a failed load. */
 export function useWealthPortfolios() {
   const [portfolios, setPortfolios] = useState<Portfolio[] | null>(null)
   const [holdings, setHoldings] = useState<Holding[]>([])
@@ -51,6 +52,11 @@ export function useWealthPortfolios() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
   useEffect(load, [load])
+  /** After a failed load: clears the error and reads everything again. */
+  const retry = useCallback(() => {
+    setError(null)
+    load()
+  }, [load])
 
   const active = useMemo(() => (portfolios ?? []).filter((p) => !p.archived), [portfolios])
   const activeIds = useMemo(() => new Set(active.map((p) => p.id)), [active])
@@ -112,5 +118,6 @@ export function useWealthPortfolios() {
     openOptions,
     error,
     load,
+    retry,
   }
 }
