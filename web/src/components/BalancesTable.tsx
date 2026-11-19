@@ -1,4 +1,4 @@
-import { Fragment, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react'
+import { Fragment, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react'
 import { Landmark, Plus, Settings2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { NetworthAccount, NetworthBalance, NetworthCategory } from '../lib/database.types'
@@ -20,6 +20,46 @@ export type BalancesTableHandle = {
   unsavedCount: () => number
   /** Saves them. False when it didn't go through (the table shows why). */
   save: () => Promise<boolean>
+  /** Throws them away, including the copy kept for coming back to the page. */
+  discard: () => void
+}
+
+/** Typed and ticked rows that haven't been saved, as kept in sessionStorage. */
+type Draft = { edits: [string, string][]; confirmed: string[] }
+const NO_DRAFT: Draft = { edits: [], confirmed: [] }
+
+function readDraft(key: string | null): Draft {
+  if (!key) return NO_DRAFT
+  try {
+    const raw: unknown = JSON.parse(sessionStorage.getItem(key) ?? 'null')
+    if (typeof raw !== 'object' || raw === null) return NO_DRAFT
+    const { edits, confirmed } = raw as { edits?: unknown; confirmed?: unknown }
+    return {
+      edits: Array.isArray(edits) ? edits.filter((e): e is [string, string] => Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'string') : [],
+      confirmed: Array.isArray(confirmed) ? confirmed.filter((id): id is string => typeof id === 'string') : [],
+    }
+  } catch {
+    return NO_DRAFT
+  }
+}
+
+/** A draft cut down to what can still be saved: nothing in a closed month, and only the
+ * accounts open in it. */
+function savableDraft(d: Draft, open: NetworthAccount[], locked: boolean): Draft {
+  if (locked) return NO_DRAFT
+  const ids = new Set(open.map((a) => a.id))
+  return { edits: d.edits.filter(([id]) => ids.has(id)), confirmed: d.confirmed.filter((id) => ids.has(id)) }
+}
+
+/** An empty draft removes the entry. */
+function writeDraft(key: string | null, draft: Draft) {
+  if (!key) return
+  try {
+    if (draft.edits.length === 0 && draft.confirmed.length === 0) sessionStorage.removeItem(key)
+    else sessionStorage.setItem(key, JSON.stringify(draft))
+  } catch {
+    /* private mode or full storage -- the typing just isn't kept across pages */
+  }
 }
 
 /** The month's balances as a table: open accounts only, pre-filled with this month's entry
@@ -28,7 +68,9 @@ export type BalancesTableHandle = {
  * carried balance stays carried until you've looked at it. A closed month is read-only.
  *
  * What you've typed belongs to one month: the page gives the table a new `key` per month, so
- * it starts clean there, and a data reload for any other reason leaves typed rows alone. */
+ * it starts clean there, and a data reload for any other reason leaves typed rows alone.
+ * Unsaved rows are also kept in sessionStorage per user and month, so leaving the page and
+ * coming back in the same tab brings them back as unsaved typing. */
 export function BalancesTable({
   month,
   accounts,
@@ -62,14 +104,23 @@ export function BalancesTable({
     return out
   }, [open, balances, month])
 
+  const draftKey = user ? `tj.balancesDraft.${user.id}.${month}` : null
+  // What was left unsaved the last time this month was on screen, read once.
+  const [restored] = useState(() => savableDraft(readDraft(draftKey), open, locked))
+
   // Only the rows you've typed in. Every other row shows the saved (or carried) number, so it
   // follows a reload while typed rows keep what you typed.
-  const [edits, setEdits] = useState<Map<string, string>>(new Map())
+  const [edits, setEdits] = useState<Map<string, string>>(() => new Map(restored.edits))
   // Carried rows you've confirmed for this month: typed in, Enter pressed, or "unchanged" ticked.
-  const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
+  const [confirmed, setConfirmed] = useState<Set<string>>(() => new Set(restored.confirmed))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputs = useRef(new Map<string, HTMLInputElement>())
+
+  // Keeps the stored copy in step with what's typed; it empties once everything is saved or discarded.
+  useEffect(() => {
+    writeDraft(draftKey, savableDraft({ edits: [...edits], confirmed: [...confirmed] }, open, locked))
+  }, [draftKey, edits, confirmed, open, locked])
 
   const valueOf = (id: string) => edits.get(id) ?? prefill.get(id)?.value ?? ''
   const isCarried = (id: string) => Boolean(prefill.get(id)?.from)
@@ -122,6 +173,13 @@ export function BalancesTable({
         return n
       })
       setConfirmed((c) => new Set([...c].filter((id) => !sent.has(id))))
+      // The stored copy too, right away: when the page moves to another month straight after
+      // the save, this table is gone before it can catch up.
+      const stored = readDraft(draftKey)
+      writeDraft(draftKey, {
+        edits: stored.edits.filter(([id, typed]) => !(sent.has(id) && parseBalance(typed) === sent.get(id))),
+        confirmed: stored.confirmed.filter((id) => !sent.has(id)),
+      })
       return true
     } catch (e) {
       setError(errorMessage(e))
@@ -129,6 +187,14 @@ export function BalancesTable({
     } finally {
       setSaving(false)
     }
+  }
+
+  function discard() {
+    setEdits(new Map())
+    setConfirmed(new Set())
+    setError(null)
+    // Straight away rather than on the next render: the page may be leaving this month.
+    writeDraft(draftKey, NO_DRAFT)
   }
 
   const amountOf = (a: NetworthAccount) => parseBalance(valueOf(a.id)) ?? 0
@@ -166,6 +232,7 @@ export function BalancesTable({
     },
     unsavedCount: () => open.filter((a) => toSave(a)).length,
     save: () => save(),
+    discard,
   }))
 
   /** Enter moves down the column; on the last field it saves. In a carried row it also
@@ -341,15 +408,7 @@ export function BalancesTable({
           </span>
           <span className="flex flex-wrap gap-2">
             {dirty && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setEdits(new Map())
-                  setConfirmed(new Set())
-                  setError(null)
-                }}
-              >
+              <Button size="sm" variant="ghost" onClick={discard}>
                 Discard
               </Button>
             )}

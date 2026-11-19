@@ -4,6 +4,14 @@
 // web/api/_lib/candleProviders.ts, which vite.config.ts's dev middleware still
 // imports -- keep the two in sync if either changes.
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { createClient } from '@supabase/supabase-js'
+
+// One ticker: letters, digits, dot, dash (BRK.B, BF-B). No commas, so never a batch.
+const SYMBOL_RE = /^[A-Za-z0-9.-]{1,12}$/
+// The chart asks for a trade's first fill to its last (or to now while it's open) plus 30
+// minutes each side, so a long-held position is a long window. Past this it's not a chart.
+const MAX_WINDOW_MS = 731 * 24 * 60 * 60_000
+const GENERIC_ERROR = 'Could not load candles'
 
 type Candle = {
   time: number // unix seconds
@@ -74,11 +82,60 @@ async function getCandlesFromProvider(params: { symbol: string; from: Date; to: 
   throw new CandleProviderError(`CANDLE_PROVIDER is not configured (got ${JSON.stringify(provider)})`)
 }
 
+/** Whether the request carries a signed-in user's Supabase access token -- the same check
+ * as api/trigger-sync.ts. 'unconfigured' when the server can't verify anyone. */
+async function verifyUser(authHeader: string | string[] | undefined): Promise<'ok' | 'unauthorized' | 'unconfigured'> {
+  const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader
+  const token = headerValue?.startsWith('Bearer ') ? headerValue.slice(7) : null
+  if (!token) return 'unauthorized'
+
+  const supabaseUrl = process.env.VITE_SUPABASE_URL
+  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !supabaseAnonKey) return 'unconfigured'
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey)
+  const { data, error } = await supabase.auth.getUser(token)
+  return error || !data.user ? 'unauthorized' : 'ok'
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'GET') {
+    res.status(405).json({ error: 'method not allowed' })
+    return
+  }
+
+  try {
+    const auth = await verifyUser(req.headers.authorization)
+    if (auth === 'unauthorized') {
+      res.status(401).json({ error: 'not signed in' })
+      return
+    }
+    if (auth === 'unconfigured') {
+      console.error('candles: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set')
+      res.status(500).json({ error: GENERIC_ERROR })
+      return
+    }
+  } catch (err) {
+    console.error('candles: could not verify the session:', err)
+    res.status(502).json({ error: GENERIC_ERROR })
+    return
+  }
+
   const { symbol, from, to, interval } = req.query
 
   if (typeof symbol !== 'string' || typeof from !== 'string' || typeof to !== 'string') {
     res.status(400).json({ error: 'symbol, from, to query params are required' })
+    return
+  }
+  if (!SYMBOL_RE.test(symbol)) {
+    res.status(400).json({ error: 'symbol is not a valid ticker' })
+    return
+  }
+
+  const fromMs = Date.parse(from)
+  const toMs = Date.parse(to)
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || fromMs >= toMs || toMs - fromMs > MAX_WINDOW_MS) {
+    res.status(400).json({ error: 'from and to must be dates, from before to, at most two years apart' })
     return
   }
 
@@ -87,12 +144,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const candles = await getCandlesFromProvider({
       symbol,
-      from: new Date(from),
-      to: new Date(to),
+      from: new Date(fromMs),
+      to: new Date(toMs),
       interval: resolvedInterval,
     })
+    // A window that ended a while ago no longer changes; one still in progress does.
+    const settled = toMs < Date.now() - 60 * 60_000
+    res.setHeader('Cache-Control', `private, max-age=${settled ? 3600 : 60}`)
     res.status(200).json({ candles })
   } catch (err) {
-    res.status(502).json({ error: err instanceof Error ? err.message : String(err) })
+    // The detail (provider message, missing configuration) stays in the server log.
+    console.error('candles: provider call failed:', err)
+    res.status(502).json({ error: GENERIC_ERROR })
   }
 }

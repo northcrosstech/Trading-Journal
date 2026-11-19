@@ -7,7 +7,9 @@ import type { Portfolio } from '../lib/database.types'
 import { fetchPortfolios } from '../lib/wealthQueries'
 import { SEARCH_SHORTCUT, isPlainKey, isSearchShortcut, isTyping, overlayOpen } from '../lib/shortcuts'
 import { HOME, readLastPath, readStoredWorkspace, storeLastPath, storeWorkspace, workspaceFor, type Workspace } from '../lib/workspace'
+import { useSyncState, type SyncState } from '../lib/useSyncState'
 import { SyncStatus } from './SyncStatus'
+import { SyncFailedBanner } from './SyncFailedBanner'
 import { SearchDialog } from './SearchDialog'
 import { LogPicker, type LogKind } from './LogPicker'
 import { Button } from './ui/Button'
@@ -69,6 +71,7 @@ function AccountSwitcher() {
 function Sidebar({
   workspace,
   portfolios,
+  sync,
   onNavigate,
   onSearch,
   onLog,
@@ -76,6 +79,8 @@ function Sidebar({
   workspace: Workspace
   /** Open portfolios, listed under the Portfolios link in Wealth. */
   portfolios: Portfolio[]
+  /** The latest trade sync, shown in Trading. */
+  sync: SyncState
   onNavigate: () => void
   onSearch: () => void
   onLog: () => void
@@ -131,7 +136,7 @@ function Sidebar({
       {workspace === 'trading' && (
         <>
           <AccountSwitcher />
-          <SyncStatus />
+          <SyncStatus sync={sync} />
         </>
       )}
 
@@ -243,6 +248,9 @@ export function Layout() {
 
   useEffect(() => setMenuOpen(false), [location.pathname])
 
+  // One copy of the sync state for the sidebar badge and the banner above the Trading pages.
+  const sync = useSyncState(workspace === 'trading', location.pathname)
+
   // Loaded only in Wealth, and again on each page change (and when the Log picker opens) so a
   // new or renamed portfolio shows up.
   const inWealth = workspace === 'wealth'
@@ -303,7 +311,7 @@ export function Layout() {
   }, [searchOpen, inWealth, startLog])
 
   const sidebar = (onNavigate: () => void) => (
-    <Sidebar workspace={workspace} portfolios={portfolios ?? []} onNavigate={onNavigate} onSearch={() => setSearchOpen(true)} onLog={startLog} />
+    <Sidebar workspace={workspace} portfolios={portfolios ?? []} sync={sync} onNavigate={onNavigate} onSearch={() => setSearchOpen(true)} onLog={startLog} />
   )
 
   return (
@@ -335,7 +343,16 @@ export function Layout() {
 
       <div className="flex">
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r border-(--border) bg-(--bg) lg:block">{sidebar(() => {})}</aside>
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{redirecting ? <Navigate to={fresh.to} replace /> : <Outlet context={workspace} />}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          {redirecting ? (
+            <Navigate to={fresh.to} replace />
+          ) : (
+            <>
+              {workspace === 'trading' && <SyncFailedBanner sync={sync} />}
+              <Outlet context={workspace} />
+            </>
+          )}
+        </main>
       </div>
 
       <SearchDialog open={searchOpen} workspace={workspace} onClose={closeSearch} />

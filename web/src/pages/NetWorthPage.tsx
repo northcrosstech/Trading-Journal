@@ -43,19 +43,28 @@ type View = (typeof VIEWS)[number]
 
 /** Wealth → Net worth. Two tabs share one month, kept in the link as ?month=yyyy-mm:
  * "Balances" (the month's balances, payments and month-end close) and "Cash flow"
- * (?view=cashflow). While a finished month is waiting to be closed the page leads with the
- * close: the close card, the balances table, then the payments. */
+ * (?view=cashflow). With no month in the link each tab opens on its own: Balances on the
+ * month being worked on, Cash flow on last month. While a finished month is waiting to be
+ * closed the page leads with the close: the close card, the balances table, then the payments. */
 export function NetWorthPage() {
   const today = centralDateStr(new Date())
   const currentMonth = monthOf(today)
   const dialog = useDialog()
-  const [, setParams] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const [view, setView] = useUrlState<View>('view', 'balances', VIEWS)
-  // Without ?month the page shows the month picked on the first load (see netWorthOpenMonth).
+  // Without ?month Balances shows the month picked on the first load (see netWorthOpenMonth).
   const [openMonth, setOpenMonth] = useState<string | null>(null)
   const fallbackMonth = (openMonth ?? currentMonth).slice(0, 7)
-  const [linkMonth, setLinkMonth] = useUrlState('month', fallbackMonth)
-  const month = `${isLinkMonth(linkMonth) ? linkMonth : fallbackMonth}-01`
+  // Without ?month Cash flow shows last month, as it did as a page of its own.
+  const cashFlowFallback = addMonths(currentMonth, -1).slice(0, 7)
+  const [, setLinkMonth] = useUrlState('month', view === 'cashflow' ? cashFlowFallback : fallbackMonth)
+  const linkParam = params.get('month')
+  const linkMonth = linkParam !== null && isLinkMonth(linkParam) ? linkParam : null
+  // The Balances month. It stays where it is while Cash flow shows its own default, so the
+  // balances table (and anything typed in it) isn't swapped for another month's.
+  const month = `${linkMonth ?? fallbackMonth}-01`
+  // The month in the header, and the one Cash flow shows.
+  const shownMonth = view === 'cashflow' ? `${linkMonth ?? cashFlowFallback}-01` : month
   // The chart follows the month on screen until a year is picked from its list.
   const [chosenYear, setYear] = useState<number | null>(null)
   const year = chosenYear ?? Number(month.slice(0, 4))
@@ -183,24 +192,30 @@ export function NetWorthPage() {
       if (!saved && view !== 'balances') setView('balances') // the table says what went wrong
       return saved
     }
-    return dialog.confirm({
+    const discard = await dialog.confirm({
       title: `Discard the ${what}?`,
       message: `Discard ${n === 1 ? 'it' : 'them'} and leave ${monthLabel(month)}, or cancel to stay and keep typing.`,
       confirmLabel: 'Discard',
       tone: 'danger',
     })
+    // Also drops the copy the table keeps for coming back to this month.
+    if (discard) tableRef.current?.discard()
+    return discard
   }
 
   async function goToMonth(m: string, toBalances = false) {
-    if (m !== month && !(await mayLeaveMonth())) return
-    if (!toBalances || view === 'balances') return setLinkMonth(m.slice(0, 7))
+    // Left out of the link when it's the default of the tab it opens in.
+    const link = m.slice(0, 7) === (toBalances || view === 'balances' ? fallbackMonth : cashFlowFallback) ? null : m.slice(0, 7)
+    // Typed balances go with the Balances month, which a default Cash flow month doesn't move.
+    if (`${link ?? fallbackMonth}-01` !== month && !(await mayLeaveMonth())) return
+    if (!toBalances || view === 'balances') return setLinkMonth(link)
     // Tab and month together: two separate link updates would overwrite each other.
     setParams(
       (p) => {
         const next = new URLSearchParams(p)
         next.delete('view')
-        if (m.slice(0, 7) === fallbackMonth) next.delete('month')
-        else next.set('month', m.slice(0, 7))
+        if (link === null) next.delete('month')
+        else next.set('month', link)
         return next
       },
       { replace: true },
@@ -243,7 +258,7 @@ export function NetWorthPage() {
       <PageHeader
         title="Net worth"
         subtitle="Everything you own minus everything you owe, month by month."
-        actions={<MonthStepper month={month} max={currentMonth} onChange={(m) => void goToMonth(m)} status={monthStatus(month, currentMonth, locked)} />}
+        actions={<MonthStepper month={shownMonth} max={currentMonth} onChange={(m) => void goToMonth(m)} status={monthStatus(shownMonth, currentMonth, book.closedAt.has(shownMonth))} />}
       />
 
       <Tabs
@@ -339,7 +354,7 @@ export function NetWorthPage() {
           <div className="text-neutral-500">Loading cash flow…</div>
         ) : (
           <CashFlowView
-            month={month}
+            month={shownMonth}
             currentMonth={currentMonth}
             accounts={accounts}
             balances={balances}

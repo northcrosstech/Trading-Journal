@@ -1,3 +1,5 @@
+import { supabase } from './supabase'
+
 export type Candle = {
   time: number // unix seconds
   open: number
@@ -36,7 +38,13 @@ export async function fetchCandles(params: {
       params.from.toISOString(),
     )}&to=${encodeURIComponent(params.to.toISOString())}&interval=${params.interval}`
 
-    const res = await fetch(url)
+    // The proxy only answers a signed-in user.
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session) throw new Error('not signed in')
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${session.access_token}` } })
     const body = await res.json()
 
     if (!res.ok) {
