@@ -22,6 +22,14 @@ const monthName = (month: string) => {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long' })
 }
 
+/** "Mar 2031". */
+const monthYear = (month: string) => {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+}
+
+const wholeDollars = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export type InstallmentsCardHandle = {
@@ -86,6 +94,27 @@ export function InstallmentsCard({
   const paidTotal = rows.reduce((s, r) => s + (r.paid ? Number(r.paid.amount) : 0), 0)
   const left = rows.filter((r) => !r.paid).reduce((s, r) => s + r.expected, 0)
   const unpaidRows = rows.filter((r) => !r.paid && !r.nothingDue)
+
+  // Debt-free line: the latest payoff month and the interest left, over the loans whose row has
+  // an estimate from a fixed payment. Nothing is worked out here beyond adding them up.
+  let debtFreeMonth: string | null = null
+  let interestLeft = 0
+  let estimated = 0
+  for (const r of rows) {
+    // Every loan whose row shows a payoff month; one with no rate entered counts as 0%, as its row does.
+    if (r.plan?.kind !== 'months') continue
+    estimated += 1
+    interestLeft += r.plan.interest
+    if (debtFreeMonth === null || r.plan.payoffMonth > debtFreeMonth) debtFreeMonth = r.plan.payoffMonth
+  }
+  // Debts with something still owed; one with no balance entered yet counts, as it can't be ruled out.
+  const owed = debts.filter((a) => (balanceUpTo(a, balances, month) ?? 1) > 0).length
+  const payoffLine =
+    debtFreeMonth === null
+      ? null
+      : `${estimated < owed ? `${estimated} of ${owed} debts ${estimated === 1 ? 'has' : 'have'} a payoff estimate: paid off by` : 'Debt-free by'} ${monthYear(debtFreeMonth)} at current payments · ${
+          interestLeft >= 0.5 ? `about ${wholeDollars(interestLeft)} interest still to pay` : 'no interest still to pay'
+        }`
   // Paid today, unless the due date is more than a month behind (catching up on an old month).
   const defaultPaidOn = (r: Row) => (daysBetween(r.due, today) > 31 ? r.due : today)
 
@@ -170,6 +199,11 @@ export function InstallmentsCard({
           <>
             Monthly payments · {currency(total)} total · <span className="text-emerald-300">{currency(paidTotal)} paid</span> ·{' '}
             <span className={left > 0 ? 'text-amber-300' : 'text-neutral-400'}>{currency(left)} left</span>
+            {payoffLine && (
+              <span className="mt-0.5 block text-neutral-300" title="From each loan’s balance, rate and fixed payment. A loan with no rate entered is counted at 0% interest. Debts without a fixed payment, such as cards paid in full each statement, have no estimate.">
+                {payoffLine}
+              </span>
+            )}
           </>
         ) : (
           'Track the monthly payment on each debt, when it’s due, and when it’ll be paid off.'

@@ -26,6 +26,7 @@ import { NetWorthComposition } from '../components/NetWorthComposition'
 import { InstallmentsCard, type InstallmentsCardHandle } from '../components/InstallmentsCard'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
 import { MonthClosePanel } from '../components/MonthClosePanel'
+import { MonthRecap } from '../components/MonthRecap'
 import { BalancesTable, type BalancesTableHandle } from '../components/BalancesTable'
 import { ManageAccounts } from '../components/ManageAccounts'
 import { MonthStepper } from '../components/MonthStepper'
@@ -77,9 +78,13 @@ export function NetWorthPage() {
   const [manageOpen, setManageOpen] = useState(false)
   const [book, setBook] = useState<MonthBook>(EMPTY_BOOK)
   const [closeFromMonth, setCloseFromMonthValue] = useState<string | null>(null)
-  // Portfolio deposits and withdrawals: only the Cash flow tab needs them, so they load when it's first opened.
+  // Portfolio deposits and withdrawals: only the Cash flow tab and the month recap need them,
+  // so they load when either is first opened.
   const [flows, setFlows] = useState<CashFlowFlow[] | null>(null)
   const [flowsError, setFlowsError] = useState<string | null>(null)
+  // The closed month whose recap is showing: set by a close, or by "Recap" on a closed month.
+  const [recapMonth, setRecapMonth] = useState<string | null>(null)
+  const closeRecap = useCallback(() => setRecapMonth(null), [])
   const tableRef = useRef<BalancesTableHandle>(null)
   const paymentsRef = useRef<InstallmentsCardHandle>(null)
 
@@ -112,11 +117,11 @@ export function NetWorthPage() {
     void load()
   }, [load])
   useEffect(() => {
-    if (view !== 'cashflow' || flows !== null) return
+    if ((view !== 'cashflow' && recapMonth === null) || flows !== null) return
     fetchExternalFlows()
       .then(setFlows)
       .catch((e) => setFlowsError(errorMessage(e)))
-  }, [view, flows])
+  }, [view, recapMonth, flows])
 
   const startCloseFrom = useStartCloseFrom(load)
 
@@ -222,6 +227,20 @@ export function NetWorthPage() {
     )
   }
 
+  /** From the recap: the Cash flow tab on the recap's month. Tab and month go in one link update. */
+  function openCashFlow(m: string) {
+    setRecapMonth(null)
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p)
+        next.set('view', 'cashflow')
+        next.set('month', m.slice(0, 7))
+        return next
+      },
+      { replace: true },
+    )
+  }
+
   const kpis = (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       <StatCard
@@ -299,6 +318,7 @@ export function NetWorthPage() {
           onJumpToBalances={(ids) => tableRef.current?.focusFirst(ids)}
           onJumpToPayments={(ids) => paymentsRef.current?.focusFirst(ids)}
           onOpenMonth={(m) => void goToMonth(m)}
+          onRecap={setRecapMonth}
           late={isReminderMonth && closeIsLate(today, month)}
           note={isReminderMonth && Number(today.slice(8, 10)) <= 5 ? `Showing ${monthLabel(month)} until you close it, or through the 5th.` : null}
           startFrom={isReminderMonth && closeFromMonth === null ? { label: `Start from ${monthLabel(currentMonth, 'short')}`, onClick: () => void startCloseFrom(month) } : undefined}
@@ -369,6 +389,20 @@ export function NetWorthPage() {
       <Drawer open={manageOpen} onClose={() => setManageOpen(false)} title="Manage accounts" subtitle="What you own and what you owe" width="max-w-lg">
         <ManageAccounts accounts={accounts} month={month} monthLocked={locked} onChanged={load} />
       </Drawer>
+
+      <MonthRecap
+        month={recapMonth}
+        closedAt={recapMonth ? (book.closedAt.get(recapMonth) ?? null) : null}
+        accounts={accounts}
+        balances={balances}
+        portfolios={portfolios}
+        dailyValues={dailyValues}
+        payments={payments}
+        flows={flows}
+        flowsError={flowsError}
+        onClose={closeRecap}
+        onCashFlow={openCashFlow}
+      />
     </div>
   )
 }

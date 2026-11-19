@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowRight, CheckCircle2, Circle, Lock, LockOpen } from 'lucide-react'
+import { ArrowDown, ArrowRight, CheckCircle2, Circle, FileText, Lock, LockOpen } from 'lucide-react'
 import type { InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
 import { closeBlocker, closeChecklist, type MonthBook } from '../lib/cashflow'
 import { addMonths, isDebt, isOpenIn, monthLabel } from '../lib/networth'
@@ -53,6 +53,7 @@ export function MonthClosePanel({
   onJumpToBalances,
   onJumpToPayments,
   onOpenMonth,
+  onRecap,
   late = false,
   note,
   startFrom,
@@ -70,6 +71,8 @@ export function MonthClosePanel({
   onJumpToPayments?: (accountIds: string[]) => void
   /** Switch the page to the month that has to close first. */
   onOpenMonth?: (month: string) => void
+  /** Show a closed month's recap: called right after a close, and from "Recap" on a closed month. */
+  onRecap?: (month: string) => void
   /** The page shows this card instead of the close banner, so it carries the banner's extras:
    * the overdue mark, why the page opened on this month, and "Start from {this month}". */
   late?: boolean
@@ -83,13 +86,16 @@ export function MonthClosePanel({
   const closedAt = book.closedAt.get(month) ?? null
   const history = book.log.filter((l) => l.month === month).slice(-5).reverse()
 
-  async function run(p: Promise<unknown>, message: string) {
+  /** Resolves to whether it worked. */
+  async function run(p: Promise<unknown>, message: string): Promise<boolean> {
     try {
       await p
       toast(message)
       onChanged()
+      return true
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e), 'error')
+      return false
     }
   }
 
@@ -99,7 +105,9 @@ export function MonthClosePanel({
       message: `This locks ${name}'s balances and payments. You can reopen it later, with a reason, if something needs correcting.`,
       confirmLabel: `Close ${monthLabel(month, 'short')}`,
     })
-    if (ok) run(closeNetworthMonth(month), `${name} closed`)
+    if (!ok) return
+    // The recap opens by itself once the month is closed.
+    if (await run(closeNetworthMonth(month), `${name} closed`)) onRecap?.(month)
   }
 
   async function reopen() {
@@ -142,11 +150,18 @@ export function MonthClosePanel({
         }
         subtitle={`Closed ${dayOf(closedAt)}. Its balances and payments are locked.`}
         actions={
-          book.ready ? (
-            <Button size="sm" icon={<LockOpen size={14} />} onClick={reopen}>
-              Reopen
-            </Button>
-          ) : undefined
+          <>
+            {onRecap && (
+              <Button size="sm" icon={<FileText size={14} />} onClick={() => onRecap(month)}>
+                Recap
+              </Button>
+            )}
+            {book.ready && (
+              <Button size="sm" icon={<LockOpen size={14} />} onClick={reopen}>
+                Reopen
+              </Button>
+            )}
+          </>
         }
       >
         {historyList || undefined}
