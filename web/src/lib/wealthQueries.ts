@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { fetchAllRows } from './paging'
 import type {
   AllocationTargetRow,
   TickerTypeRow,
@@ -63,9 +64,7 @@ export async function deleteNetworthAccount(id: string) {
 }
 
 export async function fetchNetworthBalances(): Promise<NetworthBalance[]> {
-  const { data, error } = await supabase.from('networth_balances').select('*').order('month')
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) => supabase.from('networth_balances').select('*').order('month').order('id').range(from, to))
 }
 
 /** Saves one month's form: a number upserts that account's balance, null removes it. */
@@ -132,11 +131,11 @@ export async function updateHolding(id: string, patch: Pick<Holding, 'manual_pri
 }
 
 export async function fetchCsps(portfolioId?: string): Promise<CspPosition[]> {
-  let q = supabase.from('csp_positions').select('*').order('expiration')
-  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
-  const { data, error } = await q
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) => {
+    let q = supabase.from('csp_positions').select('*').order('expiration').order('id')
+    if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+    return q.range(from, to)
+  })
 }
 
 export async function setCspMark(id: string, mark: number | null) {
@@ -145,13 +144,15 @@ export async function setCspMark(id: string, mark: number | null) {
 }
 
 export async function fetchActivity(portfolioId: string): Promise<PortfolioActivity[]> {
-  const { data, error } = await supabase
-    .from('portfolio_activity')
-    .select('*')
-    .eq('portfolio_id', portfolioId)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) =>
+    supabase
+      .from('portfolio_activity')
+      .select('*')
+      .eq('portfolio_id', portfolioId)
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(from, to),
+  )
 }
 
 /** Problems from the audit_summary view (empty = everything reconciles); null when the
@@ -167,17 +168,18 @@ export async function fetchAuditProblems(): Promise<AuditProblem[] | null> {
 
 /** Realized gains for every portfolio (activity rows that carry one). */
 export async function fetchRealizedGains(): Promise<Pick<PortfolioActivity, 'portfolio_id' | 'realized_gain'>[]> {
-  const { data, error } = await supabase.from('portfolio_activity').select('portfolio_id, realized_gain').not('realized_gain', 'is', null).is('voided_at', null)
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) =>
+    supabase.from('portfolio_activity').select('portfolio_id, realized_gain').not('realized_gain', 'is', null).is('voided_at', null).order('id').range(from, to),
+  )
 }
 
 export async function fetchDailyValues(portfolioId?: string): Promise<PortfolioDailyValue[]> {
-  let q = supabase.from('portfolio_daily_values').select('*').order('value_date')
-  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
-  const { data, error } = await q
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) => {
+    // One row per portfolio per day, so the portfolio settles the order within a day.
+    let q = supabase.from('portfolio_daily_values').select('*').order('value_date').order('portfolio_id')
+    if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+    return q.range(from, to)
+  })
 }
 
 export type SymbolPrice = { close: number; date: string; prevClose: number | null }
@@ -209,7 +211,27 @@ export async function fetchLatestPrices(symbols: string[]): Promise<Map<string, 
  * still takes fee-free trades. */
 const feeArg = (fee: number | undefined) => (fee ? { p_fee: fee } : {})
 
-export async function portfolioBuy(p: { portfolioId: string; symbol: string; quantity: number; price: number; fromCash: boolean; on: string; fee?: number }) {
+/** A call that used an argument the database doesn't know yet (PostgREST can't find the
+ * function with that argument): say which update is missing instead of the raw error. */
+function needsUpdate<E extends { code?: string; message: string }>(error: E, usedNewArgument: boolean, what: string): E | Error {
+  if (usedNewArgument && error.code === 'PGRST202')
+    return new Error(`${what} needs the database update 20261119020000_partial_closes_archive_owned_shares.sql. Run it in Supabase, then try again.`)
+  return error
+}
+
+/** `marketPrice` is for shares brought in (fromCash false) when no close is saved for the
+ * ticker: what they are worth per share today, so the money coming in is counted at value
+ * and not at cost. Only sent when given, so it needs migration 20261119020000 only then. */
+export async function portfolioBuy(p: {
+  portfolioId: string
+  symbol: string
+  quantity: number
+  price: number
+  fromCash: boolean
+  on: string
+  fee?: number
+  marketPrice?: number | null
+}) {
   const { error } = await supabase.rpc('portfolio_buy', {
     p_portfolio: p.portfolioId,
     p_symbol: p.symbol,
@@ -218,8 +240,9 @@ export async function portfolioBuy(p: { portfolioId: string; symbol: string; qua
     p_from_cash: p.fromCash,
     p_on: p.on,
     ...feeArg(p.fee),
+    ...(p.marketPrice != null ? { p_market_price: p.marketPrice } : {}),
   })
-  if (error) throw error
+  if (error) throw needsUpdate(error, p.marketPrice != null, 'Recording today’s price for these shares')
 }
 
 export async function portfolioSell(p: { portfolioId: string; symbol: string; quantity: number; price: number; toCash: boolean; on: string; fee?: number }) {
@@ -249,10 +272,11 @@ export async function portfolioTrades(portfolioId: string, trades: TradeLine[]) 
 
 /** When each portfolio last had an entry (newest live Activity), by portfolio id. */
 export async function fetchLastEntries(): Promise<Map<string, string>> {
-  const { data, error } = await supabase.from('portfolio_activity').select('portfolio_id, created_at').is('voided_at', null).order('created_at', { ascending: false })
-  if (error) throw error
+  const rows = await fetchAllRows((from, to) =>
+    supabase.from('portfolio_activity').select('portfolio_id, created_at').is('voided_at', null).order('created_at', { ascending: false }).order('id').range(from, to),
+  )
   const out = new Map<string, string>()
-  for (const r of data ?? []) if (!out.has(r.portfolio_id)) out.set(r.portfolio_id, r.created_at)
+  for (const r of rows) if (!out.has(r.portfolio_id)) out.set(r.portfolio_id, r.created_at)
   return out
 }
 
@@ -326,14 +350,17 @@ export async function cspOpen(p: {
   if (error) throw error
 }
 
-export async function cspResolve(p: { cspId: string; outcome: 'expired' | 'closed' | 'assigned'; price?: number | null; on: string }) {
+/** `contracts` closes only part of the sale (it is split in two first); leave it out to
+ * close all of it. Only sent when given, so it needs migration 20261119020000 only then. */
+export async function cspResolve(p: { cspId: string; outcome: 'expired' | 'closed' | 'assigned'; price?: number | null; on: string; contracts?: number }) {
   const { error } = await supabase.rpc('csp_resolve', {
     p_csp: p.cspId,
     p_outcome: p.outcome,
     p_price: p.price ?? null,
     p_on: p.on,
+    ...(p.contracts != null ? { p_contracts: p.contracts } : {}),
   })
-  if (error) throw error
+  if (error) throw needsUpdate(error, p.contracts != null, 'Closing part of a position')
 }
 
 // ---------------------------------------------------------------------------
@@ -360,11 +387,11 @@ export async function deleteDividendInfo(symbol: string) {
 
 /** Dividends actually received (recorded with the Dividend cash action) since a date. */
 export async function fetchDividendsReceived(since: string, portfolioId?: string): Promise<PortfolioActivity[]> {
-  let q = supabase.from('portfolio_activity').select('*').eq('kind', 'dividend').is('voided_at', null).gte('occurred_on', since).order('occurred_on')
-  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
-  const { data, error } = await q
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) => {
+    let q = supabase.from('portfolio_activity').select('*').eq('kind', 'dividend').is('voided_at', null).gte('occurred_on', since).order('occurred_on').order('id')
+    if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+    return q.range(from, to)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -372,11 +399,11 @@ export async function fetchDividendsReceived(since: string, portfolioId?: string
 // ---------------------------------------------------------------------------
 
 export async function fetchOptions(portfolioId?: string): Promise<OptionPosition[]> {
-  let q = supabase.from('option_positions').select('*').order('expiration')
-  if (portfolioId) q = q.eq('portfolio_id', portfolioId)
-  const { data, error } = await q
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) => {
+    let q = supabase.from('option_positions').select('*').order('expiration').order('id')
+    if (portfolioId) q = q.eq('portfolio_id', portfolioId)
+    return q.range(from, to)
+  })
 }
 
 export async function setOptionMark(id: string, mark: number | null) {
@@ -411,14 +438,23 @@ export async function optionOpen(p: {
   if (error) throw error
 }
 
-export async function optionClose(p: { optionId: string; outcome: 'closed' | 'expired' | 'exercised' | 'assigned'; price?: number | null; on: string }) {
+/** `contracts` closes only part of the purchase (it is split in two first); leave it out
+ * to close all of it. Only sent when given, so it needs migration 20261119020000 only then. */
+export async function optionClose(p: {
+  optionId: string
+  outcome: 'closed' | 'expired' | 'exercised' | 'assigned'
+  price?: number | null
+  on: string
+  contracts?: number
+}) {
   const { error } = await supabase.rpc('option_close', {
     p_option: p.optionId,
     p_outcome: p.outcome,
     p_price: p.price ?? null,
     p_on: p.on,
+    ...(p.contracts != null ? { p_contracts: p.contracts } : {}),
   })
-  if (error) throw error
+  if (error) throw needsUpdate(error, p.contracts != null, 'Closing part of a position')
 }
 
 // ---------------------------------------------------------------------------
@@ -487,12 +523,13 @@ export async function undoPositionLast(p: { optionId?: string; cspId?: string })
 
 /** Payments marked paid. Empty (not an error) until the installments migration is applied. */
 export async function fetchInstallmentPayments(): Promise<InstallmentPayment[]> {
-  const { data, error } = await supabase.from('installment_payments').select('*').order('month')
-  if (error) {
+  try {
+    return await fetchAllRows((from, to) => supabase.from('installment_payments').select('*').order('month').order('id').range(from, to))
+  } catch (e) {
+    const error = e as { code?: string; message: string }
     if (error.code === '42P01' || /installment_payments/.test(error.message)) return []
-    throw error
+    throw e
   }
-  return data ?? []
 }
 
 export async function markInstallmentPaid(userId: string, p: { accountId: string; month: string; amount: number; paidOn: string }) {
@@ -689,13 +726,15 @@ export async function setCloseFromMonth(userId: string, month: string) {
 
 /** Money in/out of every portfolio (activity rows that carry an external flow), for cash flow. */
 export async function fetchExternalFlows(): Promise<Pick<PortfolioActivity, 'portfolio_id' | 'kind' | 'external_flow' | 'occurred_on'>[]> {
-  const { data, error } = await supabase
-    .from('portfolio_activity')
-    .select('portfolio_id, kind, external_flow, occurred_on')
-    .neq('external_flow', 0)
-    .is('voided_at', null)
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) =>
+    supabase
+      .from('portfolio_activity')
+      .select('portfolio_id, kind, external_flow, occurred_on')
+      .neq('external_flow', 0)
+      .is('voided_at', null)
+      .order('id')
+      .range(from, to),
+  )
 }
 
 // --- Month-end close -------------------------------------------------------------------------

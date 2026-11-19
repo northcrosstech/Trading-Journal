@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { fetchAllRows } from './paging'
 import type { ReviewChecklist } from './reviewChecks'
 import type {
   Trade,
@@ -401,20 +402,20 @@ const TRADE_WITH_DETAILS_SELECT =
  * only need the raw trade rows. `accountId` is the account switcher's selection:
  * omit/null/undefined for "All accounts" (no filter). */
 export async function fetchTrades(accountId?: string | null): Promise<Trade[]> {
-  let query = supabase.from('trades').select('*').order('first_in_at', { ascending: true })
-  if (accountId) query = query.eq('account_id', accountId)
-  const { data, error } = await query
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) => {
+    let query = supabase.from('trades').select('*').order('first_in_at', { ascending: true }).order('id')
+    if (accountId) query = query.eq('account_id', accountId)
+    return query.range(from, to)
+  })
 }
 
 export async function fetchTradesWithDetails(accountId?: string | null): Promise<TradeWithDetails[]> {
-  let query = supabase.from('trades').select(TRADE_WITH_DETAILS_SELECT).order('first_in_at', { ascending: false })
-  if (accountId) query = query.eq('account_id', accountId)
-  const { data, error } = await query
-
-  if (error) throw error
-  return (data ?? []) as unknown as TradeWithDetails[]
+  const rows = await fetchAllRows((from, to) => {
+    let query = supabase.from('trades').select(TRADE_WITH_DETAILS_SELECT).order('first_in_at', { ascending: false }).order('id')
+    if (accountId) query = query.eq('account_id', accountId)
+    return query.range(from, to)
+  })
+  return rows as unknown as TradeWithDetails[]
 }
 
 export async function fetchTradeWithDetails(tradeId: string): Promise<TradeWithDetails | null> {
@@ -558,9 +559,7 @@ export async function fetchDailyJournal(entryDate: string): Promise<DailyJournal
 }
 
 export async function fetchAllDailyJournal(): Promise<DailyJournal[]> {
-  const { data, error } = await supabase.from('daily_journal').select('*')
-  if (error) throw error
-  return data ?? []
+  return fetchAllRows((from, to) => supabase.from('daily_journal').select('*').order('id').range(from, to))
 }
 
 export async function upsertDailyJournal(
@@ -622,9 +621,8 @@ export async function fetchDailyPlan(planDate: string): Promise<DailyPlanWithPla
 }
 
 export async function fetchAllDailyPlans(): Promise<DailyPlanWithPlaybooks[]> {
-  const { data, error } = await supabase.from('daily_plans').select(DAILY_PLAN_WITH_PLAYBOOKS_SELECT)
-  if (error) throw error
-  return (data ?? []) as unknown as DailyPlanWithPlaybooks[]
+  const rows = await fetchAllRows((from, to) => supabase.from('daily_plans').select(DAILY_PLAN_WITH_PLAYBOOKS_SELECT).order('id').range(from, to))
+  return rows as unknown as DailyPlanWithPlaybooks[]
 }
 
 /** Upserts the plan row and returns it (with its id) so the caller can then set
