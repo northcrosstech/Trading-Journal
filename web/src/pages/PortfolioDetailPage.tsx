@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { Archive, ArchiveRestore, Pencil, Plus, Wallet } from 'lucide-react'
-import type { CspPosition, Holding, OptionPosition, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind, TickerThesisRow } from '../lib/database.types'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Archive, ArchiveRestore, ChevronDown, Pencil, Plus, Wallet } from 'lucide-react'
+import type { AuditProblem, CspPosition, Holding, OptionPosition, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind, TickerThesisRow } from '../lib/database.types'
 import {
   fetchActivity,
   fetchAllocationTolerance,
+  fetchAuditProblems,
   fetchCsps,
   fetchDailyValues,
   fetchHoldings,
@@ -36,7 +37,14 @@ import { useDialog } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
 import { AllocationDonut, ValueHistoryChart } from '../components/WealthCharts'
 import { Kpi, ReturnsRow } from '../components/WealthBits'
-import { PortfolioActions, type TradeTab } from '../components/PortfolioActions'
+import { PortfolioActions } from '../components/PortfolioActions'
+import { LOG_TITLE, type LogAction } from '../lib/logActions'
+import { contractLabel, daysTo, openContractLines } from '../lib/optionLines'
+import { CHECK_LABEL } from '../lib/healthCheck'
+import { useUrlState } from '../lib/useUrlState'
+import { DropMenu } from '../components/DropMenu'
+import { AttentionButton, AttentionStrip, type AttentionItem } from '../components/AttentionStrip'
+import type { OptionFormInitial } from '../components/OptionTradeForm'
 import { DividendsCard } from '../components/DividendsCard'
 import { SortTh } from '../components/SortTh'
 import { sortRows, useSort } from '../lib/useSort'
@@ -44,7 +52,7 @@ import { GetPricesButton } from '../components/GetPricesButton'
 import { OptionsCard } from '../components/OptionsCard'
 import { ActivityTable } from '../components/ActivityTable'
 import { ResearchPills } from '../components/ResearchBits'
-import { QuickTrade } from '../components/QuickTrade'
+import { QuickTrade, type QuickLine } from '../components/QuickTrade'
 import { PlanNotesCard, PositionPlanCard, reviewDue } from '../components/PositionPlan'
 import { comparePlan, planActions, type PlanAction, type PlanTarget } from '../lib/positionPlan'
 import { ResearchDrawer } from '../components/ResearchDrawer'
@@ -59,11 +67,14 @@ import { Tabs } from '../components/ui/Tabs'
 import { Drawer } from '../components/ui/Drawer'
 import { EmptyState } from '../components/ui/EmptyState'
 
-type View = 'positions' | 'plan' | 'performance' | 'dividends' | 'activity'
+type View = 'positions' | 'plan' | 'performance' | 'activity'
+// Dividends used to be a tab of its own; old links to it land on Performance, where it lives now.
+const TABS_IN_LINK = ['positions', 'plan', 'performance', 'activity', 'dividends'] as const
 
 /** Inline manual price for a holding -- for funds with no public ticker (many 401k funds).
- * Shares and average cost only change through Activity entries (Buy, Sell, Add existing,
- * Split...), so the holding always matches its history and cash. Enter saves, Esc cancels. */
+ * Shares and average cost only change through Activity entries (Buy, Sell, Shares I already
+ * own, Stock split...), so the holding always matches its history and cash. Enter in the
+ * field saves, Esc cancels. */
 function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; onSaved: () => void; onCancel: () => void }) {
   const [manual, setManual] = useState(h.manual_price !== null ? String(Number(h.manual_price)) : '')
   const [saving, setSaving] = useState(false)
@@ -84,7 +95,8 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') save()
+    // Enter on Cancel must cancel, not save: only the field itself saves.
+    if (e.key === 'Enter' && e.target instanceof HTMLInputElement) save()
     else if (e.key === 'Escape') onCancel()
   }
 
@@ -112,7 +124,7 @@ function HoldingEditRow({ holding: h, onSaved, onCancel }: { holding: Holding; o
           {error ? (
             <span className="text-red-400">{error}</span>
           ) : (
-            'For funds without a public ticker; leave blank to use the daily close. Shares and average cost come from Activity — to fix them, edit the entry there, or use Trade → Split for a stock split.'
+            'For funds without a public ticker; leave blank to use the daily close. Shares and average cost come from Activity — to fix them, edit the entry there, or use Log → Stock split for a stock split.'
           )}
         </p>
       </td>
@@ -147,10 +159,19 @@ const HOLDING_SORT_KEYS = ['symbol', 'qty', 'avgCost', 'price', 'fair', 'value',
 // Text sorts A→Z first; fair value (price ÷ fair value) sorts cheapest first.
 const HOLDING_ASC_FIRST = ['symbol', 'fair'] as const
 
+/** A table row that opens something: Enter or Space on the row itself does what a click does.
+ * Keys pressed on a button inside the row are left to that button. */
+const rowKeys = (open: () => void) => (e: React.KeyboardEvent) => {
+  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+  e.preventDefault()
+  open()
+}
+const ROW_FOCUS = 'focus-visible:bg-white/3 focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--accent)'
+
 /** Holdings, with the quick trade form opening under the row you click (or at the top for a
- * new ticker). `trading` is the open form's ticker: '' = new, null = closed. With a position
- * plan, each row shows what to buy or trim to get back on plan, and planned tickers you don't
- * own yet follow at the bottom. */
+ * new ticker or several lines). `trading` is the open form's ticker: '' = new, null = closed.
+ * With a position plan, each row shows what to buy or trim to get back on plan, and planned
+ * tickers you don't own yet follow at the bottom. */
 function HoldingsTable({
   views,
   total,
@@ -158,17 +179,13 @@ function HoldingsTable({
   research,
   onResearch,
   onSaved,
-  portfolioId,
-  cash,
-  priceOf,
   trading,
   onTrading,
-  onTraded,
+  renderTrade,
   targets,
   theses,
   actions,
   offOnly,
-  preset,
 }: {
   views: HoldingView[]
   total: number
@@ -176,19 +193,16 @@ function HoldingsTable({
   research: Map<string, Research>
   onResearch: (symbol: string) => void
   onSaved: () => void
-  portfolioId: string
-  cash: number
-  priceOf: (symbol: string) => number | null
   trading: string | null
   onTrading: (symbol: string | null, preset?: TradePreset) => void
-  onTraded: (message: string) => void
+  /** The quick trade form for the row it opens under. */
+  renderTrade: (symbol: string) => ReactNode
   /** Plan target % by ticker (empty = no plan). */
   targets: Map<string, number>
   theses: Map<string, TickerThesisRow>
   /** What to do per ticker to get back on plan; null = no plan. */
   actions: Map<string, PlanAction> | null
   offOnly: boolean
-  preset: TradePreset | null
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const { state: sort, toggle: onSort } = useSort('holdings', HOLDING_SORT_KEYS, HOLDING_ASC_FIRST)
@@ -219,18 +233,7 @@ function HoldingsTable({
   const tradeRow = (symbol: string) => (
     <tr key={`trade-${symbol}`} className="border-b border-(--border) bg-(--accent-soft)/40">
       <td colSpan={cols} className="px-5 py-3">
-        <QuickTrade
-          key={`${symbol}-${preset?.side ?? ''}-${preset?.qty ?? ''}`}
-          portfolioId={portfolioId}
-          views={views}
-          priceOf={priceOf}
-          cash={cash}
-          symbol={symbol}
-          side={preset?.side}
-          qty={preset?.qty}
-          onDone={onTraded}
-          onCancel={() => onTrading(null)}
-        />
+        {renderTrade(symbol)}
       </td>
     </tr>
   )
@@ -273,8 +276,10 @@ function HoldingsTable({
               <tr
                 key={v.holding.id}
                 onClick={() => onTrading(trading === v.holding.symbol ? null : v.holding.symbol)}
+                tabIndex={0}
+                onKeyDown={rowKeys(() => onTrading(trading === v.holding.symbol ? null : v.holding.symbol))}
                 title={`Log a buy or sale of ${v.holding.symbol}`}
-                className={`group cursor-pointer border-b border-(--border) transition last:border-0 hover:bg-white/2 ${trading === v.holding.symbol ? 'bg-white/3' : ''}`}
+                className={`group cursor-pointer border-b border-(--border) transition last:border-0 hover:bg-white/2 ${ROW_FOCUS} ${trading === v.holding.symbol ? 'bg-white/3' : ''}`}
               >
                 <td className="px-5 py-3 font-semibold text-white">
                   {v.holding.symbol}
@@ -335,6 +340,7 @@ function HoldingsTable({
                       setEditingId(v.holding.id)
                     }}
                     title={`Manual price for ${v.holding.symbol}`}
+                    aria-label={`Manual price for ${v.holding.symbol}`}
                     className="rounded-md p-1.5 text-neutral-600 transition hover:bg-(--card-raised) hover:text-white group-hover:text-neutral-300"
                   >
                     <Pencil size={14} />
@@ -352,7 +358,14 @@ function HoldingsTable({
             </tr>
           )}
           {notOwned.flatMap((a) => [
-            <tr key={`plan-${a.symbol}`} onClick={() => trade(a)} title={`Log a buy of ${a.symbol}`} className="cursor-pointer border-b border-(--border) last:border-0 hover:bg-white/2">
+            <tr
+              key={`plan-${a.symbol}`}
+              onClick={() => trade(a)}
+              tabIndex={0}
+              onKeyDown={rowKeys(() => trade(a))}
+              title={`Log a buy of ${a.symbol}`}
+              className={`cursor-pointer border-b border-(--border) last:border-0 hover:bg-white/2 ${ROW_FOCUS}`}
+            >
               <td className="px-5 py-3 font-semibold text-white">
                 {a.symbol}
                 <div className="font-normal sm:hidden">
@@ -402,11 +415,24 @@ export function PortfolioDetailPage() {
   const [values, setValues] = useState<PortfolioDailyValue[]>([])
   const [activity, setActivity] = useState<PortfolioActivity[]>([])
   const [prices, setPrices] = useState<Map<string, SymbolPrice>>(new Map())
+  // Health check problems for this portfolio; empty when all is well or the check isn't set up.
+  const [problems, setProblems] = useState<AuditProblem[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [view, setView] = useState<View>('positions')
-  const [trade, setTrade] = useState<TradeTab | null>(null)
+  // The tab lives in the link (?tab=plan), so Back, refresh and links from other pages land on it.
+  const [tab, setTab] = useUrlState('tab', 'positions', TABS_IN_LINK)
+  const view: View = tab === 'dividends' ? 'performance' : tab
+  const [params, setParams] = useSearchParams()
+  // The form open in the drawer (from the Log menu), and the contract an option form starts on.
+  const [drawer, setDrawer] = useState<LogAction | null>(null)
+  const [optionInitial, setOptionInitial] = useState<OptionFormInitial | undefined>(undefined)
+  // The quick buy/sell form: the row it is open under ('' = at the top, null = closed), the
+  // lines it starts with, and a number that changes each time it opens so it starts fresh.
   const [trading, setTrading] = useState<string | null>(null)
-  const [preset, setPreset] = useState<TradePreset | null>(null)
+  const [preset, setPreset] = useState<QuickLine[] | null>(null)
+  const [formKey, setFormKey] = useState(0)
+  // True once something was typed into the quick form, so closing it asks first.
+  const dirty = useRef(false)
+  const [focusLine, setFocusLine] = useState<{ key: string } | null>(null)
   // "Off plan only" on the holdings table, remembered per browser.
   const [offOnly, setOffOnly] = useState(() => {
     try {
@@ -424,10 +450,13 @@ export function PortfolioDetailPage() {
       }
       return !v
     })
-  const openTrade = (symbol: string | null, p?: TradePreset) => {
+  /** Opens (or, with null, closes) the quick form without asking -- callers check first. */
+  const showTrade = useCallback((symbol: string | null, lines?: QuickLine[]) => {
+    dirty.current = false
     setTrading(symbol)
-    setPreset(p ?? null)
-  }
+    setPreset(lines ?? null)
+    setFormKey((k) => k + 1)
+  }, [])
   const [plan, setPlan] = useState<PlanTarget[]>([])
   const [tolerance, setTolerance] = useState(5)
   const [theses, setTheses] = useState<Map<string, TickerThesisRow>>(new Map())
@@ -472,11 +501,43 @@ export function PortfolioDetailPage() {
         setPortfolio(ps.find((p) => p.id === portfolioId) ?? null)
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    // On its own, so a slow or missing health check never holds the page up.
+    fetchAuditProblems()
+      .then((all) => setProblems((all ?? []).filter((x) => x.portfolio_id === portfolioId)))
+      .catch(() => setProblems([]))
   }, [portfolioId])
   useEffect(load, [load])
 
+  // ?log=trade|cash|option (from the sidebar's Log shortcut) opens that form once. The
+  // parameter is then taken out of the link, so a refresh doesn't open it again.
+  const logParam = params.get('log')
+  const loaded = portfolio != null
+  useEffect(() => {
+    if (!logParam || !loaded) return
+    if (logParam === 'trade') {
+      // A form with lines already typed stays as it is.
+      if (!dirty.current) showTrade('')
+    } else if (logParam === 'cash') setDrawer('deposit')
+    else if (logParam === 'option') {
+      setOptionInitial(undefined)
+      setDrawer('option')
+    }
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('log')
+        // The quick form is on the Positions tab.
+        if (logParam === 'trade') next.delete('tab')
+        return next
+      },
+      { replace: true },
+    )
+  }, [logParam, loaded, showTrade, setParams])
+
   const openCsps = useMemo(() => csps.filter((c) => c.status === 'open'), [csps])
   const openOptions = useMemo(() => options.filter((o) => o.status === 'open'), [options])
+  // Open options as the Options card shows them: one line per contract, however many lots.
+  const optionLines = useMemo(() => openContractLines(options, csps), [options, csps])
   const snap = useMemo(
     () => (portfolio ? portfolioSnapshot([portfolio], holdings, openCsps, prices, openOptions) : null),
     [portfolio, holdings, openCsps, prices, openOptions],
@@ -579,10 +640,54 @@ export function PortfolioDetailPage() {
     }
   }
 
+  /** False when lines were typed into the quick form and the user chose to keep them. */
+  const okToDiscard = async () =>
+    !dirty.current ||
+    (await dialog.confirm({
+      title: 'Discard what you typed?',
+      message: 'The trades in the form haven’t been logged yet.',
+      confirmLabel: 'Discard',
+      tone: 'warning',
+    }))
+  /** Opens the quick form under a row ('' = at the top) or closes it (null), asking first if
+   * that would drop typed lines. */
+  const openTrade = async (symbol: string | null, lines?: QuickLine[]) => {
+    if (!(await okToDiscard())) return
+    showTrade(symbol, lines)
+    if (symbol !== null && view !== 'positions') setTab('positions')
+  }
+  /** "Buy or sell" / "New ticker": a blank form at the top, unless one is open there with
+   * lines typed -- that one is what the user wants. */
+  const startTrade = () => {
+    if (trading === '' && dirty.current) return
+    openTrade('')
+  }
+  const changeView = async (v: View) => {
+    // Leaving Positions takes the quick form down with it.
+    if (v !== 'positions' && trading !== null) {
+      if (!(await okToDiscard())) return
+      showTrade(null)
+    }
+    if (v !== 'positions') setFocusLine(null)
+    setTab(v)
+  }
+  const openDrawer = (action: LogAction, initial?: OptionFormInitial) => {
+    setOptionInitial(initial)
+    setDrawer(action)
+  }
+  const showOptionLine = (key: string) => {
+    setFocusLine({ key })
+    if (view !== 'positions') setTab('positions')
+  }
+
   const tradeDone = (message: string) => {
-    setTrade(null)
-    setTrading(null)
-    setPreset(null)
+    showTrade(null)
+    toast(message)
+    load()
+  }
+  // A drawer form saving leaves the quick form (and anything typed in it) alone.
+  const drawerDone = (message: string) => {
+    setDrawer(null)
     toast(message)
     load()
   }
@@ -596,6 +701,94 @@ export function PortfolioDetailPage() {
     buy: [...actions.values()].filter((a) => a.kind === 'buy').reduce((s, a) => s + a.dollars, 0),
     trim: [...actions.values()].filter((a) => a.kind === 'trim').reduce((s, a) => s + a.dollars, 0),
   }
+  // "Log all": the suggestions the Vs plan column shows, as form lines, sells first so the
+  // cash is there for the buys. A ticker with no price yet has no share count and is left out.
+  const suggested = (kind: 'trim' | 'buy'): QuickLine[] =>
+    [...(actions?.values() ?? [])]
+      .filter((a) => a.kind === kind && a.shares !== null)
+      .map((a) => ({ symbol: a.symbol, side: kind === 'trim' ? 'sell' : 'buy', qty: a.shares as number }))
+  const logAllLines = [...suggested('trim'), ...suggested('buy')]
+  const logAll = () => openTrade('', logAllLines)
+
+  const today = centralDateStr(new Date())
+  const expiring = optionLines.filter((l) => daysTo(l.expiration, today) <= 7)
+  const attention: AttentionItem[] = []
+  if (planSummary && planSummary.off > 0)
+    attention.push({
+      key: 'plan',
+      text: (
+        <>
+          {planSummary.off} off plan
+          {planSummary.buy > 0 && ` · buy ${currency(planSummary.buy)}`}
+          {planSummary.trim > 0 && ` · trim ${currency(planSummary.trim)}`}
+        </>
+      ),
+      action: logAllLines.length > 0 ? <AttentionButton onClick={logAll}>Log all</AttentionButton> : undefined,
+    })
+  // A long list of expiring contracts would bury the rest: the first few, then one line for the others.
+  for (const [i, l] of expiring.entries()) {
+    if (i === 3 && expiring.length > 4) {
+      attention.push({
+        key: 'options-more',
+        text: `${expiring.length - 3} more options expire within 7 days or have already expired`,
+        action: <AttentionButton onClick={() => showOptionLine(l.key)}>Show</AttentionButton>,
+      })
+      break
+    }
+    const days = daysTo(l.expiration, today)
+    const name = `${contractLabel(l.symbol, l.strike, l.optionType)} ×${l.contracts}`
+    attention.push({
+      key: `option-${l.key}`,
+      text:
+        days < 0
+          ? `${name} expired ${dateFmt(l.expiration)}. Record what happened: expired, assigned or closed.`
+          : days === 0
+            ? `${name} expires today`
+            : `${name} expires in ${days} day${days === 1 ? '' : 's'} (${dateFmt(l.expiration)})`,
+      action: <AttentionButton onClick={() => showOptionLine(l.key)}>Show</AttentionButton>,
+    })
+  }
+  if (pending.length > 0)
+    attention.push({
+      key: 'prices',
+      text: (
+        <>
+          Waiting for a first price: <span className="font-medium">{pending.join(', ')}</span>. Until then they’re valued at average cost.
+        </>
+      ),
+      action: <GetPricesButton symbols={pending} onDone={load} />,
+    })
+  for (const [i, x] of problems.entries())
+    attention.push({
+      key: `health-${x.check_name}-${x.item ?? ''}-${i}`,
+      text: (
+        <>
+          Health check · {CHECK_LABEL[x.check_name] ?? x.check_name}
+          {x.item && ` · ${x.item}`}: {x.detail}
+        </>
+      ),
+      detail: x.fix,
+      action: view !== 'activity' ? <AttentionButton onClick={() => changeView('activity')}>Open Activity</AttentionButton> : undefined,
+    })
+
+  const quickForm = (symbol: string) => (
+    <QuickTrade
+      key={formKey}
+      portfolioId={p.id}
+      views={snap.holdings}
+      priceOf={priceOf}
+      cash={snap.cash}
+      setAside={snap.collateral}
+      symbol={symbol}
+      preset={preset}
+      onDone={tradeDone}
+      onCancel={() => showTrade(null)}
+      onEscape={() => openTrade(null)}
+      onDirtyChange={(d) => {
+        dirty.current = d
+      }}
+    />
+  )
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -616,21 +809,39 @@ export function PortfolioDetailPage() {
             <Button variant="ghost" icon={p.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />} onClick={toggleArchive}>
               {p.archived ? 'Unarchive' : 'Archive'}
             </Button>
-            <Button variant="primary" icon={<Plus size={16} />} onClick={() => setTrade('buy')}>
-              Trade
-            </Button>
+            <DropMenu
+              variant="primary"
+              icon={<Plus size={16} />}
+              groups={[
+                { items: [{ label: 'Buy or sell', hint: 'Shares, one trade or several', onClick: startTrade }] },
+                {
+                  label: 'Cash',
+                  items: [
+                    { label: 'Deposit', onClick: () => openDrawer('deposit') },
+                    { label: 'Withdraw', onClick: () => openDrawer('withdrawal') },
+                    { label: 'Dividend', onClick: () => openDrawer('dividend') },
+                    { label: 'Match broker balance', hint: 'Set cash to what your broker shows', onClick: () => openDrawer('balance') },
+                  ],
+                },
+                { items: [{ label: 'Option', hint: 'Buy a call or put, or sell one', onClick: () => openDrawer('option') }] },
+                {
+                  label: 'More',
+                  items: [
+                    { label: 'Shares I already own', hint: 'Add them without spending cash', onClick: () => openDrawer('existing') },
+                    { label: 'Transfer', hint: 'To another portfolio or broker', onClick: () => openDrawer('transfer') },
+                    { label: 'Stock split', onClick: () => openDrawer('split') },
+                  ],
+                },
+              ]}
+            >
+              Log
+              <ChevronDown size={14} className="-mr-1 opacity-80" />
+            </DropMenu>
           </>
         }
       />
 
-      {pending.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/8 px-4 py-3 text-sm text-amber-200">
-          <span>
-            Waiting for a first price: <span className="font-medium">{pending.join(', ')}</span>. Until then they’re valued at average cost.
-          </span>
-          <GetPricesButton symbols={pending} onDone={load} />
-        </div>
-      )}
+      <AttentionStrip items={attention} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Kpi
@@ -656,23 +867,33 @@ export function PortfolioDetailPage() {
         <Kpi label="Realized gain" value={signed(realized)} tone={realized} sub="sales, options and puts" />
         {margin ? (
           <div className="col-span-2 lg:col-span-1">
-            <StatCardMargin used={-snap.cash} leverage={leverage} />
+            <CashCard
+              label="Margin used"
+              value={currency(-snap.cash)}
+              sub={leverage !== null ? `${leverage.toFixed(2)}× leverage` : 'borrowed from your broker'}
+              warning
+              onClick={() => openDrawer('deposit')}
+            />
           </div>
         ) : (
-          <Kpi label="Cash" value={currency(snap.cash)} sub={snap.collateral > 0 ? `${currency(snap.cashAvailable)} free after puts` : 'available to invest'} />
+          <CashCard
+            label="Cash"
+            value={currency(snap.cash)}
+            sub={snap.collateral > 0 ? `${currency(snap.cashAvailable)} free after puts` : 'available to invest'}
+            onClick={() => openDrawer('deposit')}
+          />
         )}
       </div>
 
       <Tabs<View>
         tabs={[
-          { value: 'positions', label: 'Positions', count: snap.holdings.length + openOptions.length + openCsps.length },
+          { value: 'positions', label: 'Positions', count: snap.holdings.length + optionLines.length },
           { value: 'plan', label: 'Plan' },
           { value: 'performance', label: 'Performance' },
-          { value: 'dividends', label: 'Dividends' },
           { value: 'activity', label: 'Activity', count: activity.filter((a) => a.voided_at === null).length },
         ]}
         value={view}
-        onChange={setView}
+        onChange={changeView}
       />
 
       {view === 'positions' && (
@@ -691,6 +912,19 @@ export function PortfolioDetailPage() {
                         {` · ${planSummary.off} off plan`}
                         {planSummary.buy > 0 && ` · buy ${currency(planSummary.buy)}`}
                         {planSummary.trim > 0 && ` · trim ${currency(planSummary.trim)}`}
+                        {logAllLines.length > 0 && (
+                          <>
+                            {' · '}
+                            <button
+                              type="button"
+                              onClick={logAll}
+                              title="Opens the form with one line per suggested buy or trim, sells first. Check the prices, then press Log."
+                              className="rounded font-medium text-(--accent-text) underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                            >
+                              Log all
+                            </button>
+                          </>
+                        )}
                       </span>
                     ))}
                   {` · click a row to log a buy or sale${lastEntry ? ` · last entry ${dateFmt(centralDateStr(new Date(lastEntry)))}` : ''}`}
@@ -699,30 +933,40 @@ export function PortfolioDetailPage() {
             }
             flush
             actions={
-              <>
-                {actions && snap.holdings.length > 0 && (
-                  <Button size="sm" variant={offOnly ? 'primary' : 'ghost'} onClick={toggleOffOnly} aria-pressed={offOnly}>
-                    Off plan only
+              snap.holdings.length > 0 ? (
+                <>
+                  {actions && (
+                    <Button size="sm" variant={offOnly ? 'primary' : 'ghost'} onClick={toggleOffOnly} aria-pressed={offOnly}>
+                      Off plan only
+                    </Button>
+                  )}
+                  <Button size="sm" icon={<Plus size={14} />} onClick={startTrade}>
+                    New ticker
                   </Button>
-                )}
-                <Button size="sm" icon={<Plus size={14} />} onClick={() => (snap.holdings.length > 0 ? openTrade('') : setTrade('existing'))}>
-                  {snap.holdings.length > 0 ? 'New ticker' : 'Add shares'}
-                </Button>
-              </>
+                </>
+              ) : undefined
             }
           >
             {snap.holdings.length === 0 ? (
-              <EmptyState
-                icon={<Wallet size={20} />}
-                title="No holdings yet"
-                action={
-                  <Button variant="primary" size="sm" onClick={() => setTrade('existing')}>
-                    Add shares you own
-                  </Button>
-                }
-              >
-                Use “Add existing” for shares you already hold, or “Buy” for new purchases from this portfolio’s cash.
-              </EmptyState>
+              <>
+                {trading !== null && <div className="border-y border-(--border) bg-(--accent-soft)/40 px-5 py-3">{quickForm(trading)}</div>}
+                <EmptyState
+                  icon={<Wallet size={20} />}
+                  title="No holdings yet"
+                  action={
+                    <span className="flex flex-wrap justify-center gap-2">
+                      <Button variant="primary" size="sm" onClick={() => openDrawer('existing')}>
+                        Shares I already own
+                      </Button>
+                      <Button size="sm" onClick={startTrade}>
+                        Buy or sell
+                      </Button>
+                    </span>
+                  }
+                >
+                  Add shares you already hold without touching cash, or log a purchase paid from this portfolio’s cash.
+                </EmptyState>
+              </>
             ) : (
               <HoldingsTable
                 views={snap.holdings}
@@ -731,21 +975,25 @@ export function PortfolioDetailPage() {
                 research={research.rows}
                 onResearch={setResearchOpen}
                 onSaved={load}
-                portfolioId={p.id}
-                cash={snap.cash}
-                priceOf={priceOf}
                 trading={trading}
-                onTrading={openTrade}
-                onTraded={tradeDone}
+                onTrading={(symbol, pre) => openTrade(symbol, symbol !== null && pre ? [{ symbol, side: pre.side, qty: pre.qty }] : undefined)}
+                renderTrade={quickForm}
                 targets={planTargets}
                 theses={theses}
                 actions={actions}
                 offOnly={offOnly}
-                preset={preset}
               />
             )}
           </Card>
-          <OptionsCard options={options} csps={csps} prices={prices} onChanged={load} onAdd={() => setTrade('option')} />
+          <OptionsCard
+            options={options}
+            csps={csps}
+            prices={prices}
+            holdings={holdings}
+            onChanged={load}
+            onAdd={(initial) => openDrawer('option', initial)}
+            focus={focusLine}
+          />
         </div>
       )}
 
@@ -762,6 +1010,7 @@ export function PortfolioDetailPage() {
           <Card title="Returns">
             <ReturnsRow series={series} />
           </Card>
+          <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} showEmpty />
         </div>
       )}
 
@@ -784,8 +1033,6 @@ export function PortfolioDetailPage() {
         </div>
       )}
 
-      {view === 'dividends' && <DividendsCard holdings={holdings} prices={prices} holdingsValue={snap.holdingsValue} portfolioId={p.id} onRecorded={load} />}
-
       {view === 'activity' && (
         <Card flush title="Activity" subtitle="Every trade, cash move and option event — use ⋯ to edit or undo a mistake">
           <ActivityTable activity={activity} onChanged={load} />
@@ -801,19 +1048,26 @@ export function PortfolioDetailPage() {
         onThesisSaved={loadTheses}
       />
 
-      <Drawer open={trade !== null} onClose={() => setTrade(null)} title={`Trade · ${p.name}`} subtitle={`Cash available ${currency(snap.cashAvailable)}`}>
-        {trade !== null && (
+      <Drawer
+        open={drawer !== null}
+        onClose={() => setDrawer(null)}
+        title={drawer !== null ? `${LOG_TITLE[drawer]} · ${p.name}` : ''}
+        subtitle={`Cash available ${currency(snap.cashAvailable)}`}
+      >
+        {drawer !== null && (
           <PortfolioActions
-            key={trade}
+            // Deposit and Withdraw are one form, so switching between them keeps the amount.
+            key={drawer === 'deposit' || drawer === 'withdrawal' ? 'cash-move' : drawer}
             portfolioId={p.id}
             otherPortfolios={allPortfolios.filter((x) => x.id !== p.id && !x.archived)}
             holdings={holdings}
             options={options}
-            prices={prices}
             cashAvailable={snap.cashAvailable}
             cash={snap.cash}
-            initialTab={trade}
-            onDone={tradeDone}
+            action={drawer}
+            onAction={setDrawer}
+            optionInitial={optionInitial}
+            onDone={drawerDone}
           />
         )}
       </Drawer>
@@ -821,7 +1075,25 @@ export function PortfolioDetailPage() {
   )
 }
 
-/** Cash card when the portfolio is on margin (negative cash): amber, with leverage. */
-function StatCardMargin({ used, leverage }: { used: number; leverage: number | null }) {
-  return <Kpi label="Margin used" value={currency(used)} sub={leverage !== null ? `${leverage.toFixed(2)}× leverage` : 'borrowed from your broker'} warning />
+/** The Cash figure as a button: it looks like the other stat cards and opens the Deposit
+ * form (which switches to Withdraw). On margin (negative cash) it shows what is borrowed, in
+ * amber, with the leverage. */
+function CashCard({ label, value, sub, warning = false, onClick }: { label: string; value: string; sub: string; warning?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group relative block h-full w-full overflow-hidden rounded-2xl border border-(--border) bg-(--card) p-4 text-left transition hover:border-(--accent)/50 focus-visible:border-(--accent) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent-soft)"
+    >
+      <span className="block text-xs font-medium text-neutral-400">{label}</span>
+      <span className={`mt-1.5 block break-words text-lg font-semibold tracking-tight tabular-nums sm:text-2xl ${warning ? 'text-amber-300' : 'text-white'}`}>{value}</span>
+      <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-neutral-500">
+        <span className="min-w-0">{sub}</span>
+        <span className="inline-flex items-center gap-0.5 font-medium text-(--accent-text) group-hover:underline">
+          <Plus size={12} />
+          Add or withdraw
+        </span>
+      </span>
+    </button>
+  )
 }

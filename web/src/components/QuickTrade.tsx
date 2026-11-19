@@ -1,15 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import type { HoldingView } from '../lib/portfolio'
 import { signedCurrency as signed } from '../lib/portfolio'
 import { portfolioTrades, type TradeLine } from '../lib/wealthQueries'
 import { centralDateStr, currency } from '../lib/format'
 import { INPUT_SM, toneClass } from '../lib/ui'
+import { parsePastedTrades } from '../lib/pasteTrades'
 import { Button } from './ui/Button'
 
 type Side = 'buy' | 'sell'
-/** autoPrice: the price was filled in for you, so it follows the ticker until you type one. */
-type Line = { key: number; symbol: string; side: Side; qty: string; price: string; fee: string; autoPrice: boolean }
+/** A line to start the form with: the row clicked, a plan suggestion, or several of them. */
+export type QuickLine = { symbol: string; side?: Side; qty?: number }
+/** autoPrice: the price was filled in for you, so it follows the ticker until you type one.
+ * focus: the field that takes the cursor when the line appears. */
+type Line = { key: number; symbol: string; side: Side; qty: string; price: string; fee: string; autoPrice: boolean; focus: 'symbol' | 'qty' | 'price' | null }
 
 const num = (s: string) => {
   const t = s.replace(/[$,\s]/g, '')
@@ -23,44 +27,112 @@ const BOX = INPUT_SM.replace('w-full ', '')
 const priceText = (p: number | null) => (p === null ? '' : String(Number(p.toFixed(4))))
 
 /** Log buys and sells right from the holdings list: opens under the position you clicked,
- * already filled in, and "+ Add another" adds more lines. Log saves every line together --
- * or none, with the failing line marked. */
+ * already filled in, and "+ Add another" adds more lines. Rows copied from a broker or a
+ * spreadsheet can be pasted in, one line each. Log saves every line together -- or none,
+ * with the failing line marked. */
 export function QuickTrade({
   portfolioId,
   views,
   priceOf,
   cash,
+  setAside = 0,
   symbol,
-  side = 'buy',
-  qty,
+  preset,
   onDone,
   onCancel,
+  onEscape,
+  onDirtyChange,
 }: {
   portfolioId: string
   views: HoldingView[]
   /** Latest known price for a ticker (to fill in the price), null if none. */
   priceOf: (symbol: string) => number | null
   cash: number
+  /** Cash held back for open puts: buying into it is flagged, not blocked. */
+  setAside?: number
   /** The position clicked; '' = a new ticker. */
   symbol: string
-  /** Pre-filled from the plan's suggested trade. */
-  side?: Side
-  qty?: number
+  /** Lines filled in for you (the plan's suggested trades). Without it: one line for `symbol`. */
+  preset?: QuickLine[] | null
   onDone: (message: string) => void
   onCancel: () => void
+  /** Esc was pressed. Defaults to onCancel; the page uses it to ask before dropping typed lines. */
+  onEscape?: () => void
+  /** Told true once something has been typed or pasted, false when the form goes away. */
+  onDirtyChange?: (dirty: boolean) => void
 }) {
-  const [nextKey, setNextKey] = useState(1)
-  const [lines, setLines] = useState<Line[]>([{ key: 0, symbol, side, qty: qty ? String(qty) : '', price: priceText(symbol ? priceOf(symbol) : null), fee: '', autoPrice: true }])
+  const [lines, setLines] = useState<Line[]>(() => {
+    const start: QuickLine[] = preset && preset.length > 0 ? preset : [{ symbol }]
+    return start.map((p, i) => ({
+      key: i,
+      symbol: p.symbol,
+      side: p.side ?? 'buy',
+      qty: p.qty ? String(p.qty) : '',
+      price: priceText(p.symbol ? priceOf(p.symbol) : null),
+      fee: '',
+      autoPrice: true,
+      // Several suggested lines: the prices are what needs checking. One line: the first blank.
+      focus: i > 0 ? null : start.length > 1 ? 'price' : p.symbol === '' ? 'symbol' : 'qty',
+    }))
+  })
+  const nextKey = useRef(lines.length)
   const [on, setOn] = useState(centralDateStr(new Date()))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ line: number | null; message: string } | null>(null)
+  const [pasteNote, setPasteNote] = useState<string | null>(null)
+
+  const touched = useRef(false)
+  const dirtyChange = useRef(onDirtyChange)
+  useEffect(() => {
+    dirtyChange.current = onDirtyChange
+  })
+  useEffect(() => () => dirtyChange.current?.(false), [])
+  const touch = () => {
+    if (touched.current) return
+    touched.current = true
+    onDirtyChange?.(true)
+  }
 
   const held = (s: string) => views.find((v) => v.holding.symbol === s.trim().toUpperCase())?.holding
-  const update = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  const update = (key: number, patch: Partial<Line>) => {
+    touch()
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  }
 
   function addLine() {
-    setLines((ls) => [...ls, { key: nextKey, symbol: '', side: 'buy', qty: '', price: '', fee: '', autoPrice: true }])
-    setNextKey((k) => k + 1)
+    const key = nextKey.current++
+    setLines((ls) => [...ls, { key, symbol: '', side: 'buy', qty: '', price: '', fee: '', autoPrice: true, focus: 'symbol' }])
+  }
+
+  /** Rows pasted from a broker or spreadsheet become one line each. A single value (a
+   * ticker, a price) is not a row, so it pastes into the field as usual. */
+  function onPaste(e: React.ClipboardEvent) {
+    const t = e.target
+    if (!(t instanceof HTMLInputElement) || t.type === 'date') return
+    const parsed = parsePastedTrades(e.clipboardData.getData('text'))
+    if (!parsed) return
+    e.preventDefault()
+    const typedBefore = touched.current
+    touch()
+    const added: Line[] = parsed.trades.map((p, i) => ({
+      key: nextKey.current++,
+      symbol: p.symbol,
+      side: p.side,
+      qty: fmtQty(p.qty),
+      price: priceText(p.price),
+      fee: '',
+      autoPrice: false,
+      focus: i === 0 ? 'qty' : null,
+    }))
+    // Lines still waiting for a share count give way to the pasted rows: the blank ones
+    // always, the starting line too if nothing had been typed yet.
+    setLines((ls) => [...ls.filter((l) => l.qty.trim() !== '' || (typedBefore && l.symbol.trim() !== '')), ...added])
+    setError(null)
+    const n = parsed.trades.length
+    setPasteNote(
+      `Pasted ${n} ${n === 1 ? 'row' : 'rows'}: check ${n === 1 ? 'it' : 'them'} before you log.` +
+        (parsed.skipped > 0 ? ` ${parsed.skipped} ${parsed.skipped === 1 ? 'row' : 'rows'} couldn’t be read and ${parsed.skipped === 1 ? 'was' : 'were'} left out.` : ''),
+    )
   }
 
   /** Cash effect and, for a sale, the gain -- both after the fee. */
@@ -75,6 +147,8 @@ export function QuickTrade({
     return { cash: proceeds, gain: h ? proceeds - q * Number(h.avg_cost) : null }
   }
   const cashAfter = cash + lines.reduce((s, l) => s + (result(l)?.cash ?? 0), 0)
+  // Display only: what spending past the free cash means. Nothing is blocked.
+  const cashNote = cashAfter >= cash ? null : cashAfter < 0 ? 'the rest shows as margin' : cashAfter < setAside ? `uses cash set aside for puts (${currency(setAside)})` : null
 
   async function log() {
     setError(null)
@@ -108,13 +182,16 @@ export function QuickTrade({
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !busy) log()
-    else if (e.key === 'Escape') onCancel()
+    if (e.key === 'Escape') return (onEscape ?? onCancel)()
+    // Enter saves only from a field you type in: on a button it presses that button, and on
+    // the date field it belongs to the date picker.
+    const t = e.target
+    if (e.key === 'Enter' && !busy && t instanceof HTMLInputElement && t.type !== 'date') log()
   }
 
   return (
     <div className="flex flex-col gap-3" onKeyDown={onKeyDown}>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2" onPaste={onPaste}>
         {lines.map((l, i) => {
           const h = held(l.symbol)
           const r = result(l)
@@ -127,7 +204,7 @@ export function QuickTrade({
                   const s = e.target.value.toUpperCase()
                   update(l.key, { symbol: s, ...(l.autoPrice || l.price === '' ? { price: priceText(priceOf(s.trim())), autoPrice: true } : {}) })
                 }}
-                autoFocus={i > 0 || symbol === ''}
+                autoFocus={l.focus === 'symbol'}
                 placeholder="Ticker"
                 aria-label="Ticker"
                 className={`${BOX} w-24 font-semibold uppercase`}
@@ -138,6 +215,7 @@ export function QuickTrade({
                     key={s}
                     type="button"
                     onClick={() => update(l.key, { side: s })}
+                    aria-pressed={l.side === s}
                     className={`rounded-md px-2.5 py-1 font-medium transition ${l.side === s ? (s === 'buy' ? 'bg-emerald-500/20 text-emerald-200' : 'bg-red-500/20 text-red-200') : 'text-neutral-400 hover:text-white'}`}
                   >
                     {s === 'buy' ? 'Bought' : 'Sold'}
@@ -148,7 +226,7 @@ export function QuickTrade({
                 <input
                   value={l.qty}
                   onChange={(e) => update(l.key, { qty: e.target.value })}
-                  autoFocus={i === 0 && symbol !== ''}
+                  autoFocus={l.focus === 'qty'}
                   inputMode="decimal"
                   placeholder="Shares"
                   aria-label="Shares"
@@ -162,7 +240,15 @@ export function QuickTrade({
               </span>
               <label className="flex items-center gap-1 text-xs text-neutral-500">
                 @
-                <input value={l.price} onChange={(e) => update(l.key, { price: e.target.value, autoPrice: false })} inputMode="decimal" placeholder="Price" aria-label="Price per share" className={`${BOX} w-24 text-right tabular-nums`} />
+                <input
+                  value={l.price}
+                  onChange={(e) => update(l.key, { price: e.target.value, autoPrice: false })}
+                  autoFocus={l.focus === 'price'}
+                  inputMode="decimal"
+                  placeholder="Price"
+                  aria-label="Price per share"
+                  className={`${BOX} w-24 text-right tabular-nums`}
+                />
               </label>
               <label className="flex items-center gap-1 text-xs text-neutral-500">
                 fee
@@ -172,7 +258,18 @@ export function QuickTrade({
                 {r && (r.gain !== null ? <span className={toneClass(r.gain)}>{r.gain >= 0 ? 'gain' : 'loss'} {signed(r.gain)}</span> : <span className="text-neutral-400">cash {signed(r.cash)}</span>)}
               </span>
               {lines.length > 1 && (
-                <button type="button" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} className="rounded-md p-1 text-neutral-500 hover:bg-(--card-raised) hover:text-white" title="Remove this line">
+                <button
+                  type="button"
+                  onClick={() => {
+                    touch()
+                    setLines((ls) => ls.filter((x) => x.key !== l.key))
+                    // The failing line's number no longer points at the same line.
+                    setError(null)
+                  }}
+                  className="rounded-md p-1 text-neutral-500 hover:bg-(--card-raised) hover:text-white"
+                  title="Remove this line"
+                  aria-label={`Remove ${l.symbol || 'this'} line`}
+                >
                   <X size={14} />
                 </button>
               )}
@@ -183,16 +280,20 @@ export function QuickTrade({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-(--border) pt-3">
-        <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-400">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-neutral-400">
           <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={addLine}>
             Add another
           </Button>
+          <span className="text-neutral-500" title="One trade per line: ticker, shares, price. A word like “sold”, or a negative share count, marks a sale.">
+            {pasteNote ?? 'or paste rows from your broker: ticker, shares, price'}
+          </span>
           <label className="flex items-center gap-1.5">
             Date
             <input type="date" value={on} onChange={(e) => setOn(e.target.value)} className={`${BOX} w-auto`} />
           </label>
           <span className="tabular-nums">
-            Cash {currency(cash)} → <span className={cashAfter < 0 ? 'text-amber-300' : 'text-neutral-200'}>{currency(cashAfter)}</span>
+            Cash {currency(cash)} → <span className={cashAfter < 0 || cashNote ? 'text-amber-300' : 'text-neutral-200'}>{currency(cashAfter)}</span>
+            {cashNote && <span className="text-amber-300/80"> · {cashNote}</span>}
           </span>
         </div>
         <div className="flex items-center gap-2">

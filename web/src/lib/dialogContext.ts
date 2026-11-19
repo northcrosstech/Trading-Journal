@@ -30,6 +30,11 @@ export type FormOptions = {
   fields: DialogField[]
   submitLabel?: string
   tone?: 'default' | 'danger' | 'warning'
+  /** Save from inside the dialog. While it runs the button shows "Saving…"; if it throws,
+   * the dialog stays open with the message and everything typed; it closes (and `form`
+   * resolves with the values) only once this succeeds. Leave out to get the values back
+   * and save afterwards. */
+  onSubmit?: (values: Record<string, string>) => Promise<void> | void
 }
 
 export type DialogApi = {

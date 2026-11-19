@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { Lock } from 'lucide-react'
 import type { PortfolioActivity } from '../lib/database.types'
 import { deleteActivityEntry, editActivityEntry } from '../lib/wealthQueries'
 import { signedCurrency as signed } from '../lib/portfolio'
@@ -6,7 +7,9 @@ import { currency, dateFmt, priceFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
 import { parseAmount, useDialog, validators, type DialogField } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
+import { entryLocks } from '../lib/activityLocks'
 import { Menu, type MenuItem } from './ui/Menu'
+import { DropMenu } from './DropMenu'
 import { EmptyState } from './ui/EmptyState'
 import { SortTh } from './SortTh'
 import { sortRows, useSort } from '../lib/useSort'
@@ -41,7 +44,7 @@ const CASH_KINDS: Kind[] = ['deposit', 'withdrawal', 'dividend']
 const OPEN_KINDS: Kind[] = ['csp_open', 'option_buy', 'option_write']
 /** Entries that only moved cash -- undone by reversing the cash change. */
 const CASH_ONLY: Kind[] = [...CASH_KINDS, 'cash_adjust']
-/** Undone with a plain Delete (not a reopen), but not editable. */
+/** Undone with a plain Undo (not a reopen), but not editable. */
 const PLAIN_UNDO: Kind[] = [...CASH_ONLY, 'split']
 
 const qtyOf = (a: PortfolioActivity) => Number(Number(a.quantity ?? 0).toFixed(6))
@@ -76,7 +79,7 @@ function undoMessage(a: PortfolioActivity): string {
     case 'csp_open':
     case 'option_buy':
     case 'option_write':
-      return 'Deletes the position and reverses its premium.'
+      return 'Removes the position and reverses its premium.'
     default:
       return 'Reopens the position and reverses everything this did (cash, shares, gain).'
   }
@@ -86,12 +89,15 @@ const ACTIVITY_SORT_KEYS = ['date', 'event', 'details', 'cash', 'realized'] as c
 const ACTIVITY_ASC_FIRST = ['event', 'details'] as const
 
 /** Every trade, cash move and option event in a portfolio, newest first. Each entry can be
- * undone; stock and cash entries can also be edited. Both reverse the original exactly. */
+ * undone; stock and cash entries can also be edited. Both reverse the original exactly, and
+ * the undone entry stays in the history. An entry the server would refuse to change (newer
+ * entries for the same ticker depend on it) shows a lock and the reason instead. */
 export function ActivityTable({ activity, onChanged }: { activity: PortfolioActivity[]; onChanged: () => void }) {
   const dialog = useDialog()
   const toast = useToast()
   const [showUndone, setShowUndone] = useState(false)
   const undoneCount = activity.filter((a) => a.voided_at !== null).length
+  const locks = useMemo(() => entryLocks(activity), [activity])
   const { state: sort, toggle: onSort } = useSort('activity', ACTIVITY_SORT_KEYS, ACTIVITY_ASC_FIRST)
   const rows = sortRows(showUndone ? activity : activity.filter((a) => a.voided_at === null), sort, {
     date: (a) => a.occurred_on,
@@ -120,7 +126,7 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
         { name: 'quantity', label: 'Shares', type: 'number', defaultValue: String(qtyOf(a)), validate: validators.positive },
         {
           name: 'price',
-          label: a.kind === 'transfer_in' ? 'Cost per share' : 'Price per share',
+          label: a.kind === 'transfer_in' ? 'Average cost per share' : 'Price per share',
           type: 'number',
           prefix: '$',
           defaultValue: fillPrice(a) !== null ? String(Number(fillPrice(a)!.toFixed(6))) : '',
@@ -142,46 +148,45 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
       fields.push({ name: 'amount', label: 'Amount', type: 'number', prefix: '$', defaultValue: String(Math.abs(Number(a.cash_change))), validate: validators.positive })
       if (a.kind === 'dividend') fields.push({ name: 'symbol', label: 'Ticker', defaultValue: a.symbol ?? '', optional: true, hint: 'Which holding paid it (optional).' })
     }
+    // Saved from inside the dialog: if the server refuses, its reason shows there and
+    // nothing typed is lost.
     const v = await dialog.form({
       title: `Edit ${ACTIVITY_LABEL[a.kind].toLowerCase()}`,
       description: 'The original is reversed and this is saved in its place — cash, shares and average cost update to match.',
       submitLabel: 'Save changes',
       fields,
+      onSubmit: (v) =>
+        editActivityEntry({
+          activityId: a.id,
+          symbol: v.symbol ? v.symbol.toUpperCase() : null,
+          quantity: shares ? parseAmount(v.quantity) : null,
+          price: shares ? parseAmount(v.price) : null,
+          amount: shares ? null : parseAmount(v.amount),
+          on: v.on,
+          fee: v.fee ? (parseAmount(v.fee) ?? 0) : 0,
+        }),
     })
     if (!v) return
-    run(
-      editActivityEntry({
-        activityId: a.id,
-        symbol: v.symbol ? v.symbol.toUpperCase() : null,
-        quantity: shares ? parseAmount(v.quantity) : null,
-        price: shares ? parseAmount(v.price) : null,
-        amount: shares ? null : parseAmount(v.amount),
-        on: v.on,
-        fee: v.fee ? (parseAmount(v.fee) ?? 0) : 0,
-      }),
-      `${ACTIVITY_LABEL[a.kind]} updated`,
-    )
+    toast(`${ACTIVITY_LABEL[a.kind]} updated`)
+    onChanged()
   }
 
   async function undo(a: PortfolioActivity) {
-    const opening = OPEN_KINDS.includes(a.kind)
-    const closing = !opening && !SHARE_KINDS.includes(a.kind) && !PLAIN_UNDO.includes(a.kind)
+    const closing = !OPEN_KINDS.includes(a.kind) && !SHARE_KINDS.includes(a.kind) && !PLAIN_UNDO.includes(a.kind)
     const ok = await dialog.confirm({
-      title: opening ? 'Delete this position?' : closing ? 'Undo and reopen the position?' : `Delete this ${ACTIVITY_LABEL[a.kind].toLowerCase()}?`,
-      message: undoMessage(a),
-      confirmLabel: opening ? 'Delete position' : closing ? 'Undo' : 'Delete entry',
+      title: closing ? 'Undo and reopen the position?' : `Undo this ${ACTIVITY_LABEL[a.kind].toLowerCase()}?`,
+      message: `${undoMessage(a)} The entry stays in Activity, marked as undone.`,
+      confirmLabel: closing ? 'Undo' : 'Undo entry',
       tone: 'danger',
     })
-    if (ok) run(deleteActivityEntry(a.id), closing ? 'Position reopened' : 'Entry deleted')
+    if (ok) run(deleteActivityEntry(a.id), closing ? 'Position reopened' : 'Entry undone')
   }
 
   const menuFor = (a: PortfolioActivity): MenuItem[] => {
-    if (a.kind === 'transfer_out') return [] // reversed by transferring back / Add existing
     const items: MenuItem[] = []
     if (SHARE_KINDS.includes(a.kind) || CASH_KINDS.includes(a.kind)) items.push({ label: 'Edit…', onClick: () => edit(a) })
-    const opening = OPEN_KINDS.includes(a.kind)
-    const closing = !opening && !SHARE_KINDS.includes(a.kind) && !PLAIN_UNDO.includes(a.kind)
-    items.push({ label: opening ? 'Delete position' : closing ? 'Undo (reopen)' : 'Delete', tone: 'danger', onClick: () => undo(a) })
+    const closing = !OPEN_KINDS.includes(a.kind) && !SHARE_KINDS.includes(a.kind) && !PLAIN_UNDO.includes(a.kind)
+    items.push({ label: closing ? 'Undo (reopen)' : 'Undo', tone: 'danger', onClick: () => undo(a) })
     return items
   }
 
@@ -211,7 +216,7 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
         <tbody>
           {rows.map((a) => {
             const undone = a.voided_at !== null
-            const items = undone ? [] : menuFor(a)
+            const lock = undone ? undefined : locks.get(a.id)
             return (
               <tr key={a.id} className={`border-b border-(--border) last:border-0 hover:bg-white/2 ${undone ? 'opacity-50 [&_td:not(:last-child)]:line-through' : ''}`}>
                 <td className="whitespace-nowrap px-5 py-2.5 tabular-nums text-neutral-400">{dateFmt(a.occurred_on)}</td>
@@ -247,12 +252,18 @@ export function ActivityTable({ activity, onChanged }: { activity: PortfolioActi
                     <span className="text-xs text-neutral-400 no-underline" title={`Undone ${dateFmt(a.voided_at)}`}>
                       {a.replaced_by ? 'Edited' : 'Undone'}
                     </span>
-                  ) : items.length > 0 ? (
-                    <Menu items={items} label={`Actions for ${ACTIVITY_LABEL[a.kind]} ${a.symbol ?? ''}`} />
+                  ) : lock ? (
+                    // Said up front rather than after a failed save: this entry can't be changed.
+                    <DropMenu
+                      groups={[{ items: [{ label: lock, disabled: true }] }]}
+                      label={`${ACTIVITY_LABEL[a.kind]} ${a.symbol ?? ''} is locked: ${lock}`}
+                      title={lock}
+                      triggerClassName="rounded-md p-1.5 text-neutral-600 transition hover:bg-(--card-raised) hover:text-neutral-300"
+                    >
+                      <Lock size={14} />
+                    </DropMenu>
                   ) : (
-                    <span className="text-xs text-neutral-600" title="Transfer the shares back, or use Add existing">
-                      —
-                    </span>
+                    <Menu items={menuFor(a)} label={`Actions for ${ACTIVITY_LABEL[a.kind]} ${a.symbol ?? ''}`} />
                   )}
                 </td>
               </tr>

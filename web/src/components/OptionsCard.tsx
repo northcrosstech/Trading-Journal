@@ -1,12 +1,13 @@
-import { useState } from 'react'
-import { Layers, Plus } from 'lucide-react'
-import type { CspPosition, OptionPosition } from '../lib/database.types'
+import { Fragment, useEffect, useState } from 'react'
+import { ChevronDown, ChevronRight, Layers, Plus, X } from 'lucide-react'
+import type { CspPosition, Holding, OptionPosition } from '../lib/database.types'
 import { cspEdit, cspResolve, optionClose, optionEdit, setCspMark, setOptionMark, undoPositionLast, type SymbolPrice } from '../lib/wealthQueries'
 import { OPTION_MULTIPLIER, cspAnnualizedYield, cspCollateral, cspLiability, cspStats, optionGain, optionValue } from '../lib/portfolio'
-import { centralDateStr, currency, dateFmt, percentFmt } from '../lib/format'
+import { centralDateStr, currency, dateFmt, percentFmt, priceFmt } from '../lib/format'
 import { toneClass } from '../lib/ui'
-import { parseAmount, useDialog, validators, type DialogField } from '../lib/dialogContext'
+import { parseAmount, useDialog, validators, type DialogField, type FormOptions } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
+import { contractLabel, daysTo, openContractLines, type ContractLine, type OptionLot } from '../lib/optionLines'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Pill, type PillTone } from './ui/Pill'
@@ -14,56 +15,126 @@ import { Menu, type MenuItem } from './ui/Menu'
 import { EmptyState } from './ui/EmptyState'
 import { SortTh } from './SortTh'
 import { sortRows, useSort } from '../lib/useSort'
+import type { OptionFormInitial, OptionKind } from './OptionTradeForm'
 
-const daysTo = (iso: string, from: string) => Math.round((Date.parse(iso) - Date.parse(from)) / 86_400_000)
 const pct = (n: number | null) => (n === null ? '—' : percentFmt(n).replace('+', ''))
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const shareCount = (n: number) => Number(n.toFixed(6))
 
-/** One row in the unified options table -- long calls/puts and covered calls come from
- * option_positions, cash-secured puts from csp_positions. */
+type Tag = { label: string; tone: PillTone }
+type Outcome = 'closed' | 'expired' | 'assigned' | 'exercised'
+
+/** One purchase or sale of a contract (a row of option_positions or csp_positions), with
+ * the calls that act on it. */
+type Lot = {
+  id: string
+  /** "Jan 5, 2026 ×2": how a lot is named when a contract has several. */
+  name: string
+  openedOn: string
+  contracts: number
+  openPrice: number // per share
+  mark: number | null
+  premium: number // $ paid (long) or received (short)
+  value: number // $ value (long) or $ to buy back (short)
+  valueWord: string
+  gain: number
+  /** Cash set aside for a sold put. */
+  collateral: number
+  tags: Tag[]
+  extra?: string
+  setMark: (mark: number | null) => Promise<unknown>
+  resolve: (outcome: Outcome, on: string, price?: number) => Promise<unknown>
+  edit: () => void
+  remove: () => void
+}
+
+/** One contract in the table: every open lot of it added up. Long calls/puts and covered
+ * calls come from option_positions, cash-secured puts from csp_positions. */
 type Row = {
   key: string
+  symbol: string
+  /** "AAPL 150C" */
+  name: string
+  /** With the contract count, as shown and sorted: "AAPL 150C ×3". */
   label: string
-  type: { label: string; tone: PillTone }
-  tags: { label: string; tone: PillTone }[]
+  strike: number
+  contracts: number
+  long: boolean
+  isCsp: boolean
+  canExercise: boolean
+  canAssign: boolean
+  type: Tag
+  tags: Tag[]
   expiration: string
-  stock: number | undefined
-  premium: number // $ paid (long) or received (short)
+  premium: number
   premiumWord: 'paid' | 'received'
-  value: number // $ value (long) or $ to buy back (short)
+  value: number
   valueWord: string
   marked: boolean
   gain: number
   extra?: string
-  menu: MenuItem[]
+  lots: Lot[]
+  /** What "+ Add" fills the option form with. */
+  initial: OptionFormInitial
 }
 
+/** A contract line, or one lot of it, that an action applies to. */
+type Target = Pick<Row, 'symbol' | 'name' | 'strike' | 'long' | 'isCsp' | 'canExercise' | 'canAssign' | 'expiration'> & { lots: Lot[] }
+
+/** What was saved when an action ran over several lots and one of them failed. */
+type Batch = { done: Lot[]; failed: { lot: Lot; message: string } | null; rest: Lot[] }
+
 const STATUS_LABEL: Record<string, string> = { closed: 'Closed', expired: 'Expired', exercised: 'Exercised', assigned: 'Assigned' }
+const FORM_KIND: Partial<Record<ContractLine['kind'], OptionKind>> = { long_call: 'buy_call', long_put: 'buy_put', short_call: 'covered_call', csp: 'csp' }
 
 const OPTION_SORT_KEYS = ['label', 'expires', 'premium', 'value', 'gain'] as const
 const OPTION_ASC_FIRST = ['label', 'expires'] as const
 
-/** All open option positions in one table, with row actions (update price, close, expire,
- * exercise/assign) in a menu. There's no free option price feed: a long option counts at
- * what was paid until you enter today's price; short ones at their in-the-money amount. */
+/** All open option positions in one table, grouped by stock and then by contract: several
+ * purchases of the same contract show as one line (open it to see each lot). Actions
+ * (update price, close, expire, exercise/assign) are in each line's menu and apply to every
+ * lot of the line; each lot keeps its own menu too. There's no free option price feed: a
+ * long option counts at what was paid until you enter today's price; short ones at their
+ * in-the-money amount. */
 export function OptionsCard({
   options,
   csps,
   prices,
+  holdings = [],
   onChanged,
   onAdd,
+  focus,
 }: {
   options: OptionPosition[]
   csps: CspPosition[]
   prices: Map<string, SymbolPrice>
+  /** For the shares line under each stock: held, covered by sold calls, free. */
+  holdings?: Holding[]
   onChanged: () => void
-  onAdd: () => void
+  /** Opens the option form, filled in with a contract when adding to an open line. */
+  onAdd: (initial?: OptionFormInitial) => void
+  /** Scrolls to a contract line (by its key) and highlights it. Pass a new object each time. */
+  focus?: { key: string } | null
 }) {
   const dialog = useDialog()
   const toast = useToast()
   const [showHistory, setShowHistory] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [notice, setNotice] = useState<{ title: string; lines: string[] } | null>(null)
+  const [flash, setFlash] = useState<string | null>(null)
   const { state: sort, toggle: onSort } = useSort('options', OPTION_SORT_KEYS, OPTION_ASC_FIRST)
   const today = centralDateStr(new Date())
   const resolveDate = (expiration: string) => (expiration < today ? expiration : today)
+
+  useEffect(() => {
+    if (!focus) return
+    const el = document.getElementById(`option-line-${focus.key}`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlash(focus.key)
+    const t = setTimeout(() => setFlash(null), 2500)
+    return () => clearTimeout(t)
+  }, [focus])
 
   async function run(p: Promise<unknown>, message: string) {
     try {
@@ -71,34 +142,22 @@ export function OptionsCard({
       toast(message)
       onChanged()
     } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error')
+      toast(errorText(e), 'error')
     }
   }
 
-  async function askPrice(title: string, current: number | null, description?: string, allowBlank = false) {
-    const v = await dialog.form({
-      title,
-      description,
-      submitLabel: 'Save',
-      fields: [
-        {
-          name: 'price',
-          label: 'Price per share',
-          type: 'number',
-          prefix: '$',
-          defaultValue: current !== null ? String(current) : '',
-          placeholder: 'e.g. 4.20',
-          optional: allowBlank,
-          validate: allowBlank ? validators.nonNegative : (s) => validators.nonNegative(s) ?? (s.trim() === '' ? 'Required' : null),
-          hint: allowBlank ? 'From your broker. Leave blank to go back to the estimate.' : 'As quoted by your broker (per share, not per contract).',
-        },
-      ],
-    })
-    if (!v) return undefined
-    return v.price === '' ? null : parseAmount(v.price)
-  }
-
-  const labelOf = (symbol: string, strike: number, type: 'call' | 'put') => `${symbol} ${Number(strike)}${type === 'call' ? 'C' : 'P'}`
+  const priceField = (current: number | null, allowBlank: boolean): DialogField => ({
+    name: 'price',
+    label: 'Price per share',
+    type: 'number',
+    prefix: '$',
+    defaultValue: current !== null ? String(current) : '',
+    placeholder: 'e.g. 4.20',
+    optional: allowBlank,
+    validate: allowBlank ? validators.nonNegative : (s) => validators.nonNegative(s) ?? (s.trim() === '' ? 'Required' : null),
+    hint: allowBlank ? 'From your broker. Leave blank to go back to the estimate.' : 'As quoted by your broker (per share, not per contract).',
+  })
+  const dateField = (defaultValue: string): DialogField => ({ name: 'on', label: 'Date', type: 'date', defaultValue, validate: validators.required })
 
   /** The fields shared by editing an option and a put: the contract and what was paid/received. */
   const contractFields = (
@@ -145,21 +204,27 @@ export function OptionsCard({
           { value: 'yes', label: 'Yes — protects other positions' },
         ],
       })
-    const v = await dialog.form({ title: `Edit ${labelOf(o.symbol, o.strike, o.option_type)}`, description: EDIT_NOTE, submitLabel: 'Save changes', fields })
+    // Saved from inside the dialog, so a refused edit keeps what was typed.
+    const v = await dialog.form({
+      title: `Edit ${contractLabel(o.symbol, o.strike, o.option_type)}`,
+      description: EDIT_NOTE,
+      submitLabel: 'Save changes',
+      fields,
+      onSubmit: (v) =>
+        optionEdit({
+          optionId: o.id,
+          symbol: v.symbol.toUpperCase(),
+          strike: parseAmount(v.strike)!,
+          expiration: v.expiration,
+          contracts: Number(v.contracts),
+          price: parseAmount(v.price)!,
+          isHedge: long ? v.hedge === 'yes' : false,
+          on: v.on,
+        }),
+    })
     if (!v) return
-    run(
-      optionEdit({
-        optionId: o.id,
-        symbol: v.symbol.toUpperCase(),
-        strike: parseAmount(v.strike)!,
-        expiration: v.expiration,
-        contracts: Number(v.contracts),
-        price: parseAmount(v.price)!,
-        isHedge: long ? v.hedge === 'yes' : false,
-        on: v.on,
-      }),
-      'Option updated',
-    )
+    toast('Option updated')
+    onChanged()
   }
 
   async function editCsp(c: CspPosition) {
@@ -167,20 +232,25 @@ export function OptionsCard({
       { symbol: c.symbol, strike: c.strike, expiration: c.expiration, contracts: c.contracts, price: c.premium, openedOn: c.opened_on },
       'Premium received',
     )
-    const v = await dialog.form({ title: `Edit ${labelOf(c.symbol, c.strike, 'put')}`, description: EDIT_NOTE, submitLabel: 'Save changes', fields })
+    const v = await dialog.form({
+      title: `Edit ${contractLabel(c.symbol, c.strike, 'put')}`,
+      description: EDIT_NOTE,
+      submitLabel: 'Save changes',
+      fields,
+      onSubmit: (v) =>
+        cspEdit({
+          cspId: c.id,
+          symbol: v.symbol.toUpperCase(),
+          strike: parseAmount(v.strike)!,
+          expiration: v.expiration,
+          contracts: Number(v.contracts),
+          premium: parseAmount(v.price)!,
+          on: v.on,
+        }),
+    })
     if (!v) return
-    run(
-      cspEdit({
-        cspId: c.id,
-        symbol: v.symbol.toUpperCase(),
-        strike: parseAmount(v.strike)!,
-        expiration: v.expiration,
-        contracts: Number(v.contracts),
-        premium: parseAmount(v.price)!,
-        on: v.on,
-      }),
-      'Put updated',
-    )
+    toast('Put updated')
+    onChanged()
   }
 
   async function deletePosition(label: string, target: { optionId?: string; cspId?: string }) {
@@ -207,160 +277,281 @@ export function OptionsCard({
       run(undoPositionLast(target), `${label} reopened`)
   }
 
-  const optionRows: Row[] = options
-    .filter((o) => o.status === 'open')
-    .map((o) => {
-      const label = labelOf(o.symbol, o.strike, o.option_type)
+  /** Asks once, then runs `each` on every lot in order (oldest first), stopping at the first
+   * that fails. If nothing was saved the dialog stays open with the reason and what was
+   * typed; if some lots were saved, it closes and the card says which were and which weren't. */
+  async function act(
+    t: Target,
+    what: string,
+    form: Omit<FormOptions, 'onSubmit'>,
+    each: (lot: Lot, values: Record<string, string>) => Promise<unknown>,
+    doneMessage: string,
+  ) {
+    const out: { batch: Batch | null } = { batch: null }
+    const v = await dialog.form({
+      ...form,
+      onSubmit: async (values) => {
+        const done: Lot[] = []
+        for (const [i, lot] of t.lots.entries()) {
+          try {
+            await each(lot, values)
+            done.push(lot)
+          } catch (e) {
+            out.batch = { done, failed: { lot, message: errorText(e) }, rest: t.lots.slice(i + 1) }
+            if (done.length === 0) throw e
+            return
+          }
+        }
+        out.batch = { done, failed: null, rest: [] }
+      },
+    })
+    const batch = out.batch
+    if (!v || !batch) return
+    if (batch.failed) {
+      const names = (lots: Lot[]) => lots.map((l) => l.name).join(', ')
+      setNotice({
+        title: `${what} ${t.name}: only some lots were recorded`,
+        lines: [
+          `Recorded: ${names(batch.done)}.`,
+          `Not recorded: ${batch.failed.lot.name} (${batch.failed.message})${batch.rest.length > 0 ? `, and so ${names(batch.rest)} ${batch.rest.length === 1 ? 'was' : 'were'} not tried` : ''}.`,
+          'Fix the cause, then use the menu of each lot that is left.',
+        ],
+      })
+      toast(`${what} ${t.name} stopped part-way. See the note on the Options card.`, 'error')
+    } else toast(doneMessage)
+    onChanged()
+  }
+
+  const contractsOf = (t: Target) => t.lots.reduce((s, l) => s + l.contracts, 0)
+  /** The price every lot was last updated to, when they agree. */
+  const sharedMark = (t: Target) => (t.lots.every((l) => l.mark === t.lots[0].mark) ? t.lots[0].mark : null)
+  const allLots = (t: Target, sentence: string) => (t.lots.length > 1 ? sentence : undefined)
+
+  const updatePrice = (t: Target) =>
+    act(
+      t,
+      'Update price of',
+      {
+        title: `Update ${t.name} price`,
+        description: allLots(t, `Sets the price on all ${t.lots.length} lots of this contract.`),
+        submitLabel: 'Save',
+        fields: [priceField(sharedMark(t), true)],
+      },
+      (lot, v) => lot.setMark(v.price === '' ? null : parseAmount(v.price)),
+      `${t.name} price updated`,
+    )
+
+  const closeAtPrice = (t: Target) =>
+    act(
+      t,
+      t.long ? 'Sell to close' : 'Buy back',
+      {
+        title: `${t.long ? 'Sell' : 'Buy back'} ${t.name} ×${contractsOf(t)}`,
+        description: allLots(
+          t,
+          `All ${t.lots.length} lots are ${t.long ? 'sold' : 'bought back'} at this price. To close just one, open the lots and use that lot’s menu.`,
+        ),
+        submitLabel: 'Save',
+        fields: [priceField(sharedMark(t), false), dateField(today)],
+      },
+      (lot, v) => lot.resolve('closed', v.on, parseAmount(v.price)!),
+      `${t.name} ${t.long ? 'sold' : 'bought back'}`,
+    )
+
+  const expire = (t: Target) =>
+    act(
+      t,
+      'Expired worthless',
+      {
+        title: `${t.name} expired worthless?`,
+        description: `${t.long ? 'Records the premium paid as a loss.' : 'You keep the full premium.'}${t.lots.length > 1 ? ` Applies to all ${t.lots.length} lots.` : ''}`,
+        submitLabel: 'Mark expired',
+        fields: [dateField(resolveDate(t.expiration))],
+      },
+      (lot, v) => lot.resolve('expired', v.on),
+      `${t.name} marked expired`,
+    )
+
+  const exercise = (t: Target) => {
+    const n = contractsOf(t) * OPTION_MULTIPLIER
+    return act(
+      t,
+      'Exercise',
+      {
+        title: `Exercise ${t.name}?`,
+        description: `Buys ${n} ${t.symbol} at ${t.strike} — ${currency(t.strike * n)} from cash. Their cost basis includes the premium you paid.${t.lots.length > 1 ? ` Applies to all ${t.lots.length} lots.` : ''}`,
+        submitLabel: 'Exercise',
+        tone: 'warning',
+        fields: [dateField(resolveDate(t.expiration))],
+      },
+      (lot, v) => lot.resolve('exercised', v.on),
+      `${t.name} exercised`,
+    )
+  }
+
+  const assign = (t: Target) => {
+    const n = contractsOf(t) * OPTION_MULTIPLIER
+    const what = t.isCsp
+      ? `Buys ${n} ${t.symbol} at ${t.strike} — ${currency(t.lots.reduce((s, l) => s + l.collateral, 0))} from cash. Cost basis is strike minus the premium.`
+      : `Sells ${n} ${t.symbol} at ${t.strike} — ${currency(t.strike * n)} to cash.`
+    return act(
+      t,
+      'Assigned',
+      {
+        title: `${t.name} assigned?`,
+        description: `${what}${t.lots.length > 1 ? ` Applies to all ${t.lots.length} lots.` : ''}`,
+        submitLabel: 'Mark assigned',
+        tone: 'warning',
+        fields: [dateField(resolveDate(t.expiration))],
+      },
+      (lot, v) => lot.resolve('assigned', v.on),
+      `${t.name} assigned`,
+    )
+  }
+
+  /** The menu for a whole contract line, or for one lot of it. Edit and Delete act on a
+   * single lot, so a line made of several shows them on each lot instead. */
+  const menuFor = (t: Target): MenuItem[] => {
+    const menu: MenuItem[] = [
+      { label: 'Update price', onClick: () => updatePrice(t) },
+      { label: t.long ? 'Sell to close' : 'Buy back', onClick: () => closeAtPrice(t) },
+      { label: 'Expired worthless', onClick: () => expire(t) },
+    ]
+    if (t.canExercise) menu.push({ label: 'Exercise', tone: 'warning', onClick: () => exercise(t) })
+    if (t.canAssign) menu.push({ label: 'Assigned', tone: 'warning', onClick: () => assign(t) })
+    if (t.lots.length === 1) menu.push({ label: 'Edit…', onClick: t.lots[0].edit }, { label: 'Delete', tone: 'danger', onClick: t.lots[0].remove })
+    return menu
+  }
+
+  const lotOf = (l: OptionLot, name: string): Lot => {
+    if (l.source === 'option') {
+      const o = l.o
       const n = o.contracts * OPTION_MULTIPLIER
       const long = o.side === 'long'
-      const tags: Row['tags'] = []
+      const tags: Tag[] = []
       if (long && daysTo(o.expiration, o.opened_on) > 365) tags.push({ label: 'LEAPS', tone: 'violet' })
       if (o.is_hedge) tags.push({ label: 'Hedge', tone: 'sky' })
-      const menu: MenuItem[] = [
-        {
-          label: 'Update price',
-          onClick: async () => {
-            const v = await askPrice(`Update ${label} price`, o.mark !== null ? Number(o.mark) : null, undefined, true)
-            if (v !== undefined) run(setOptionMark(o.id, v), `${label} price updated`)
-          },
-        },
-        {
-          label: long ? 'Sell to close' : 'Buy back',
-          onClick: async () => {
-            const v = await askPrice(`${long ? 'Sell' : 'Buy back'} ${label} ×${o.contracts}`, o.mark !== null ? Number(o.mark) : null)
-            if (v !== undefined && v !== null)
-              run(optionClose({ optionId: o.id, outcome: 'closed', price: v, on: today }), `${label} ${long ? 'sold' : 'bought back'}`)
-          },
-        },
-        {
-          label: 'Expired worthless',
-          onClick: async () => {
-            if (await dialog.confirm({ title: `${label} expired worthless?`, message: long ? 'Records the premium paid as a loss.' : 'You keep the full premium.', confirmLabel: 'Mark expired' }))
-              run(optionClose({ optionId: o.id, outcome: 'expired', on: resolveDate(o.expiration) }), `${label} marked expired`)
-          },
-        },
-      ]
-      if (long && o.option_type === 'call')
-        menu.push({
-          label: 'Exercise',
-          tone: 'warning',
-          onClick: async () => {
-            if (
-              await dialog.confirm({
-                title: `Exercise ${label}?`,
-                message: `Buys ${n} ${o.symbol} at ${Number(o.strike)} — ${currency(Number(o.strike) * n)} from cash. Their cost basis includes the premium you paid.`,
-                confirmLabel: 'Exercise',
-                tone: 'warning',
-              })
-            )
-              run(optionClose({ optionId: o.id, outcome: 'exercised', on: resolveDate(o.expiration) }), `${label} exercised`)
-          },
-        })
-      if (!long)
-        menu.push({
-          label: 'Assigned',
-          tone: 'warning',
-          onClick: async () => {
-            if (
-              await dialog.confirm({
-                title: `${label} assigned?`,
-                message: `Sells ${n} ${o.symbol} at ${Number(o.strike)} — ${currency(Number(o.strike) * n)} to cash.`,
-                confirmLabel: 'Mark assigned',
-                tone: 'warning',
-              })
-            )
-              run(optionClose({ optionId: o.id, outcome: 'assigned', on: resolveDate(o.expiration) }), `${label} assigned`)
-          },
-        })
-      menu.push({ label: 'Edit…', onClick: () => editOption(o) }, { label: 'Delete', tone: 'danger', onClick: () => deletePosition(label, { optionId: o.id }) })
       return {
-        key: o.id,
-        label: `${label} ×${o.contracts}`,
-        type: long ? { label: o.option_type === 'call' ? 'Long call' : 'Long put', tone: o.option_type === 'call' ? 'green' : 'red' } : { label: 'Covered call', tone: 'amber' },
-        tags,
-        expiration: o.expiration,
-        stock: prices.get(o.symbol)?.close,
+        id: o.id,
+        name: `${dateFmt(o.opened_on)} ×${o.contracts}`,
+        openedOn: o.opened_on,
+        contracts: o.contracts,
+        openPrice: Number(o.open_price),
+        mark: o.mark !== null ? Number(o.mark) : null,
         premium: Number(o.open_price) * n,
-        premiumWord: long ? 'paid' : 'received',
         value: Math.abs(optionValue(o, prices)),
         valueWord: o.mark !== null ? `@ ${Number(o.mark)}` : long ? 'not updated' : 'est. to buy back',
-        marked: o.mark !== null,
         gain: optionGain(o, prices),
-        menu,
+        collateral: 0,
+        tags,
+        setMark: (mark) => setOptionMark(o.id, mark),
+        resolve: (outcome, on, price) => optionClose(outcome === 'closed' ? { optionId: o.id, outcome, price, on } : { optionId: o.id, outcome, on }),
+        edit: () => editOption(o),
+        remove: () => deletePosition(name, { optionId: o.id }),
       }
-    })
+    }
+    const c = l.c
+    const premium = Number(c.premium) * OPTION_MULTIPLIER * c.contracts
+    const liability = cspLiability(c, prices)
+    return {
+      id: c.id,
+      name: `${dateFmt(c.opened_on)} ×${c.contracts}`,
+      openedOn: c.opened_on,
+      contracts: c.contracts,
+      openPrice: Number(c.premium),
+      mark: c.mark !== null ? Number(c.mark) : null,
+      premium,
+      value: liability,
+      valueWord: c.mark !== null ? `@ ${Number(c.mark)}` : 'est. to buy back',
+      gain: premium - liability,
+      collateral: cspCollateral(c),
+      tags: [],
+      extra: `${currency(cspCollateral(c))} set aside · ${pct(cspAnnualizedYield(c))}/yr`,
+      setMark: (mark) => setCspMark(c.id, mark),
+      resolve: (outcome, on, price) => {
+        if (outcome === 'exercised') return Promise.reject(new Error('A sold put can’t be exercised.'))
+        return cspResolve(outcome === 'closed' ? { cspId: c.id, outcome, price, on } : { cspId: c.id, outcome, on })
+      },
+      edit: () => editCsp(c),
+      remove: () => deletePosition(name, { cspId: c.id }),
+    }
+  }
 
-  const cspRows: Row[] = csps
-    .filter((c) => c.status === 'open')
-    .map((c) => {
-      const label = labelOf(c.symbol, c.strike, 'put')
-      const premium = Number(c.premium) * OPTION_MULTIPLIER * c.contracts
-      const liability = cspLiability(c, prices)
-      const menu: MenuItem[] = [
-        {
-          label: 'Update price',
-          onClick: async () => {
-            const v = await askPrice(`Update ${label} price`, c.mark !== null ? Number(c.mark) : null, undefined, true)
-            if (v !== undefined) run(setCspMark(c.id, v), `${label} price updated`)
-          },
-        },
-        {
-          label: 'Buy back',
-          onClick: async () => {
-            const v = await askPrice(`Buy back ${label} ×${c.contracts}`, c.mark !== null ? Number(c.mark) : null)
-            if (v !== undefined && v !== null) run(cspResolve({ cspId: c.id, outcome: 'closed', price: v, on: today }), `${label} bought back`)
-          },
-        },
-        {
-          label: 'Expired worthless',
-          onClick: async () => {
-            if (await dialog.confirm({ title: `${label} expired worthless?`, message: 'You keep the full premium.', confirmLabel: 'Mark expired' }))
-              run(cspResolve({ cspId: c.id, outcome: 'expired', on: resolveDate(c.expiration) }), `${label} marked expired`)
-          },
-        },
-        {
-          label: 'Assigned',
-          tone: 'warning',
-          onClick: async () => {
-            if (
-              await dialog.confirm({
-                title: `${label} assigned?`,
-                message: `Buys ${c.contracts * OPTION_MULTIPLIER} ${c.symbol} at ${Number(c.strike)} — ${currency(cspCollateral(c))} from cash. Cost basis is strike minus the premium.`,
-                confirmLabel: 'Mark assigned',
-                tone: 'warning',
-              })
-            )
-              run(cspResolve({ cspId: c.id, outcome: 'assigned', on: resolveDate(c.expiration) }), `${label} assigned`)
-          },
-        },
-        { label: 'Edit…', onClick: () => editCsp(c) },
-        { label: 'Delete', tone: 'danger', onClick: () => deletePosition(label, { cspId: c.id }) },
-      ]
-      return {
-        key: c.id,
-        label: `${label} ×${c.contracts}`,
-        type: { label: 'Cash-secured put', tone: 'teal' },
-        tags: [],
-        expiration: c.expiration,
-        stock: prices.get(c.symbol)?.close,
-        premium,
-        premiumWord: 'received',
-        value: liability,
-        valueWord: c.mark !== null ? `@ ${Number(c.mark)}` : 'est. to buy back',
-        marked: c.mark !== null,
-        gain: premium - liability,
-        extra: `${currency(cspCollateral(c))} set aside · ${pct(cspAnnualizedYield(c))}/yr`,
-        menu,
-      }
-    })
+  const rowOf = (line: ContractLine): Row => {
+    const name = contractLabel(line.symbol, line.strike, line.optionType)
+    const lots = line.lots.map((l) => lotOf(l, name))
+    const isCsp = line.kind === 'csp'
+    const long = line.kind === 'long_call' || line.kind === 'long_put'
+    const marked = lots.every((l) => l.mark !== null)
+    const sameMark = lots.every((l) => l.mark === lots[0].mark)
+    const tags: Tag[] = []
+    for (const t of lots.flatMap((l) => l.tags)) if (!tags.some((x) => x.label === t.label)) tags.push(t)
+    const collateral = lots.reduce((s, l) => s + l.collateral, 0)
+    return {
+      key: line.key,
+      symbol: line.symbol,
+      name,
+      label: `${name} ×${line.contracts}`,
+      strike: line.strike,
+      contracts: line.contracts,
+      long,
+      isCsp,
+      canExercise: line.kind === 'long_call',
+      canAssign: !long,
+      type: isCsp
+        ? { label: 'Cash-secured put', tone: 'teal' }
+        : long
+          ? { label: line.optionType === 'call' ? 'Long call' : 'Long put', tone: line.optionType === 'call' ? 'green' : 'red' }
+          : { label: 'Covered call', tone: 'amber' },
+      tags,
+      expiration: line.expiration,
+      premium: lots.reduce((s, l) => s + l.premium, 0),
+      premiumWord: long ? 'paid' : 'received',
+      value: lots.reduce((s, l) => s + l.value, 0),
+      // Several lots: say so when their prices were not all updated, or not to the same price.
+      valueWord: sameMark ? lots[0].valueWord : marked ? 'lots at different prices' : 'partly updated',
+      marked,
+      gain: lots.reduce((s, l) => s + l.gain, 0),
+      extra: !isCsp ? undefined : lots.length === 1 ? lots[0].extra : `${currency(collateral)} set aside`,
+      lots,
+      initial: { kind: FORM_KIND[line.kind], symbol: line.symbol, strike: line.strike, expiration: line.expiration },
+    }
+  }
 
-  const rows = sortRows(
-    [...optionRows, ...cspRows].sort((a, b) => a.expiration.localeCompare(b.expiration)),
-    sort,
-    { label: (r) => r.label, expires: (r) => r.expiration, premium: (r) => r.premium, value: (r) => r.value, gain: (r) => r.gain },
-  )
+  const rows = sortRows(openContractLines(options, csps).map(rowOf), sort, {
+    label: (r) => r.label,
+    expires: (r) => r.expiration,
+    premium: (r) => r.premium,
+    value: (r) => r.value,
+    gain: (r) => r.gain,
+  })
+  // Lines stay in sorted order; each stock sits where its first line falls.
+  const groups: { symbol: string; rows: Row[] }[] = []
+  for (const r of rows) {
+    const g = groups.find((x) => x.symbol === r.symbol)
+    if (g) g.rows.push(r)
+    else groups.push({ symbol: r.symbol, rows: [r] })
+  }
   const stats = cspStats(csps)
   const unrealized = rows.reduce((s, r) => s + r.gain, 0)
+
+  /** Shares behind a stock's options: held, covered by open sold calls, and free. */
+  const sharesLine = (symbol: string) => {
+    const h = holdings.find((x) => x.symbol === symbol)
+    if (!h) return null
+    const qty = Number(h.quantity)
+    const covered = options.filter((o) => o.status === 'open' && o.side === 'short' && o.symbol === symbol).reduce((n, o) => n + o.contracts * OPTION_MULTIPLIER, 0)
+    return covered > 0
+      ? `${shareCount(qty)} shares · ${shareCount(covered)} covered by sold calls · ${shareCount(Math.max(0, qty - covered))} free`
+      : `${shareCount(qty)} shares · none covered by sold calls`
+  }
+
+  const toggleLots = (key: string) =>
+    setExpanded((cur) => {
+      const next = new Set(cur)
+      if (!next.delete(key)) next.add(key)
+      return next
+    })
 
   const history = [
     ...options
@@ -370,14 +561,14 @@ export function OptionsCard({
         const premium = Number(o.open_price) * n
         const exit = o.close_price !== null ? Number(o.close_price) * n : 0
         const result = o.status === 'exercised' || o.status === 'assigned' ? null : o.side === 'long' ? exit - premium : premium - exit
-        return { key: o.id, label: `${labelOf(o.symbol, o.strike, o.option_type)} ×${o.contracts}`, kind: o.side === 'long' ? `Long ${o.option_type}` : 'Covered call', status: STATUS_LABEL[o.status], date: o.closed_on, result, target: { optionId: o.id } }
+        return { key: o.id, label: `${contractLabel(o.symbol, o.strike, o.option_type)} ×${o.contracts}`, kind: o.side === 'long' ? `Long ${o.option_type}` : 'Covered call', status: STATUS_LABEL[o.status], date: o.closed_on, result, target: { optionId: o.id } }
       }),
     ...csps
       .filter((c) => c.status !== 'open')
       .map((c) => {
         const credit = Number(c.premium) * OPTION_MULTIPLIER * c.contracts
         const kept = c.status === 'closed' && c.close_price !== null ? credit - Number(c.close_price) * OPTION_MULTIPLIER * c.contracts : credit
-        return { key: c.id, label: `${labelOf(c.symbol, c.strike, 'put')} ×${c.contracts}`, kind: 'Cash-secured put', status: c.status === 'closed' ? 'Bought back' : STATUS_LABEL[c.status], date: c.closed_on, result: kept, target: { cspId: c.id } }
+        return { key: c.id, label: `${contractLabel(c.symbol, c.strike, 'put')} ×${c.contracts}`, kind: 'Cash-secured put', status: c.status === 'closed' ? 'Bought back' : STATUS_LABEL[c.status], date: c.closed_on, result: kept, target: { cspId: c.id } }
       }),
   ].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
 
@@ -394,11 +585,27 @@ export function OptionsCard({
       }
       flush
       actions={
-        <Button size="sm" icon={<Plus size={14} />} onClick={onAdd}>
+        <Button size="sm" icon={<Plus size={14} />} onClick={() => onAdd()}>
           Add option
         </Button>
       }
     >
+      {notice && (
+        <div role="alert" className="mx-5 mb-3 flex items-start justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div className="min-w-0">
+            <div className="font-medium">{notice.title}</div>
+            {notice.lines.map((l) => (
+              <div key={l} className="text-red-200/80">
+                {l}
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="shrink-0 rounded-md p-1 text-red-200/70 transition hover:bg-red-500/15 hover:text-red-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <EmptyState icon={<Layers size={20} />} title="No open options">
           Long calls and puts (LEAPS, hedges), covered calls and cash-secured puts show up here.
@@ -413,47 +620,116 @@ export function OptionsCard({
                 <SortTh k="premium" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Premium</SortTh>
                 <SortTh k="value" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Value</SortTh>
                 <SortTh k="gain" sort={sort} onSort={onSort} className="px-3 py-2.5 text-right">Gain</SortTh>
-                <th className="w-12 px-3 py-2.5" />
+                <th className="w-28 px-3 py-2.5" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const dte = daysTo(r.expiration, today)
+              {groups.map((g) => {
+                const shares = sharesLine(g.symbol)
+                const stock = prices.get(g.symbol)?.close
                 return (
-                  <tr key={r.key} className="border-b border-(--border) transition last:border-0 hover:bg-white/2">
-                    <td className="px-5 py-3">
-                      <div className="font-semibold text-white">{r.label}</div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Pill tone={r.type.tone}>{r.type.label}</Pill>
-                        {r.tags.map((t) => (
-                          <Pill key={t.label} tone={t.tone}>
-                            {t.label}
-                          </Pill>
-                        ))}
-                        {r.stock !== undefined && <span className="text-xs text-neutral-500">stock {r.stock.toFixed(2)}</span>}
-                      </div>
-                      {r.extra && <div className="mt-1 text-xs text-neutral-500">{r.extra}</div>}
-                    </td>
-                    <td className="px-3 py-3 text-neutral-300">
-                      {dateFmt(r.expiration)}
-                      <div className={`text-xs ${dte <= 7 ? 'text-amber-400' : 'text-neutral-500'}`}>{dte >= 0 ? `${dte}d left` : 'expired'}</div>
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-neutral-300">
-                      {currency(r.premium)}
-                      <div className="text-xs text-neutral-500">{r.premiumWord}</div>
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-neutral-100">
-                      {currency(r.value)}
-                      <div className={`text-xs ${r.marked ? 'text-neutral-500' : 'text-amber-500/80'}`}>{r.valueWord}</div>
-                    </td>
-                    <td className={`px-3 py-3 text-right font-medium tabular-nums ${toneClass(r.gain)}`}>
-                      {currency(r.gain)}
-                      {r.premium > 0 && <div className="text-xs font-normal">{percentFmt(r.gain / r.premium)}</div>}
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      <Menu items={r.menu} label={`Actions for ${r.label}`} />
-                    </td>
-                  </tr>
+                  <Fragment key={g.symbol}>
+                    <tr className="border-b border-(--border) bg-white/2">
+                      <td colSpan={6} className="px-5 py-1.5 text-xs text-neutral-500">
+                        <span className="font-semibold text-neutral-200">{g.symbol}</span>
+                        {shares && ` · ${shares}`}
+                        {stock !== undefined && ` · stock ${stock.toFixed(2)}`}
+                      </td>
+                    </tr>
+                    {g.rows.map((r) => {
+                      const dte = daysTo(r.expiration, today)
+                      const several = r.lots.length > 1
+                      const open = several && expanded.has(r.key)
+                      return (
+                        <Fragment key={r.key}>
+                          <tr
+                            id={`option-line-${r.key}`}
+                            className={`border-b border-(--border) transition last:border-0 hover:bg-white/2 ${flash === r.key ? 'bg-amber-500/10' : ''}`}
+                          >
+                            <td className="px-5 py-3">
+                              <div className="font-semibold text-white">{r.label}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                <Pill tone={r.type.tone}>{r.type.label}</Pill>
+                                {r.tags.map((t) => (
+                                  <Pill key={t.label} tone={t.tone}>
+                                    {t.label}
+                                  </Pill>
+                                ))}
+                                {several && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleLots(r.key)}
+                                    aria-expanded={open}
+                                    title={open ? 'Hide the lots' : 'Show each purchase with its own date, price and menu'}
+                                    className="inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-xs font-medium text-(--accent-text) transition hover:bg-(--card-raised)"
+                                  >
+                                    {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                    {r.lots.length} lots
+                                  </button>
+                                )}
+                              </div>
+                              {r.extra && <div className="mt-1 text-xs text-neutral-500">{r.extra}</div>}
+                            </td>
+                            <td className="px-3 py-3 text-neutral-300">
+                              {dateFmt(r.expiration)}
+                              <div className={`text-xs ${dte <= 7 ? 'text-amber-400' : 'text-neutral-500'}`}>{dte >= 0 ? `${dte}d left` : 'expired'}</div>
+                            </td>
+                            <td className="px-3 py-3 text-right tabular-nums text-neutral-300">
+                              {currency(r.premium)}
+                              <div className="text-xs text-neutral-500">{r.premiumWord}</div>
+                            </td>
+                            <td className="px-3 py-3 text-right tabular-nums text-neutral-100">
+                              {currency(r.value)}
+                              <div className={`text-xs ${r.marked ? 'text-neutral-500' : 'text-amber-500/80'}`}>{r.valueWord}</div>
+                            </td>
+                            <td className={`px-3 py-3 text-right font-medium tabular-nums ${toneClass(r.gain)}`}>
+                              {currency(r.gain)}
+                              {r.premium > 0 && <div className="text-xs font-normal">{percentFmt(r.gain / r.premium)}</div>}
+                            </td>
+                            <td className="px-3 py-3 text-right">
+                              <span className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => onAdd(r.initial)}
+                                  title={`Add more ${r.name}: only contracts and price to type`}
+                                  className="whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium text-(--accent-text) transition hover:bg-(--card-raised)"
+                                >
+                                  + Add
+                                </button>
+                                <Menu items={menuFor(r)} label={`Actions for ${r.label}`} />
+                              </span>
+                            </td>
+                          </tr>
+                          {open &&
+                            r.lots.map((lot) => (
+                              <tr key={lot.id} className="border-b border-(--border) bg-white/2 text-xs last:border-0">
+                                <td className="py-2 pl-9 pr-3 text-neutral-400">
+                                  <span className="flex flex-wrap items-center gap-1.5">
+                                    Opened {dateFmt(lot.openedOn)} · ×{lot.contracts} @ {priceFmt(lot.openPrice)}
+                                    {lot.tags.map((t) => (
+                                      <Pill key={t.label} tone={t.tone}>
+                                        {t.label}
+                                      </Pill>
+                                    ))}
+                                  </span>
+                                  {lot.extra && <div className="mt-0.5 text-neutral-500">{lot.extra}</div>}
+                                </td>
+                                <td className="px-3 py-2" />
+                                <td className="px-3 py-2 text-right tabular-nums text-neutral-400">{currency(lot.premium)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-neutral-300">
+                                  {currency(lot.value)}
+                                  <div className={lot.mark !== null ? 'text-neutral-500' : 'text-amber-500/80'}>{lot.valueWord}</div>
+                                </td>
+                                <td className={`px-3 py-2 text-right tabular-nums ${toneClass(lot.gain)}`}>{currency(lot.gain)}</td>
+                                <td className="px-3 py-2 text-right">
+                                  <Menu items={menuFor({ ...r, lots: [lot] })} label={`Actions for the ${lot.name} lot of ${r.name}`} />
+                                </td>
+                              </tr>
+                            ))}
+                        </Fragment>
+                      )
+                    })}
+                  </Fragment>
                 )
               })}
             </tbody>

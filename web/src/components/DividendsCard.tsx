@@ -17,7 +17,8 @@ import { parseAmount, useDialog, validators } from '../lib/dialogContext'
 import { useToast } from '../lib/toastContext'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
-import { Plus } from 'lucide-react'
+import { EmptyState } from './ui/EmptyState'
+import { CircleDollarSign, Plus } from 'lucide-react'
 import { SortTh } from './SortTh'
 import { sortRows, useSort } from '../lib/useSort'
 const pct = (n: number | null) => (n === null ? '—' : percentFmt(n).replace('+', ''))
@@ -141,7 +142,8 @@ const DIV_ASC_FIRST = ['symbol', 'next'] as const
  * dividend, frequency and pay month are entered once per ticker, plus one-tap Record.
  * `portfolioId` set = one portfolio (with Record); unset = all of `portfolioIds` combined --
  * the one place to set up every ticker's dividend. Either way a ticker's dividend is saved
- * once per user and applies to every portfolio holding it. */
+ * once per user and applies to every portfolio holding it. With no holdings it renders
+ * nothing, or a short explanation when `showEmpty` is set. */
 export function DividendsCard({
   holdings,
   prices,
@@ -149,6 +151,7 @@ export function DividendsCard({
   portfolioId,
   portfolioIds,
   onRecorded,
+  showEmpty = false,
 }: {
   holdings: Holding[]
   prices: Map<string, SymbolPrice>
@@ -156,6 +159,8 @@ export function DividendsCard({
   portfolioId?: string
   portfolioIds?: Set<string>
   onRecorded?: () => void
+  /** With no holdings, show an empty card saying why instead of nothing. */
+  showEmpty?: boolean
 }) {
   const { user } = useAuth()
   const dialog = useDialog()
@@ -215,6 +220,7 @@ export function DividendsCard({
 
   async function record(r: DividendRow) {
     if (!portfolioId) return
+    // Saved from inside the dialog, so a refused save keeps the amount and date typed.
     const v = await dialog.form({
       title: `Record ${r.symbol} dividend`,
       description: 'Adds it to this portfolio’s cash as earnings.',
@@ -223,13 +229,22 @@ export function DividendsCard({
         { name: 'amount', label: 'Amount received', type: 'number', prefix: '$', defaultValue: r.perPayment.toFixed(2), validate: validators.positive },
         { name: 'on', label: 'Date', type: 'date', defaultValue: today },
       ],
+      onSubmit: (v) => portfolioCash({ portfolioId, kind: 'dividend', amount: parseAmount(v.amount)!, symbol: r.symbol, on: v.on }),
     })
     if (!v) return
-    const amount = parseAmount(v.amount)!
-    run(portfolioCash({ portfolioId, kind: 'dividend', amount, symbol: r.symbol, on: v.on }), onRecorded, `Recorded ${r.symbol} dividend of ${currency(amount)}`)
+    onRecorded?.()
+    toast(`Recorded ${r.symbol} dividend of ${currency(parseAmount(v.amount)!)}`)
+    load()
   }
 
-  if (holdings.length === 0) return null
+  if (holdings.length === 0)
+    return showEmpty ? (
+      <Card title="Dividends">
+        <EmptyState icon={<CircleDollarSign size={20} />} title="No dividends to show yet">
+          Once this portfolio holds shares, what they are expected to pay and what you have received shows up here.
+        </EmptyState>
+      </Card>
+    ) : null
 
   const configured = rows.filter((r) => r.info).length
   const stat = (label: string, value: string, sub?: string) => (

@@ -3,16 +3,7 @@ import { Link } from 'react-router-dom'
 import { ShieldAlert, ShieldCheck } from 'lucide-react'
 import type { AuditProblem } from '../lib/database.types'
 import { fetchAuditProblems } from '../lib/wealthQueries'
-
-const CHECK_LABEL: Record<AuditProblem['check_name'], string> = {
-  shares: 'Shares',
-  avg_cost: 'Average cost',
-  cash: 'Cash',
-  position: 'Option / put',
-  covered_call: 'Covered call',
-  price: 'Price',
-  daily_value: 'Daily value',
-}
+import { CHECK_LABEL } from '../lib/healthCheck'
 
 /** Does every stored number match the Activity history? One read of the audit_summary view
  * when the page opens: a quiet green line when everything reconciles, else each problem with
@@ -46,7 +37,8 @@ export function HealthCheckCard() {
         {problems.map((p, i) => (
           <li key={`${p.portfolio_id}-${p.check_name}-${p.item ?? ''}-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
             <span className="min-w-0">
-              <Link to={`/portfolios/${p.portfolio_id}`} className="font-medium text-amber-100 hover:underline">
+              {/* Straight to Activity: that is where an entry gets fixed. */}
+              <Link to={`/portfolios/${p.portfolio_id}?tab=activity`} className="font-medium text-amber-100 hover:underline">
                 {p.portfolio}
               </Link>
               <span className="text-amber-200/70">

@@ -6,16 +6,37 @@ import { INPUT, LABEL } from '../../lib/ui'
 import { Button } from './Button'
 
 type Pending =
-  | { kind: 'confirm'; opts: ConfirmOptions; resolve: (v: boolean) => void }
-  | { kind: 'form'; opts: FormOptions; resolve: (v: Record<string, string> | null) => void }
+  | { kind: 'confirm'; id: number; opts: ConfirmOptions; resolve: (v: boolean) => void }
+  | { kind: 'form'; id: number; opts: FormOptions; resolve: (v: Record<string, string> | null) => void }
 
-function FormBody({ opts, onSubmit, onCancel }: { opts: FormOptions; onSubmit: (v: Record<string, string>) => void; onCancel: () => void }) {
+function FormBody({
+  opts,
+  onSubmit,
+  onCancel,
+  onBusy,
+}: {
+  opts: FormOptions
+  onSubmit: (v: Record<string, string>) => void
+  onCancel: () => void
+  /** Tells the host a save is running, so Esc or a click outside can't drop it. */
+  onBusy: (busy: boolean) => void
+}) {
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(opts.fields.map((f) => [f.name, f.defaultValue ?? ''])),
   )
   const [errors, setErrors] = useState<Record<string, string | null>>({})
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
-  function submit() {
+  async function submit() {
+    if (busy) return
     const trimmed = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim()]))
     const next: Record<string, string | null> = {}
     for (const f of opts.fields) {
@@ -24,6 +45,22 @@ function FormBody({ opts, onSubmit, onCancel }: { opts: FormOptions; onSubmit: (
     }
     setErrors(next)
     if (Object.values(next).some(Boolean)) return
+    if (!opts.onSubmit) return onSubmit(trimmed)
+    // The caller saves from inside the dialog: stay open until it has worked.
+    setFailure(null)
+    setBusy(true)
+    onBusy(true)
+    try {
+      await opts.onSubmit(trimmed)
+    } catch (e) {
+      if (!mounted.current) return
+      onBusy(false)
+      setBusy(false)
+      setFailure(e instanceof Error ? e.message : String(e))
+      return
+    }
+    if (!mounted.current) return
+    onBusy(false)
     onSubmit(trimmed)
   }
 
@@ -76,12 +113,17 @@ function FormBody({ opts, onSubmit, onCancel }: { opts: FormOptions; onSubmit: (
           )}
         </label>
       ))}
+      {failure && (
+        <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          {failure}
+        </p>
+      )}
       <div className="mt-1 flex justify-end gap-2">
-        <Button variant="ghost" onClick={onCancel}>
+        <Button variant="ghost" onClick={onCancel} disabled={busy}>
           Cancel
         </Button>
-        <Button type="submit" variant={opts.tone === 'danger' ? 'danger' : 'primary'}>
-          {opts.submitLabel ?? 'Save'}
+        <Button type="submit" variant={opts.tone === 'danger' ? 'danger' : 'primary'} disabled={busy}>
+          {busy ? 'Saving…' : (opts.submitLabel ?? 'Save')}
         </Button>
       </div>
     </form>
@@ -92,13 +134,16 @@ function FormBody({ opts, onSubmit, onCancel }: { opts: FormOptions; onSubmit: (
 export function DialogProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<Pending | null>(null)
   const pendingRef = useRef<Pending | null>(null)
+  const nextId = useRef(1)
+  // True while a form's own save is running: the dialog can't be dismissed until it ends.
+  const busyRef = useRef(false)
   useEffect(() => {
     pendingRef.current = pending
   }, [pending])
 
-  const close = useCallback((result: unknown) => {
+  const close = useCallback((result: unknown, force = false) => {
     const p = pendingRef.current
-    if (!p) return
+    if (!p || (busyRef.current && !force)) return
     if (p.kind === 'confirm') p.resolve(Boolean(result))
     else p.resolve((result as Record<string, string> | null) ?? null)
     setPending(null)
@@ -110,13 +155,14 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     if (!p) return
     if (p.kind === 'confirm') p.resolve(false)
     else p.resolve(null)
+    busyRef.current = false
   }, [])
 
   const confirm = useCallback(
     (opts: ConfirmOptions) =>
       new Promise<boolean>((resolve) => {
         cancelOpen()
-        setPending({ kind: 'confirm', opts, resolve })
+        setPending({ kind: 'confirm', id: nextId.current++, opts, resolve })
       }),
     [cancelOpen],
   )
@@ -124,7 +170,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     (opts: FormOptions) =>
       new Promise<Record<string, string> | null>((resolve) => {
         cancelOpen()
-        setPending({ kind: 'form', opts, resolve })
+        setPending({ kind: 'form', id: nextId.current++, opts, resolve })
       }),
     [cancelOpen],
   )
@@ -170,7 +216,15 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                   </div>
                 </>
               ) : (
-                <FormBody opts={pending.opts} onSubmit={(v) => close(v)} onCancel={() => close(null)} />
+                <FormBody
+                  key={pending.id}
+                  opts={pending.opts}
+                  onSubmit={(v) => close(v, true)}
+                  onCancel={() => close(null)}
+                  onBusy={(b) => {
+                    busyRef.current = b
+                  }}
+                />
               )}
             </div>
           </div>,

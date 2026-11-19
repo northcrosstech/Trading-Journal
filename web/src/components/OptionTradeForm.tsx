@@ -7,7 +7,10 @@ import { INPUT, LABEL } from '../lib/ui'
 import { Button } from './ui/Button'
 import { Segmented } from './ui/Tabs'
 
-type Kind = 'buy_call' | 'buy_put' | 'covered_call' | 'csp'
+export type OptionKind = 'buy_call' | 'buy_put' | 'covered_call' | 'csp'
+type Kind = OptionKind
+/** A contract to start the form on, so adding to a position only needs contracts and price. */
+export type OptionFormInitial = { kind?: OptionKind; symbol?: string; strike?: number; expiration?: string }
 const KINDS: { value: Kind; label: string; hint: string; action: string }[] = [
   { value: 'buy_call', label: 'Buy call', hint: 'LEAPS or any long call — the premium is paid from cash.', action: 'Buy call' },
   { value: 'buy_put', label: 'Buy put', hint: 'Hedges and long puts — the premium is paid from cash.', action: 'Buy put' },
@@ -35,18 +38,21 @@ export function OptionTradeForm({
   holdings,
   options,
   cashAvailable,
+  initial,
   onDone,
 }: {
   portfolioId: string
   holdings: Holding[]
   options: OptionPosition[]
   cashAvailable: number
+  /** Fills in the contract (from "+ Add" on an open position). Read once, when the form opens. */
+  initial?: OptionFormInitial
   onDone: (message: string) => void
 }) {
-  const [kind, setKind] = useState<Kind>('buy_call')
-  const [symbol, setSymbol] = useState('')
-  const [strike, setStrike] = useState('')
-  const [expiration, setExpiration] = useState('')
+  const [kind, setKind] = useState<Kind>(initial?.kind ?? 'buy_call')
+  const [symbol, setSymbol] = useState(initial?.symbol ?? '')
+  const [strike, setStrike] = useState(initial?.strike !== undefined ? String(Number(initial.strike)) : '')
+  const [expiration, setExpiration] = useState(initial?.expiration ?? '')
   const [contracts, setContracts] = useState('1')
   const [price, setPrice] = useState('')
   const [hedge, setHedge] = useState(false)
@@ -103,8 +109,14 @@ export function OptionTradeForm({
   const long = kind === 'buy_call' || kind === 'buy_put'
   const collateral = kind === 'csp' && k !== null && c !== null ? k * OPTION_MULTIPLIER * c : null
 
+  // Enter saves from a field you type in (not from the date pickers or the buttons).
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const t = e.target
+    if (e.key === 'Enter' && !busy && t instanceof HTMLInputElement && t.type !== 'date' && t.type !== 'checkbox') submit()
+  }
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" onKeyDown={onKeyDown}>
       <Segmented options={KINDS.map((x) => ({ value: x.value, label: x.label }))} value={kind} onChange={(v) => {
           setKind(v)
           setError(null)
@@ -133,7 +145,14 @@ export function OptionTradeForm({
           <input type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} className={INPUT} />
         </Field>
         <Field label="Contracts">
-          <input inputMode="numeric" value={contracts} onChange={(e) => setContracts(e.target.value)} className={INPUT} />
+          <input
+            autoFocus={initial !== undefined}
+            onFocus={(e) => e.target.select()}
+            inputMode="numeric"
+            value={contracts}
+            onChange={(e) => setContracts(e.target.value)}
+            className={INPUT}
+          />
         </Field>
         <Field label={long ? 'Price paid / share' : 'Premium received / share'}>
           <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="e.g. 4.20" className={INPUT} />
