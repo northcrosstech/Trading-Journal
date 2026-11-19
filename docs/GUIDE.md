@@ -49,7 +49,7 @@ Each person signs in with their own login and only ever sees their own data.
 | **After trading** | Review closed trades: whose idea it was, what went well or badly, the setup | Review |
 | **When you buy, sell or move money** in a portfolio | Record it as an entry so cash and shares stay right | **Log** in the sidebar (or press L), or the Log menu on the portfolio page |
 | **Start of each month** (by the 15th) | **Close last month:** enter each account's balance as of the last day, mark payments paid, then press Close | The amber "Close {month}" banner, then the close card on Net worth |
-| **Now and then** | Glance at "Needs attention" on Overview and the Targets card on Portfolios | Overview, Portfolios |
+| **Now and then** | Glance at "Needs attention" on Overview and the **Plan** tab on Portfolios (it shows how many targets are off) | Overview, Portfolios |
 
 ### Closing a month
 
@@ -113,11 +113,11 @@ Things to know about synced trades:
 
 | Page | What it shows |
 |---|---|
-| **Overview** | The freedom gauge, **why last month's net worth changed**, four headline numbers, a **Needs attention** list (Health check problems, options expiring in the next 30 days or past expiration, tickers waiting for a price), links to the detail pages, and each portfolio. The close banner shows here too |
+| **Overview** | A **Needs attention** list (Health check problems, options expiring in the next 30 days or past expiration, tickers waiting for a price), the freedom gauge, three headline numbers (**Net worth**, **Investments**, **Expected dividends**), **why last month's net worth changed**, and each portfolio. Click a headline number to open the page behind it. The close banner shows here too |
 | **Net worth** | Everything you own minus everything you owe, by month. Two tabs: **Balances** (monthly balances, Monthly payments, the month-end close, and a Breakdown section with the yearly chart and what's in each category) and **Cash flow**. One month stepper at the top serves both |
 | **Cash flow** (a tab on Net worth) | What you kept each month, worked out from balances alone (no income entry): cash saved + invested + debt paid down, reconciled to the change in net worth. Opens on last month, the latest one with a full set of balances |
-| **Portfolios** | Each portfolio's value and day change, **What I own** (every ticker added up across portfolios), **Income** (dividends and option premium by month), the Health check, **Targets** (are you on target across accounts) and **Holdings breakdown** |
-| **Portfolio page** | Four tabs: **Positions** (stocks, funds and options, with the biggest gains and losses above the table), **Plan** (with each position's Research rating and a "Worth a look" list), **Performance** (value, returns, dividends) and **Activity**. A strip at the top appears only when something needs you: positions off plan, an option about to expire, a ticker waiting for a price, or numbers that don't match the entries |
+| **Portfolios** | All portfolios together. The headline numbers stay on top, with five tabs under them: **Summary** (a card per portfolio, the Health check, archived portfolios), **Positions** (**What I own**: every ticker added up across portfolios), **Plan** (**Targets**: are you on target across accounts), **Performance** (value, allocation, returns) and **Income** (dividends and option premium received by month, then what each ticker is expected to pay) |
+| **Portfolio page** | Five tabs, named like the ones on Portfolios: **Positions** (stocks, funds and options, with the biggest gains and losses above the table), **Plan** (with each position's Research rating and a "Worth a look" list), **Performance** (value, allocation, returns), **Income** (this portfolio's dividends and option premium by month, then its dividends per ticker) and **Activity**. **Log** is the one button in the header; rename, change type and archive are under **⋯** next to it. A strip at the top appears only when something needs you: positions off plan (with what to buy or trim, and **Log all**), an option about to expire, a ticker waiting for a price, or numbers that don't match the entries |
 | **Research** | Fair value, score and next earnings date for everything you hold, plus a watchlist |
 
 ### Reading the numbers
@@ -128,7 +128,7 @@ These show figures the app already works out, in the place you'd look for them. 
 - **Month recap** (Net worth). Opens by itself when you close a month, and from the **Recap** button on any closed month: the change and why, the portfolio that grew the most and the one that fell the most, dividends and option premium received, and the payments you made.
 - **Debt-free date** (Monthly payments). The latest payoff month among your loans at current payments, and the interest still to pay. A loan with no rate entered counts as 0%. If only some debts have a fixed payment, the line says how many it covers.
 - **What I own** (Portfolios). One row per ticker across all active portfolios: shares, value, share of the total, gain, and which portfolios hold it. Cash and options have their own rows. A ticker above 20% of the total is marked **Large position**. A holding with no price yet is left out of the percentages and listed in a footnote.
-- **Income** (Portfolios). Dividends and option premium for each of the last 12 months and the month so far, with this year's total and the monthly average. Premium is what you received for options you sold, less what you paid to buy any back; options you bought are trades, not income.
+- **Income** (Portfolios and each portfolio, Income tab). Dividends and option premium for each of the last 12 months and the month so far, with this year's total and the monthly average. Premium is what you received for options you sold, less what you paid to buy any back; options you bought are trades, not income.
 - **Biggest gains and losses** (a portfolio's Positions tab). Up to three holdings that are up the most and three that are down the most, in dollars against cost. Switch to the latest day's change with the toggle. Click one to jump to its row. Hidden when the portfolio has fewer than three priced holdings.
 - **Worth a look** (a portfolio's Plan tab). Positions that are under their target and that Research rates cheap (price below 85% of fair value), furthest under target first, with a button that fills in the buy. It's a shortlist, not a recommendation. A ticker in your plan that you don't own yet is rated against its latest close.
 
@@ -151,7 +151,7 @@ The holding's pencil edits only a manual price. That's what keeps every number t
 | Bought shares | **Click the position** (or Log → Buy or sell) | None: cash became shares |
 | Already owned shares before using the app | **Log → Shares I already own** | None: counted as money in at the last saved price. If the app has no price for the ticker yet, the form asks for today's price |
 | Sold shares | **Click the position** (or Log → Buy or sell) | The gain or loss counts |
-| Got a dividend | **Log → Dividend**, or **Record** on the Performance tab | Counts as earnings |
+| Got a dividend | **Log → Dividend**, or **Record** on the Income tab | Counts as earnings |
 | Moved shares between portfolios | **Log → Transfer** | None on either side |
 | Stock split (or reverse split) | **Log → Stock split** | None: shares × ratio, cost ÷ ratio |
 | Broker's cash differs, or you're on margin | **Log → Match broker balance** (negative for margin) | None as a correction; ticked as interest or fees it lowers returns |
@@ -253,12 +253,12 @@ Two kinds of targets:
 
 | Target | Where you set it | Covers |
 |---|---|---|
-| **Split** | Portfolios page → Targets → **Edit split** | How brokerage money divides between brokerage accounts (e.g. Long Term 90%, Equity Trades 10%) |
+| **Split** | Portfolios page → **Plan** tab → **Edit split** | How brokerage money divides between brokerage accounts (e.g. Long Term 90%, Equity Trades 10%) |
 | **Position plan** | Each portfolio's page → **Plan** → **Set / Edit plan** | A target % per ticker in that account (e.g. VOO 40%, NVDA 20%) |
 | **Mix by type** | Each portfolio's page → **Plan** → **Set / Edit targets** | That one account's ETFs / Stocks / Bonds / Options / Cash. With a position plan, this is worked out from the plan instead |
 
 Retirement accounts are never in the split, because money can't move freely in or out of them.
-The Targets card on Portfolios opens by itself when something is off target. It lists every account with **On target**, **N off target** or
+The Targets card is on the Portfolios page's **Plan** tab; the tab's label shows how many targets are off. It lists every account with **On target**, **N off target** or
 **No targets**; open a line to see the positions that are off plan and what to buy or trim (or, for an account without a position plan, its mix by type).
 
 - **Types:** ETFs, Stocks, Bonds, Options, Cash.
@@ -278,7 +278,7 @@ The Targets card on Portfolios opens by itself when something is off target. It 
 
 ## 8. Health check: what each warning means
 
-The Health check (on Portfolios, in "Needs attention" on Overview, and at the top of the portfolio it concerns) re-adds every number from the Activity history and
+The Health check (on Portfolios, above the tabs when it finds something and at the foot of Summary when all is well; in "Needs attention" on Overview; and at the top of the portfolio it concerns) re-adds every number from the Activity history and
 lists anything that doesn't match. **No warnings means every share, cost and cash figure is
 backed by entries.**
 

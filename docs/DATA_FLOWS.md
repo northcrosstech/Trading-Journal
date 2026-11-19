@@ -250,7 +250,7 @@ Nothing below is stored. The website calculates it from the tables each time a p
 | Time-weighted return | Chain each day's (value − net_flow) ÷ previous value | `portfolio.ts` `timeWeightedReturn` |
 | Average per year | (1 + TWR)^(365 ÷ days) − 1, shown only after 365 days | same |
 | Allocation / weight | Each position ÷ (shares + long options + positive cash) | portfolio pages |
-| Dividend income | annual $/share × shares; per payment = ÷ payments per year | `dividends.ts` |
+| Expected dividends | annual $/share × shares; per payment = ÷ payments per year | `dividends.ts` |
 | Dividend calendar | Past months = recorded `dividend` activity; this month on = expected | `dividends.ts` `dividendCalendar` |
 | Net worth (month) | Σ assets − Σ debts for accounts open that month (missing month → last earlier balance, "carried") + each portfolio's last daily value in or before that month. An archived portfolio counts only in months before the one it was archived in. Negative portfolio cash becomes a separate **Margin loans** debt | `networth.ts` `monthTotals`, `portfolioCountsIn` |
 | Month Net worth opens on | Current month; on the 1st–5th, last month while it isn't closed (section 8) | `cashflow.ts` `netWorthOpenMonth` |
