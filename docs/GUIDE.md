@@ -113,12 +113,24 @@ Things to know about synced trades:
 
 | Page | What it shows |
 |---|---|
-| **Overview** | The freedom gauge, four headline numbers, a **Needs attention** list (Health check problems, options about to expire, tickers waiting for a price), links to the detail pages, and each portfolio. The close banner shows here too |
+| **Overview** | The freedom gauge, **why last month's net worth changed**, four headline numbers, a **Needs attention** list (Health check problems, options expiring in the next 30 days or past expiration, tickers waiting for a price), links to the detail pages, and each portfolio. The close banner shows here too |
 | **Net worth** | Everything you own minus everything you owe, by month. Two tabs: **Balances** (monthly balances, Monthly payments, the month-end close, and a Breakdown section with the yearly chart and what's in each category) and **Cash flow**. One month stepper at the top serves both |
 | **Cash flow** (a tab on Net worth) | What you kept each month, worked out from balances alone (no income entry): cash saved + invested + debt paid down, reconciled to the change in net worth. Opens on last month, the latest one with a full set of balances |
-| **Portfolios** | Each portfolio's value and day change, the Health check, **Targets** (are you on target across accounts) and **Holdings breakdown** |
-| **Portfolio page** | Four tabs: **Positions** (stocks, funds and options), **Plan**, **Performance** (value, returns, dividends) and **Activity**. A strip at the top appears only when something needs you: positions off plan, an option about to expire, a ticker waiting for a price, or numbers that don't match the entries |
+| **Portfolios** | Each portfolio's value and day change, **What I own** (every ticker added up across portfolios), **Income** (dividends and option premium by month), the Health check, **Targets** (are you on target across accounts) and **Holdings breakdown** |
+| **Portfolio page** | Four tabs: **Positions** (stocks, funds and options, with the biggest gains and losses above the table), **Plan** (with each position's Research rating and a "Worth a look" list), **Performance** (value, returns, dividends) and **Activity**. A strip at the top appears only when something needs you: positions off plan, an option about to expire, a ticker waiting for a price, or numbers that don't match the entries |
 | **Research** | Fair value, score and next earnings date for everything you hold, plus a watchlist |
+
+### Reading the numbers
+
+These show figures the app already works out, in the place you'd look for them. None of them is a new calculation.
+
+- **Why net worth changed** (Overview). Last month's change in one sentence, split into cash saved, invested, debt paid down, investment growth and other changes: the same figures as the Cash flow tab. If some balances for the month were carried instead of entered, the card says which accounts and shows no split, because it would be a guess.
+- **Month recap** (Net worth). Opens by itself when you close a month, and from the **Recap** button on any closed month: the change and why, the portfolio that grew the most and the one that fell the most, dividends and option premium received, and the payments you made.
+- **Debt-free date** (Monthly payments). The latest payoff month among your loans at current payments, and the interest still to pay. A loan with no rate entered counts as 0%. If only some debts have a fixed payment, the line says how many it covers.
+- **What I own** (Portfolios). One row per ticker across all active portfolios: shares, value, share of the total, gain, and which portfolios hold it. Cash and options have their own rows. A ticker above 20% of the total is marked **Large position**. A holding with no price yet is left out of the percentages and listed in a footnote.
+- **Income** (Portfolios). Dividends and option premium for each of the last 12 months and the month so far, with this year's total and the monthly average. Premium is what you received for options you sold, less what you paid to buy any back; options you bought are trades, not income.
+- **Biggest gains and losses** (a portfolio's Positions tab). Up to three holdings that are up the most and three that are down the most, in dollars against cost. Switch to the latest day's change with the toggle. Click one to jump to its row. Hidden when the portfolio has fewer than three priced holdings.
+- **Worth a look** (a portfolio's Plan tab). Positions that are under their target and that Research rates cheap (price below 85% of fair value), furthest under target first, with a button that fills in the buy. It's a shortlist, not a recommendation. A ticker in your plan that you don't own yet is rated against its latest close.
 
 ### How investments reach net worth
 
