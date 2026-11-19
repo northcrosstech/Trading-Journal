@@ -48,7 +48,7 @@ flowchart LR
     WK -- "analyst EPS estimates" --> FM
 ```
 
-**In one sentence:** the website talks straight to the database as you, protected by row-level security. Anything needing a secret (charts data, triggering the worker) goes through a small Vercel function. The always-on worker on Fly.io pulls your Webull trades, the daily prices and the research data (fundamentals and economic numbers) into the database.
+**In one sentence:** the website talks straight to the database as you, protected by row-level security. Anything needing a secret (charts data, triggering the worker) goes through a small Vercel function that first checks you're signed in. The always-on worker on Fly.io pulls your Webull trades, the daily prices and the research data (fundamentals and economic numbers) into the database.
 
 ---
 
@@ -57,7 +57,7 @@ flowchart LR
 | Component | Tech | Runs on | Code | Job |
 |---|---|---|---|---|
 | Website | React 19, Vite, Tailwind, Recharts, lightweight-charts | Vercel (static) | `web/src/` | Every page you see |
-| `/api/candles` | Vercel function (Node) | Vercel | `web/api/candles.ts` | Fetches 1-min / 5-min candles from Twelve Data for trade charts; keeps the API key off the browser |
+| `/api/candles` | Vercel function (Node) | Vercel | `web/api/candles.ts` | Checks you're signed in, then fetches 1-min / 5-min candles from Twelve Data for trade charts; keeps the API key off the browser. One ticker per request, a window of at most two years, and a generic error message (the detail goes to the function log) |
 | `/api/trigger-sync` | Vercel function (Node) | Vercel | `web/api/trigger-sync.ts` | Checks you're signed in, then calls the worker with the shared secret. `?job=prices` triggers pricing instead of a trade sync |
 | Database | Postgres + row-level security | Supabase | `supabase/migrations/` | All data |
 | Auth | Supabase Auth | Supabase | `web/src/auth/` | Sign-in, password reset, sessions |
@@ -66,7 +66,8 @@ flowchart LR
 
 > `web/api/_lib/` holds local-dev copies of the two functions (used by `vite.config.ts`).
 > Vercel can't bundle local imports into functions, so each deployed function is
-> self-contained. Keep the copies in sync when changing either.
+> self-contained. Keep the copies in sync when changing either. The local-dev candles route
+> skips the session check the deployed function makes.
 
 ### Website pages
 
@@ -78,21 +79,23 @@ flowchart LR
 | `/trades`, `/trades/:id` | Trade log; trade detail with chart | `trades`, `executions`, `options_detail` |
 | `/trades/new`, `/trades/:id/edit`, `/trades/import`, `/trades/import/robinhood` | Manual entry, CSV and Robinhood import | `trades`, `executions`, `options_detail` |
 | `/insights` | Stats and breakdowns | `trades` (+ review fields) |
-| `/wealth` | Wealth overview: net worth, portfolios, month-end close banner | most wealth tables |
+| `/wealth` | Wealth overview: freedom gauge, why last month's net worth changed, headline numbers, Needs attention, portfolios, month-end close banner | most wealth tables |
 | `/wealth` gauge | Towards financial freedom, on the Wealth page | `networth_accounts`, `networth_balances`, `portfolios`, `portfolio_daily_values`, `portfolio_activity`, `freedom_settings` |
-| `/portfolios` | All portfolios, Health check, brokerage allocation | `portfolios`, `portfolio_daily_values`, `audit_summary`, `allocation_targets`, `ticker_types`, `fundamentals` |
-| `/portfolios/:id` | One portfolio: holdings (with fair value pills), its plan (position targets, add money, plan notes, mix by type), activity, options, puts, dividends and performance | `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `prices`, `portfolio_daily_values`, `fundamentals`, `position_targets`, `ticker_theses` |
-| `/networth` | Net worth by month, accounts, monthly payments | `networth_accounts`, `networth_balances`, `installment_payments`, `wealth_settings` (+ portfolio values) |
-| `/cashflow` | What you kept each month, derived from balances | `networth_balances`, `portfolio_activity`, `portfolio_daily_values` |
+| `/portfolios` | All portfolios, What I own (every ticker across portfolios), Income (dividends and option premium by month), Health check, Targets | `portfolios`, `holdings`, `portfolio_daily_values`, `portfolio_activity`, `audit_summary`, `allocation_targets`, `ticker_types`, `fundamentals` |
+| `/portfolios/:id` | One portfolio in four tabs (`?tab=positions\|plan\|performance\|activity`): holdings (with fair value pills and the biggest gains and losses), options and puts as one list; its plan (position targets with Research ratings, "Worth a look", add money, plan notes, mix by type); performance and dividends; activity. `?log=trade\|cash\|option` opens that form once | `holdings`, `portfolio_activity`, `csp_positions`, `option_positions`, `dividend_info`, `prices`, `portfolio_daily_values`, `fundamentals`, `position_targets`, `ticker_theses` |
+| `/networth` | Two tabs. **Balances**: net worth by month, the month-end close and its recap, accounts, monthly payments. **Cash flow** (`?view=cashflow`): what you kept each month, derived from balances. `?month=yyyy-mm` picks the month | `networth_accounts`, `networth_balances`, `installment_payments`, `networth_month_closes`, `wealth_settings`, `portfolio_activity`, `portfolio_daily_values` |
+| `/cashflow` | Redirects to `/networth?view=cashflow` | |
 | `/research` | Fair value, score and next earnings for holdings and a watchlist | `fundamentals`, `macro_indicators`, `research_watchlist`, `research_overrides`, `wealth_settings` |
-| `/accounts`, `/settings` | Accounts; risk limits, setups, review checklist | `accounts`, `target_settings`, `playbooks` |
+| `/accounts`, `/settings` | Accounts; settings in two groups (`?group=trading\|wealth`): risk limits, setups and review checklist; on-target tolerance and growth cap | `accounts`, `target_settings`, `playbooks`, `wealth_settings` |
 
-The sidebar has two sides, **Trading** and **Wealth**. They share sign-in but never each other's data: day trades never feed portfolios or net worth.
+The sidebar has two sides, **Trading** and **Wealth**. They share sign-in but never each other's data: day trades never feed portfolios or net worth. In Wealth the sidebar also has a **Log** button (key L), each portfolio by name, and **Search** (Ctrl/Cmd+K); it remembers the last page used on each side.
 
 **Key website modules:**
-- **Data access:** `web/src/lib/queries.ts` for the trading journal, `wealthQueries.ts` for net worth and portfolios.
+- **Data access:** `web/src/lib/queries.ts` for the trading journal, `wealthQueries.ts` for net worth and portfolios. The API returns at most 1,000 rows per request, so every list that grows with time is read through `paging.ts` (`fetchAllRows`), 1,000 rows at a time, ordered on a unique column.
 - **Calculations:** trading `metrics.ts`, `insights.ts`, `whatIf.ts`; wealth `portfolio.ts`, `networth.ts`, `cashflow.ts`, `installments.ts`, `dividends.ts`, `research.ts`, `allocationPlan.ts`.
-- **Shared app-wide state:** `AuthContext`, `AccountContext` (the trading-account switcher), `ReviewChecklistProvider`.
+- **Display helpers (no new maths):** these only arrange or add up what the calculation files return. `netWorthChange.ts` (Overview card), `monthRecap.ts`, `income.ts` and `incomeSummary.ts` (dividends and option premium by month), `combinedHoldings.ts` (What I own), `movers.ts`, `buyCandidates.ts`, `attention.ts`, `optionLines.ts` (lots grouped into contract lines).
+- **Shared app-wide state:** `AuthContext`, `AccountContext` (the trading-account switcher), `ReviewChecklistProvider`, and the latest sync result (`useSyncState`, loaded once in `Layout` for the sidebar badge and the failed-sync banner).
+- **State in the link:** tabs, the month and one-shot actions live in the URL (`useUrlState.ts`), so a page can be linked to in the state it's in.
 
 ### Worker files
 
@@ -130,7 +133,7 @@ The two trigger endpoints have separate locks and cooldowns, so a trade sync and
 | Open a page | Browser → Supabase directly with the public key + your session token. Row-level security returns only your rows |
 | Tag a trade, save a balance | Browser → Supabase `update` / `upsert` on the table |
 | Buy, sell, transfer, cash, options | Browser → Supabase **database function** (one all-or-nothing save) |
-| View a trade chart | Browser → `/api/candles` → Twelve Data |
+| View a trade chart | Browser → `/api/candles` (checks your session) → Twelve Data |
 | Click Sync now / Get prices now | Browser → `/api/trigger-sync` (checks your session) → worker `POST /sync/trigger` or `/prices/trigger` (checks the secret) → background job. The page then polls the database for the result |
 | Upload a screenshot | Browser → Supabase Storage `trade-screenshots/{your id}/…`; shown through 1-hour signed links |
 
@@ -213,7 +216,7 @@ flowchart LR
 
 | Service | Limit | Effect on the design |
 |---|---|---|
-| Supabase free | 500 MB database, ~5 GB transfer/month | Fine today. Every page loads all your trades (~2.7 KB each), which is why auto-refresh was kept cheap |
+| Supabase free | 500 MB database, ~5 GB transfer/month; the API returns at most 1,000 rows per request | Fine today. Every page loads all your trades (~2.7 KB each), which is why auto-refresh was kept cheap. Growing lists are read in 1,000-row pages |
 | Twelve Data free | 800 lookups/day, 8/min; **no** options, dividends or fundamentals | Prices are batched 8 per minute; option prices and dividends are entered by hand |
 | Finnhub free | 60 calls/min; US fundamentals and earnings calendar, no prices history | Calls paced at 1.1 s; 2 calls per ticker (3 the first time, for its name) plus 1 call for the ticker-type list |
 | Financial Modeling Prep free | 250 calls/day | 1 call per ticker a day, so up to ~250 researched tickers |
@@ -230,5 +233,7 @@ flowchart LR
 - **`trade_key` doesn't include the account,** so the sync isn't safe for two accounts at the same broker yet. Before adding one, change the unique key to `(user_id, account_id, trade_key)`; see the comment beside `upsert_trade_bundle` in `20260712010000_accounts_multi_broker.sql`.
 - **Portfolio prices are daily closes,** not live. Option prices are manual.
 - **Fair value needs positive earnings.** Funds (ETFs) and loss-making companies get no fair value or score.
-- **Each page loads every trade;** fine at hundreds of trades, worth narrowing at several thousand.
+- **Each page loads every trade,** now in 1,000-row pages so nothing is cut off; fine at hundreds of trades, worth narrowing to a date window at several thousand.
+- **Closing part of an option position across several purchases isn't one save.** Each purchase is closed in turn, oldest first; if one is refused, the earlier ones stay recorded and the Options card says which.
+- **Sign-up is open.** Anyone with the address can create an account; they see only their own data.
 - **Migrations are applied by hand** (there's no migration runner), so the database can drift from the repo if one is skipped. The dictionary's date stamp says when it was last checked against the live database.

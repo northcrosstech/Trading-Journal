@@ -101,6 +101,8 @@ Things to know:
 - **Fees:** each trade gets an **estimated** fee instantly. **Actual** fees are filled in over later cycles, and `fee_source` flips to `actual`.
 - **`manually_closed` trades** keep their outcome (status, exit, P&L, hold time) even when the sync runs again. This is for options that expired worthless, because Webull records no order for an expiry.
 - **Multi-leg orders** (e.g. strangles) are skipped and logged as a warning in `sync_log.message`.
+- **A failed run** is a `sync_log` row with status `error`. While that is the newest row, the sidebar reads "Sync failed" and a banner above the Trading pages shows the message with a Sync now button.
+- **Only the worker can write synced trades:** `upsert_trade_bundle` can be called by the service role only.
 
 ---
 
@@ -132,13 +134,13 @@ Every action is a **database function**, so the holding, the cash and the ledger
 flowchart TB
     subgraph Actions
       buy[Buy] --> f1[portfolio_buy]
-      ex[Add existing] --> f1
+      ex[Shares I already own] --> f1
       sell[Sell] --> f2[portfolio_sell]
       tr[Transfer] --> f3[portfolio_transfer]
       cash[Deposit / Withdraw / Dividend] --> f4[portfolio_cash]
       csp[Sell put / resolve] --> f5[csp_open / csp_resolve]
       opt[Buy call/put, covered call / resolve] --> f6[option_open / option_close]
-      bal[Set balance] --> f7[portfolio_set_cash]
+      bal[Match broker balance] --> f7[portfolio_set_cash]
       spl[Split] --> f8[portfolio_split]
     end
     f1 & f2 & f3 & f5 & f6 & f8 --> H[(holdings)]
@@ -154,16 +156,20 @@ flowchart TB
 |---|---|---|---|
 | Deposit $1,000 | +1,000 | +1,000 | none: your money, not a gain |
 | Buy shares with it | −1,000 | 0 | none: cash became shares |
-| Add existing shares | 0 | + their value | none: your money, not a gain |
+| Shares you already own | 0 | + their value | none: your money, not a gain |
 | Dividend $20 | +20 | 0 | **counts:** earned |
 | Sell at a profit | + proceeds | 0 | **counts:** earned |
 | Transfer to another portfolio | 0 | − here, + there | none on either side, nets to 0 combined |
 
-That's why "Add existing" and "Deposit" are the right way to bring in things you already owned.
+That's why "Shares I already own" and "Deposit" are the right way to bring in things you already owned.
+
+**What "their value" is.** Shares brought in are counted as money in at the latest saved close. If no close is saved for the ticker yet, the form asks for today's price and that is used (`p_market_price`); the average cost is the last resort. Counting them at cost when they are worth more would turn the difference into a gain the portfolio never made. Editing such an entry keeps the price it was first counted at.
 
 **Logging from a position** sends every line to `portfolio_trades`, which runs `portfolio_buy` / `portfolio_sell` for each in one transaction: all lines are saved or none. A fee is stored inside the entry's price (cost per share on a buy, net proceeds per share on a sale) and recorded separately in `fee`, so cash, average cost, realized gain, undo and the audit need nothing extra.
 
-**Set balance** brings cash in line with the broker, including a negative balance for margin used. As a setup or correction it counts as money in or out (no effect on returns). Ticked as interest or fees, it's a real cost and lowers returns.
+**Closing part of an option position.** The closing dialogs take a contract count. For fewer than all, the page walks the purchases oldest first: whole purchases are closed as usual, and the last one, if only partly needed, is passed with `p_contracts`. The function then splits that purchase the way an edit works: the opening entry is voided and entered again as two purchases with the same price and date (the part and the rest), and the part is closed. Cash and realized gain come out the same as if two purchases had been entered to begin with, and every purchase still has exactly one opening and one closing entry, which is what the Health check expects. Cash-secured puts work the same way through `csp_resolve`.
+
+**Match broker balance** brings cash in line with the broker, including a negative balance for margin used. As a setup or correction it counts as money in or out (no effect on returns). Ticked as interest or fees, it's a real cost and lowers returns.
 
 ### Fixing mistakes: edit and undo
 
@@ -180,6 +186,7 @@ flowchart LR
 - **Edit** (`portfolio_entry_edit`, `option_edit`, `csp_edit`) is undo plus the corrected entry, in one save.
 - **Order matters for shares:** an entry that changed a holding can only be undone while it's the newest entry for that ticker in that portfolio. Undo newer ones first.
 - **Transfers between portfolios** can't be undone; transfer the shares back instead.
+- **Undoing a partial close** reopens the part as its own purchase; it and the rest then show as one line on the Options card, as any two purchases of the same contract do.
 - The Activity table hides voided entries; "Show undone or edited entries" brings them back as history.
 
 ---
@@ -229,7 +236,7 @@ Prices are **closes**, not live: during market hours the latest close is the pre
 
 ## 6. How the numbers are derived
 
-Nothing below is stored. The website calculates it from the tables each time a page loads.
+Nothing below is stored. The website calculates it from the tables each time a page loads. Lists that grow with time are read 1,000 rows at a time (`paging.ts`), so no total is cut short by the API's row limit.
 
 | Number | Formula | Code |
 |---|---|---|
@@ -245,11 +252,18 @@ Nothing below is stored. The website calculates it from the tables each time a p
 | Allocation / weight | Each position ÷ (shares + long options + positive cash) | portfolio pages |
 | Dividend income | annual $/share × shares; per payment = ÷ payments per year | `dividends.ts` |
 | Dividend calendar | Past months = recorded `dividend` activity; this month on = expected | `dividends.ts` `dividendCalendar` |
-| Net worth (month) | Σ assets − Σ debts for accounts open that month (missing month → last earlier balance, "carried") + each portfolio's last daily value in or before that month. Negative portfolio cash becomes a separate **Margin loans** debt | `networth.ts` `monthTotals` |
+| Net worth (month) | Σ assets − Σ debts for accounts open that month (missing month → last earlier balance, "carried") + each portfolio's last daily value in or before that month. An archived portfolio counts only in months before the one it was archived in. Negative portfolio cash becomes a separate **Margin loans** debt | `networth.ts` `monthTotals`, `portfolioCountsIn` |
 | Month Net worth opens on | Current month; on the 1st–5th, last month while it isn't closed (section 8) | `cashflow.ts` `netWorthOpenMonth` |
 | Cash flow: what you kept | Cash saved (change in cash + emergency fund) + invested (deposits − withdrawals) + debt paid down. Investment growth and other changes reconcile it to the net worth change | `cashflow.ts` `monthCashFlow` |
 | Payment due | A month's payment is due on its day the **next** month. Fixed payment: that amount. Card with only a due day: that month's closing balance | `installments.ts` `expectedPayment`, `paymentDueDate` |
 | Payoff estimate | Months n = −ln(1 − r·B/P) ÷ ln(1 + r), r = APR ÷ 12, P = payment − escrow | `installments.ts` `payoff` |
+| Debt-free date | The latest payoff month among loans with a fixed payment, and the sum of their interest still to pay. No rate entered counts as 0% | `InstallmentsCard.tsx`, from `payoff` |
+| Why net worth changed (Overview) | Last month's `monthCashFlow` as is: the change and its five parts. Not shown as numbers while any balance is carried | `netWorthChange.ts` |
+| Month recap | The same change and parts; per-portfolio growth (end value − start value − money added, the loop `monthCashFlow` runs, kept only if it adds up to its total); income; payments marked paid | `monthRecap.ts` |
+| Income by month | Dividends = `dividend` entries. Option premium = cash from `option_write` and `csp_open`, less `option_buyback` and `csp_close`. Bought options are trades, not income | `income.ts`, `incomeSummary.ts` |
+| What I own | Each ticker's `holdingView` value, cost and gain added up across active portfolios; share = value ÷ (priced holdings + cash + options − put liability). Above 20% is marked a large position | `combinedHoldings.ts` |
+| Biggest gains and losses | The three largest positive and negative `holdingView` gains (or day changes) among priced holdings | `movers.ts` |
+| Worth a look (Plan tab) | Planned positions the plan says to buy (`planActions`) that Research rates cheap (`fairWord`: price under 85% of fair value), furthest under target first | `buyCandidates.ts` |
 | Fair value | EPS × (7 + g) × 4.4 ÷ AAA yield. EPS = last 12 months; price ÷ P/E when the company reports in another currency. g = analysts' forecast EPS growth per year (next fiscal year to up to 5 years out); without one, the lower of past 5-year and 3-year growth. Floored at 0, capped (default 30). "Buy below" = 85% of fair value | `research.ts` `fairValue` |
 | Score (out of 100) | Valuation 20 (price ÷ fair value) + Growth 20 + Moat 20 (gross margin + return on equity) + Execution 10 (profitable, debt, current ratio) + Economy 30 (less for rising unemployment and a high 10-year yield). 80+ Strong, 70–79 Good, 60–69 Fair, under 60 Weak. Overrides replace any part | `research.ts` `research` |
 | Ticker type | Your `ticker_types` choice; else Finnhub type: ETP / closed-end fund → ETF (bond if its name says bond, treasury or T-bill), everything else → stock; else built-in lists | `allocationPlan.ts` `classify` |
@@ -264,6 +278,7 @@ Nothing below is stored. The website calculates it from the tables each time a p
 |---|---|
 | Each user only sees their own rows | RLS on every app table |
 | A synced trade isn't duplicated on re-sync | `unique (user_id, trade_key)` + `upsert_trade_bundle` |
+| Only the worker writes synced trades | execute on `upsert_trade_bundle` granted to the service role only |
 | A Robinhood re-import is a no-op | `unique (user_id, account_id, import_key)` |
 | A manually closed trade stays closed | `manually_closed` checked inside `upsert_trade_bundle` |
 | One setup per trade | `trade_playbooks` primary key on `trade_id` |
@@ -274,6 +289,8 @@ Nothing below is stored. The website calculates it from the tables each time a p
 | Each covered call needs 100 uncovered shares | `option_open` |
 | Cash moves only with a ledger row | all portfolio functions; direct writes revoked from signed-in users |
 | Activity is never changed or deleted, only voided or replaced | `portfolio_activity_append_only` trigger |
+| Every option purchase has one opening entry and, once closed, one closing entry | a partial close splits the purchase first; `audit_summary` flags anything else |
+| An archived portfolio keeps its earlier months | `portfolios.archived_on`, set by the `portfolios_archived_on` trigger |
 | Shares and average cost come only from Activity | holdings writes revoked; `audit_summary` flags any drift |
 | A mix target adds up to 100% | check on `allocation_targets` |
 | One closing price per ticker per day | `prices` primary key `(symbol, price_date)` |
@@ -300,6 +317,7 @@ flowchart LR
 - **Reopening** needs a reason and reopens every later closed month too. `networth_close_log` keeps every close and reopen.
 - **Which month Net worth opens on:** the current month from the 6th onward. On the 1st–5th it opens on the month waiting to be closed. The banner stays until that month closes, and says overdue after the 15th.
 - **Where closing starts:** months before `wealth_settings.close_from_month` are never asked to be closed ("Start from this month" on the banner).
-- **Not locked:** portfolio lines in a closed month come from `portfolio_daily_values`, with no copy taken at closing.
+- **Not locked:** portfolio lines in a closed month come from `portfolio_daily_values`, with no copy taken at closing. The worker only writes the current day's value, so past months don't move; archiving a portfolio leaves the months before it untouched (`archived_on`).
+- **Recap:** closing opens a one-screen summary of the month (change and why, best and worst portfolio, income, payments). It is worked out on the spot from the same tables, not stored, and can be reopened from any closed month.
 - **Balances carried forward:** a month with no balance entered uses the last earlier one, marked "carried", so totals never drop to zero. Cash flow marks a month incomplete while it leans on carried balances.
-- Code: `cashflow.ts` `closeChecklist`, `closeBlocker`, `closeStatus`; `CloseMonthBanner.tsx`, `MonthClosePanel.tsx`.
+- Code: `cashflow.ts` `closeChecklist`, `closeBlocker`, `closeStatus`; `CloseMonthBanner.tsx`, `MonthClosePanel.tsx`, `BalancesTable.tsx`, `MonthRecap.tsx`.

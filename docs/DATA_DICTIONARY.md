@@ -2,7 +2,7 @@
 
 Every table, column and database function in the Supabase database, grouped by what it's
 for. Built from the live schema on 2026-10-22, then updated from `supabase/migrations/`
-through `20261109010000_month_close.sql` (2026-10-29).
+through `20261119020000_partial_closes_archive_owned_shares.sql` (2026-11-19).
 
 **Related:** [DATA_FLOWS.md](DATA_FLOWS.md) shows how data moves between these tables;
 [ARCHITECTURE.md](ARCHITECTURE.md) shows the system around them.
@@ -231,7 +231,7 @@ An investment account you track (separate from the trading journal's `accounts`)
 |---|---|---|
 | `name` | text | e.g. "Long Term". |
 | `kind` | text | `brokerage` · `401k` · `traditional_ira` · `roth_ira` — which net-worth line it fills. The three retirement kinds are never part of the brokerage allocation split. |
-| `cash` | numeric | Cash in the portfolio. Moved by deposits, withdrawals, dividends, buys, sells, options and Set balance. **Negative = margin used**, shown in net worth as a Margin loans debt. |
+| `cash` | numeric | Cash in the portfolio. Moved by deposits, withdrawals, dividends, buys, sells, options and Match broker balance. **Negative = margin used**, shown in net worth as a Margin loans debt. |
 | `archived` | boolean | Archived portfolios aren't priced, and leave net worth and cash flow from the month they were archived. Earlier months keep their value. |
 | `archived_on` | date | The day it was archived (US Central); null while active. Set by a trigger when `archived` changes, never by the app. |
 | `target_pct` | numeric | Brokerage only: this portfolio's target share of all brokerage money (0–100). Null = no target. |
@@ -444,7 +444,7 @@ The inputs behind the financial freedom gauge on the Wealth page; balances come 
 ## System
 
 ### `sync_log`
-One row per Webull sync run — the audit trail, and the source of "Synced 2m ago". **Written by:** worker.
+One row per Webull sync run — the audit trail, and the source of "Synced 2m ago" (or "Sync failed" and the banner on the Trading pages, when the newest row's status is `error`). **Written by:** worker.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -482,12 +482,12 @@ Trading functions run as the calling user (so RLS applies) unless marked otherwi
 | `portfolio_cash` | Cash tab | Deposit / withdrawal / dividend. |
 | `csp_open` / `csp_resolve` | Cash-secured puts | Sell a put; resolve as expired / closed / assigned. `p_contracts` resolves only part: the sale is first split in two (see `option_close`). |
 | `option_open` / `option_close` | Options card | Buy call/put or sell covered call; resolve as closed / expired / exercised / assigned. `p_contracts` resolves only part: the opening entry is voided and re-entered as two purchases with the same price and date (the part and the rest), then the part is resolved. Every purchase keeps exactly one opening and one closing entry. |
-| `portfolio_set_cash` | Set balance | Sets cash to the broker's number (negative for margin) as a `cash_adjust` entry. |
+| `portfolio_set_cash` | Match broker balance | Sets cash to the broker's number (negative for margin) as a `cash_adjust` entry. |
 | `portfolio_split` | Split | Multiplies shares by the ratio and divides average cost by it. |
-| `portfolio_entry_edit` | Activity → Edit | Voids a buy / sell / add existing / cash entry and records the corrected one, linked by `replaced_by`. |
+| `portfolio_entry_edit` | Activity → Edit | Voids a buy / sell / shares-already-owned / cash entry and records the corrected one, linked by `replaced_by`. An edited shares-already-owned entry keeps the price its money-in was first counted at. |
 | `portfolio_entry_delete` | Activity → Undo | Voids an entry and reverses its effect. An entry that changed a holding can only be undone while it's the newest one for that ticker. |
 | `option_edit` / `csp_edit` | Options / puts → Edit | Corrects an open option or put. |
-| `position_undo_last` | Options / puts → Undo | Reopens a resolved position, or removes an open one. |
+| `position_undo_last` | Options / puts → Undo | Reopens a resolved position, or removes an open one. When a purchase was opened and closed in the same save (a partial close), the closing entry is undone first. |
 | `audit_rebuild_holdings` | `audit_summary` | Replays live Activity and returns the shares and cost each holding should have. Read-only. |
 | `_own_portfolio` / `_covered_shares` / `_holding_unadd` / `_holding_readd` | Other functions | Internal helpers: ownership check; shares promised to open covered calls; reversing a share change. |
 
