@@ -1,505 +1,64 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { Landmark, Plus, Settings2 } from 'lucide-react'
-import { useAuth } from '../auth/AuthContext'
-import type { InstallmentPayment, NetworthAccount, NetworthBalance, NetworthCategory, Portfolio, PortfolioDailyValue } from '../lib/database.types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import type { InstallmentPayment, NetworthAccount, NetworthBalance, Portfolio, PortfolioDailyValue } from '../lib/database.types'
 import {
-  createNetworthAccount,
-  deleteNetworthAccount,
   fetchCloseFromMonth,
   fetchDailyValues,
+  fetchExternalFlows,
   fetchInstallmentPayments,
   fetchMonthBook,
   fetchNetworthAccounts,
   fetchNetworthBalances,
   fetchPortfolios,
-  saveMonthBalances,
-  updateNetworthAccount,
 } from '../lib/wealthQueries'
-import { ACCOUNT_CATEGORIES, addMonths, categoryLabel, categoryOrder, isDebt, isOpenIn, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
+import { addMonths, monthLabel, monthOf, monthTotals, yearTotals } from '../lib/networth'
 import { centralDateStr, currency, percentFmt } from '../lib/format'
-import { INPUT, INPUT_SM, LABEL } from '../lib/ui'
+import { INPUT_SM } from '../lib/ui'
+import { errorMessage } from '../lib/balanceInput'
 import { useDialog } from '../lib/dialogContext'
-import { useToast } from '../lib/toastContext'
+import { useUrlState } from '../lib/useUrlState'
+import { isLinkMonth, monthStatus } from '../lib/monthLink'
+import { closeIsLate, useStartCloseFrom } from '../lib/closeReminder'
 import { signedCurrency as signed } from '../lib/portfolio'
+import { EMPTY_BOOK, closeStatus, netWorthOpenMonth, type MonthBook } from '../lib/cashflow'
 import { NetWorthChart } from '../components/WealthCharts'
 import { NetWorthComposition } from '../components/NetWorthComposition'
-import { InstallmentsCard } from '../components/InstallmentsCard'
+import { InstallmentsCard, type InstallmentsCardHandle } from '../components/InstallmentsCard'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
 import { MonthClosePanel } from '../components/MonthClosePanel'
-import { EMPTY_BOOK, netWorthOpenMonth, type MonthBook } from '../lib/cashflow'
-import { usePaymentSetup } from '../lib/usePaymentSetup'
+import { BalancesTable, type BalancesTableHandle } from '../components/BalancesTable'
+import { ManageAccounts } from '../components/ManageAccounts'
+import { MonthStepper } from '../components/MonthStepper'
+import { CollapsibleSection } from '../components/CollapsibleSection'
 import { Kpi } from '../components/WealthBits'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
-import { Button } from '../components/ui/Button'
-import { Pill } from '../components/ui/Pill'
+import { StatCard } from '../components/ui/StatCard'
+import { Tabs } from '../components/ui/Tabs'
 import { Drawer } from '../components/ui/Drawer'
-import { Menu } from '../components/ui/Menu'
-import { EmptyState } from '../components/ui/EmptyState'
+import { CashFlowView, type CashFlowFlow } from './CashFlowPage'
 
-/** Parses a balance box: blank = no balance this month, otherwise a non-negative number
- * (commas and $ allowed). undefined = not a valid number. */
-function parseBalance(raw: string): number | null | undefined {
-  const t = raw.replace(/[$,\s]/g, '')
-  if (t === '') return null
-  const n = Number(t)
-  return Number.isFinite(n) && n >= 0 ? n : undefined
-}
+const VIEWS = ['balances', 'cashflow'] as const
+type View = (typeof VIEWS)[number]
 
-/** Shows a balance with thousands separators (inputs accept commas back). */
-const fmtBalance = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
-
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
-
-/** The month's balances as a table: open accounts only, pre-filled with this month's entry
- * or the most recent earlier one ("carried"), grouped into Assets and Debts with subtotals.
- * Portfolio-fed lines are read-only. Saving writes only what you changed or marked unchanged,
- * so a carried balance stays carried until you've looked at it. A closed month is read-only. */
-function BalancesTable({
-  month,
-  accounts,
-  balances,
-  portfolioLines,
-  onSaved,
-  onManage,
-  locked,
-}: {
-  month: string
-  accounts: NetworthAccount[]
-  balances: NetworthBalance[]
-  portfolioLines: { key: string; name: string; category: NetworthCategory; amount: number }[]
-  onSaved: () => void
-  onManage: () => void
-  locked: boolean
-}) {
-  const { user } = useAuth()
-  const toast = useToast()
-  const open = useMemo(() => accounts.filter((a) => isOpenIn(a, month)), [accounts, month])
-  const prefill = useMemo(() => {
-    const out = new Map<string, { value: string; from: string | null }>()
-    for (const a of open) {
-      let best: NetworthBalance | null = null
-      for (const b of balances) if (b.account_id === a.id && b.month <= month && (!best || b.month > best.month)) best = b
-      out.set(a.id, { value: best ? fmtBalance(Number(best.balance)) : '', from: best && best.month !== month ? best.month : null })
-    }
-    return out
-  }, [open, balances, month])
-
-  const [draft, setDraft] = useState<Map<string, string>>(new Map())
-  const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    setDraft(new Map(Array.from(prefill, ([id, p]) => [id, p.value])))
-    setConfirmed(new Set())
-    setError(null)
-  }, [prefill])
-
-  // Saved when you changed it, or ticked a carried balance as unchanged for this month.
-  const toSave = (a: NetworthAccount) => confirmed.has(a.id) || parseBalance(draft.get(a.id) ?? '') !== parseBalance(prefill.get(a.id)?.value ?? '')
-  const dirty = open.some(toSave)
-
-  async function save() {
-    if (!user) return
-    const entries: { accountId: string; balance: number | null }[] = []
-    for (const a of open.filter(toSave)) {
-      const parsed = parseBalance(draft.get(a.id) ?? '')
-      if (parsed === undefined) {
-        setError(`“${draft.get(a.id)}” isn’t a valid amount for ${a.name}. Enter a positive number — debts are subtracted for you.`)
-        return
-      }
-      entries.push({ accountId: a.id, balance: parsed })
-    }
-    setSaving(true)
-    setError(null)
-    try {
-      await saveMonthBalances(user.id, month, entries)
-      toast(`Saved ${monthLabel(month)} balances`)
-      onSaved()
-    } catch (e) {
-      setError(errorMessage(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const amountOf = (a: NetworthAccount) => parseBalance(draft.get(a.id) ?? '') ?? 0
-  type Item =
-    | { kind: 'account'; key: string; category: NetworthCategory; name: string; account: NetworthAccount; amount: number }
-    | { kind: 'portfolio'; key: string; category: NetworthCategory; name: string; amount: number }
-  // Accounts and portfolio lines together, sorted by category, so each category's lines sit
-  // side by side and can carry a subtotal.
-  const groups = ([false, true] as const).map((debt) => {
-    const items: Item[] = [
-      ...open
-        .filter((a) => isDebt(a.category) === debt)
-        .map((a): Item => ({ kind: 'account', key: a.id, category: a.category, name: a.name, account: a, amount: amountOf(a) })),
-      ...portfolioLines
-        .filter((l) => isDebt(l.category) === debt)
-        .map((l): Item => ({ kind: 'portfolio', key: l.key, category: l.category, name: l.name, amount: Math.abs(l.amount) })),
-    ].sort((x, y) => categoryOrder(x.category) - categoryOrder(y.category) || x.name.localeCompare(y.name))
-    const counts = new Map<NetworthCategory, number>()
-    for (const it of items) counts.set(it.category, (counts.get(it.category) ?? 0) + 1)
-    const subtotal = items.reduce((s, it) => s + it.amount, 0)
-    return { debt, items, counts, subtotal }
-  })
-  const assets = groups[0].subtotal
-  const debts = groups[1].subtotal
-  // Carried balances you haven't changed or ticked yet.
-  const unconfirmed = open.filter((a) => prefill.get(a.id)?.from && !toSave(a))
-  const carriedCount = unconfirmed.length
-
-  if (open.length === 0 && portfolioLines.length === 0) {
-    return (
-      <Card>
-        <EmptyState
-          icon={<Landmark size={22} />}
-          title={`No accounts open in ${monthLabel(month)}`}
-          action={
-            <Button variant="primary" icon={<Plus size={16} />} onClick={onManage}>
-              Add an account
-            </Button>
-          }
-        >
-          Add what you own (home, cash, 401k…) and what you owe (mortgage, cards, loans). Portfolios fill their lines automatically.
-        </EmptyState>
-      </Card>
-    )
-  }
-
-  return (
-    <Card
-      title={`Balances · ${monthLabel(month)}`}
-      subtitle={locked ? `${monthLabel(month)} is closed. Reopen it to change these.` : 'Enter each balance as a positive number — debts are subtracted for you. Blank = no balance this month.'}
-      flush
-      actions={
-        <Button size="sm" icon={<Settings2 size={14} />} onClick={onManage}>
-          Manage accounts
-        </Button>
-      }
-    >
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <tbody>
-            {groups.map((g) =>
-              g.items.length === 0 ? null : (
-                <GroupRows key={String(g.debt)} title={g.debt ? 'Debts' : 'Assets'} debt={g.debt} subtotal={g.subtotal}>
-                  {g.items.map((it, i) => {
-                    const lastOfCategory = g.items[i + 1]?.category !== it.category
-                    const catCount = g.counts.get(it.category) ?? 0
-                    const catTotal = g.items.filter((x) => x.category === it.category).reduce((s2, x) => s2 + x.amount, 0)
-                    const p = it.kind === 'account' ? prefill.get(it.account.id) : undefined
-                    return (
-                      <Fragment key={it.key}>
-                        <tr className="border-b border-(--border) hover:bg-white/2">
-                          <td className="px-5 py-2.5">
-                            <div className="font-medium text-neutral-100">{it.name}</div>
-                            {it.kind === 'portfolio' ? (
-                              <div className="text-xs text-neutral-500">
-                                {it.key.startsWith('margin:') ? 'margin used · from Portfolios' : 'from Portfolios · last close'}
-                              </div>
-                            ) : (
-                              p?.from &&
-                              !locked && (
-                                <label className="mt-0.5 flex items-center gap-1.5 text-xs text-amber-400/90">
-                                  carried from {monthLabel(p.from)} ·
-                                  <input
-                                    type="checkbox"
-                                    checked={confirmed.has(it.account.id)}
-                                    onChange={(e) =>
-                                      setConfirmed((c) => {
-                                        const n = new Set(c)
-                                        if (e.target.checked) n.add(it.account.id)
-                                        else n.delete(it.account.id)
-                                        return n
-                                      })
-                                    }
-                                  />
-                                  unchanged
-                                </label>
-                              )
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <Pill tone={g.debt ? 'red' : 'teal'}>{categoryLabel(it.category)}</Pill>
-                          </td>
-                          {it.kind === 'account' ? (
-                            <td className="w-48 px-5 py-2">
-                              <span className="relative block">
-                                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-neutral-500">$</span>
-                                <input
-                                  inputMode="decimal"
-                                  aria-label={`${it.name} balance`}
-                                  value={draft.get(it.account.id) ?? ''}
-                                  disabled={locked}
-                                  onChange={(e) => setDraft((d) => new Map(d).set(it.account.id, e.target.value))}
-                                  onBlur={(e) => {
-                                    const n = parseBalance(e.target.value)
-                                    if (n !== null && n !== undefined) setDraft((d) => new Map(d).set(it.account.id, fmtBalance(n)))
-                                  }}
-                                  className={`${INPUT_SM} pl-6 text-right tabular-nums disabled:opacity-70 ${p?.from && !confirmed.has(it.account.id) ? 'border-amber-500/40' : ''}`}
-                                />
-                              </span>
-                            </td>
-                          ) : (
-                            <td className="w-48 px-5 py-2.5 text-right tabular-nums text-neutral-300">{currency(it.amount)}</td>
-                          )}
-                        </tr>
-                        {lastOfCategory && catCount >= 2 && (
-                          <tr className="border-b border-(--border) bg-white/2">
-                            <td colSpan={2} className="px-5 py-2 text-xs text-neutral-400">
-                              {categoryLabel(it.category)} · {catCount} accounts
-                            </td>
-                            <td className={`px-5 py-2 text-right text-sm font-semibold tabular-nums ${g.debt ? 'text-red-300' : 'text-neutral-100'}`}>
-                              {g.debt ? '−' : ''}
-                              {currency(catTotal)}
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    )
-                  })}
-                </GroupRows>
-              ),
-            )}
-            <tr className="bg-white/3">
-              <td className="px-5 py-3 text-sm font-semibold text-white" colSpan={2}>
-                Net worth
-              </td>
-              <td className="px-5 py-3 text-right text-base font-semibold tabular-nums text-white">{currency(assets - debts)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {!locked && (dirty || error || carriedCount > 0) && (
-        <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 rounded-b-2xl border-t border-(--border) bg-(--card-raised)/95 px-5 py-3 backdrop-blur">
-          <span className="text-xs text-neutral-400">
-            {error ? (
-              <span className="text-red-400">{error}</span>
-            ) : carriedCount > 0 ? (
-              `${carriedCount} balance${carriedCount === 1 ? ' is' : 's are'} carried from an earlier month. Enter ${carriedCount === 1 ? 'it' : 'them'}, or tick “unchanged” to keep the number for ${monthLabel(month)}.`
-            ) : (
-              'You have unsaved changes.'
-            )}
-          </span>
-          <span className="flex gap-2">
-            {dirty && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setDraft(new Map(Array.from(prefill, ([id, p]) => [id, p.value])))
-                  setConfirmed(new Set())
-                }}
-              >
-                Discard
-              </Button>
-            )}
-            {carriedCount > 0 && (
-              <Button size="sm" variant="ghost" onClick={() => setConfirmed((c) => new Set([...c, ...unconfirmed.map((a) => a.id)]))}>
-                Mark all unchanged
-              </Button>
-            )}
-            <Button size="sm" variant="primary" onClick={save} disabled={saving || !dirty}>
-              {saving ? 'Saving…' : `Save ${monthLabel(month, 'short')}`}
-            </Button>
-          </span>
-        </div>
-      )}
-    </Card>
-  )
-}
-
-function GroupRows({ title, debt, subtotal, children }: { title: string; debt: boolean; subtotal: number; children: React.ReactNode }) {
-  return (
-    <>
-      <tr className="border-y border-(--border) bg-white/2">
-        <td colSpan={2} className="px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-          <span className={`mr-2 inline-block h-2 w-2 rounded-full ${debt ? 'bg-red-400' : 'bg-teal-400'}`} />
-          {title}
-        </td>
-        <td className={`px-5 py-2 text-right text-sm font-semibold tabular-nums ${debt ? 'text-red-300' : 'text-teal-300'}`}>
-          {debt ? '−' : ''}
-          {currency(subtotal)}
-        </td>
-      </tr>
-      {children}
-    </>
-  )
-}
-
-/** Side panel: add accounts, rename, close / reopen, delete. Closing keeps history but drops
- * the account from the monthly form from its closing month on. */
-function ManageAccounts({ accounts, defaultMonth, onChanged }: { accounts: NetworthAccount[]; defaultMonth: string; onChanged: () => void }) {
-  const { user } = useAuth()
-  const dialog = useDialog()
-  const toast = useToast()
-  const editPayment = usePaymentSetup(onChanged)
-  const [name, setName] = useState('')
-  const [category, setCategory] = useState<NetworthCategory>('cash')
-  const [opened, setOpened] = useState(defaultMonth.slice(0, 7))
-  const [busy, setBusy] = useState(false)
-
-  const run = async (p: Promise<unknown>, message: string) => {
-    try {
-      await p
-      toast(message)
-      onChanged()
-    } catch (e) {
-      toast(errorMessage(e), 'error')
-    }
-  }
-
-  async function add() {
-    if (!user || !name.trim()) return
-    setBusy(true)
-    await run(
-      createNetworthAccount(user.id, { name: name.trim(), category, opened_month: `${opened}-01` }).then(() => setName('')),
-      `Added “${name.trim()}”`,
-    )
-    setBusy(false)
-  }
-
-  async function rename(a: NetworthAccount) {
-    const v = await dialog.form({ title: 'Rename account', fields: [{ name: 'name', label: 'Name', defaultValue: a.name }] })
-    if (v && v.name !== a.name) run(updateNetworthAccount(a.id, { name: v.name }), 'Account renamed')
-  }
-
-  async function close(a: NetworthAccount) {
-    const v = await dialog.form({
-      title: `Close “${a.name}”`,
-      description: 'From this month on it’s gone from the monthly form. Past balances stay in your history.',
-      submitLabel: 'Close account',
-      fields: [
-        {
-          name: 'month',
-          label: 'Closing month',
-          type: 'month',
-          defaultValue: defaultMonth.slice(0, 7),
-          validate: (m) => (`${m}-01` <= a.opened_month ? 'Must be after the month it opened' : null),
-        },
-      ],
-    })
-    if (v) run(updateNetworthAccount(a.id, { closed_month: `${v.month}-01` }), `Closed “${a.name}”`)
-  }
-
-  async function remove(a: NetworthAccount) {
-    if (
-      await dialog.confirm({
-        title: `Delete “${a.name}”?`,
-        message: 'This deletes the account and all its balances. To keep its history, close it instead.',
-        confirmLabel: 'Delete',
-        tone: 'danger',
-      })
-    )
-      run(deleteNetworthAccount(a.id), `Deleted “${a.name}”`)
-  }
-
-  const openAccounts = accounts.filter((a) => a.closed_month === null)
-  const closedAccounts = accounts.filter((a) => a.closed_month !== null)
-
-  return (
-    <div className="flex flex-col gap-6">
-      <section className="flex flex-col gap-3 rounded-2xl border border-(--border) bg-(--card-raised) p-4">
-        <h3 className="text-sm font-semibold text-white">Add an account</h3>
-        <label className="flex flex-col gap-1.5">
-          <span className={LABEL}>Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Chase checking" className={INPUT} />
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className={LABEL}>Category</span>
-          <select value={category} onChange={(e) => setCategory(e.target.value as NetworthCategory)} className={INPUT}>
-            <optgroup label="What you own">
-              {ACCOUNT_CATEGORIES.filter((c) => !c.debt).map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="What you owe">
-              {ACCOUNT_CATEGORIES.filter((c) => c.debt).map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className={LABEL}>Opened</span>
-          <input type="month" value={opened} onChange={(e) => setOpened(e.target.value)} className={INPUT} />
-          <span className="text-xs text-neutral-500">It shows up in the monthly form from this month on.</span>
-        </label>
-        <Button variant="primary" onClick={add} disabled={!name.trim() || busy} icon={<Plus size={16} />}>
-          Add account
-        </Button>
-        <p className="text-xs text-neutral-500">
-          401k, IRA and brokerage portfolios set up under{' '}
-          <Link to="/portfolios" className="text-(--accent-text) hover:underline">
-            Portfolios
-          </Link>{' '}
-          are added automatically — don’t add them here too.
-        </p>
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-white">Your accounts</h3>
-        {accounts.length === 0 ? (
-          <p className="text-sm text-neutral-500">No accounts yet.</p>
-        ) : (
-          <div className="flex flex-col divide-y divide-(--border) rounded-2xl border border-(--border)">
-            {[...openAccounts, ...closedAccounts].map((a) => (
-              <div key={a.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className={`font-medium ${a.closed_month ? 'text-neutral-500' : 'text-neutral-100'}`}>{a.name}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
-                    <Pill tone={isDebt(a.category) ? 'red' : 'teal'}>{categoryLabel(a.category)}</Pill>
-                    since {monthLabel(a.opened_month)}
-                    {a.closed_month && <Pill>closed {monthLabel(a.closed_month)}</Pill>}
-                    {(a.payment_amount ?? 0) > 0 && <Pill tone="amber">{currency(Number(a.payment_amount))}/mo</Pill>}
-                  </div>
-                </div>
-                <Menu
-                  label={`Actions for ${a.name}`}
-                  items={
-                    a.closed_month
-                      ? [
-                          { label: 'Reopen', onClick: () => run(updateNetworthAccount(a.id, { closed_month: null }), `Reopened “${a.name}”`) },
-                          { label: 'Rename', onClick: () => rename(a) },
-                          { label: 'Delete…', tone: 'danger', onClick: () => remove(a) },
-                        ]
-                      : [
-                          { label: 'Rename', onClick: () => rename(a) },
-                          ...(isDebt(a.category) ? [{ label: 'Payment details…', onClick: () => editPayment(a) }] : []),
-                          { label: 'Close account…', onClick: () => close(a) },
-                          { label: 'Delete…', tone: 'danger', onClick: () => remove(a) },
-                        ]
-                  }
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  )
-}
-
+/** Wealth → Net worth. Two tabs share one month, kept in the link as ?month=yyyy-mm:
+ * "Balances" (the month's balances, payments and month-end close) and "Cash flow"
+ * (?view=cashflow). While a finished month is waiting to be closed the page leads with the
+ * close: the close card, the balances table, then the payments. */
 export function NetWorthPage() {
-  const currentMonth = monthOf(centralDateStr(new Date()))
-  const [searchParams] = useSearchParams()
-  const requested = searchParams.get('month')
-  const validRequest = requested !== null && /^\d{4}-\d{2}$/.test(requested)
-  // Without ?month, the first load picks the month (see netWorthOpenMonth).
-  const [month, setMonth] = useState(validRequest ? `${requested}-01` : currentMonth)
-  const placed = useRef(validRequest)
-  // The month-end checklist links here with ?month=yyyy-mm.
-  useEffect(() => {
-    if (requested && /^\d{4}-\d{2}$/.test(requested)) setMonth(`${requested}-01`)
-  }, [requested])
-  const [year, setYear] = useState(Number(month.slice(0, 4)))
+  const today = centralDateStr(new Date())
+  const currentMonth = monthOf(today)
+  const dialog = useDialog()
+  const [, setParams] = useSearchParams()
+  const [view, setView] = useUrlState<View>('view', 'balances', VIEWS)
+  // Without ?month the page shows the month picked on the first load (see netWorthOpenMonth).
+  const [openMonth, setOpenMonth] = useState<string | null>(null)
+  const fallbackMonth = (openMonth ?? currentMonth).slice(0, 7)
+  const [linkMonth, setLinkMonth] = useUrlState('month', fallbackMonth)
+  const month = `${isLinkMonth(linkMonth) ? linkMonth : fallbackMonth}-01`
+  // The chart follows the month on screen until a year is picked from its list.
+  const [chosenYear, setYear] = useState<number | null>(null)
+  const year = chosenYear ?? Number(month.slice(0, 4))
   const [accounts, setAccounts] = useState<NetworthAccount[] | null>(null)
   const [balances, setBalances] = useState<NetworthBalance[]>([])
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
@@ -509,35 +68,48 @@ export function NetWorthPage() {
   const [manageOpen, setManageOpen] = useState(false)
   const [book, setBook] = useState<MonthBook>(EMPTY_BOOK)
   const [closeFromMonth, setCloseFromMonthValue] = useState<string | null>(null)
+  // Portfolio deposits and withdrawals: only the Cash flow tab needs them, so they load when it's first opened.
+  const [flows, setFlows] = useState<CashFlowFlow[] | null>(null)
+  const [flowsError, setFlowsError] = useState<string | null>(null)
+  const tableRef = useRef<BalancesTableHandle>(null)
+  const paymentsRef = useRef<InstallmentsCardHandle>(null)
 
-  const load = useCallback(() => {
-    Promise.all([
-      fetchNetworthAccounts(),
-      fetchNetworthBalances(),
-      fetchPortfolios(),
-      fetchDailyValues(),
-      fetchInstallmentPayments(),
-      fetchCloseFromMonth().catch(() => null),
-      fetchMonthBook().catch(() => EMPTY_BOOK),
-    ])
-      .then(([a, b, p, v, ip, closeFrom, mb]) => {
-        if (!placed.current) {
-          placed.current = true
-          const open = netWorthOpenMonth(centralDateStr(new Date()), a, b, ip, closeFrom, mb)
-          setMonth(open)
-          setYear(Number(open.slice(0, 4)))
-        }
-        setAccounts(a)
-        setBalances(b)
-        setPortfolios(p)
-        setDailyValues(v)
-        setPayments(ip)
-        setBook(mb)
-        setCloseFromMonthValue(closeFrom)
-      })
-      .catch((e) => setError(errorMessage(e)))
-  }, [])
-  useEffect(load, [load])
+  const load = useCallback(
+    () =>
+      Promise.all([
+        fetchNetworthAccounts(),
+        fetchNetworthBalances(),
+        fetchPortfolios(),
+        fetchDailyValues(),
+        fetchInstallmentPayments(),
+        fetchCloseFromMonth().catch(() => null),
+        fetchMonthBook().catch(() => EMPTY_BOOK),
+      ])
+        .then(([a, b, p, v, ip, closeFrom, mb]) => {
+          // Decided once: a later reload (say, after closing the month) doesn't move the page.
+          setOpenMonth((m) => m ?? netWorthOpenMonth(centralDateStr(new Date()), a, b, ip, closeFrom, mb))
+          setAccounts(a)
+          setBalances(b)
+          setPortfolios(p)
+          setDailyValues(v)
+          setPayments(ip)
+          setBook(mb)
+          setCloseFromMonthValue(closeFrom)
+        })
+        .catch((e) => setError(errorMessage(e))),
+    [],
+  )
+  useEffect(() => {
+    void load()
+  }, [load])
+  useEffect(() => {
+    if (view !== 'cashflow' || flows !== null) return
+    fetchExternalFlows()
+      .then(setFlows)
+      .catch((e) => setFlowsError(errorMessage(e)))
+  }, [view, flows])
+
+  const startCloseFrom = useStartCloseFrom(load)
 
   const totals = useMemo(() => (accounts ? monthTotals(month, accounts, balances, portfolios, dailyValues) : null), [month, accounts, balances, portfolios, dailyValues])
   const prev = useMemo(
@@ -567,6 +139,7 @@ export function NetWorthPage() {
     for (let y = Number(currentMonth.slice(0, 4)); y >= first; y--) out.push(y)
     return out
   }, [accounts, currentMonth])
+  const closedMonths = useMemo(() => new Set(book.closedAt.keys()), [book])
 
   if (error) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load net worth: {error}</div>
   if (!accounts || !totals) return <div className="text-neutral-500">Loading net worth…</div>
@@ -577,94 +150,209 @@ export function NetWorthPage() {
   const yearChange = hasYearStart ? totals.net - yearStart!.net : null
   const portfolioLines = totals.lines.filter((l) => l.source === 'portfolio')
 
+  // Which earlier months the carried balances in the headline come from.
+  const carriedFrom = totals.lines
+    .filter((l) => l.source === 'carried')
+    .map((l) => {
+      const opened = accounts.find((a) => a.id === l.key)?.opened_month ?? ''
+      let from = ''
+      for (const b of balances) if (b.account_id === l.key && b.month <= month && b.month >= opened && b.month > from) from = b.month
+      return from
+    })
+  const carriedNote =
+    carriedFrom.length === 0
+      ? null
+      : `includes ${carriedFrom.length} balance${carriedFrom.length === 1 ? '' : 's'} carried from ${new Set(carriedFrom).size === 1 ? monthLabel(carriedFrom[0]) : 'earlier months'}`
+
+  const locked = book.closedAt.has(month)
+  // Finished and not yet closed: the close card is the thing to act on, so it leads the page.
+  const closing = month < currentMonth && !locked
+  // The month the close banner would ask for. While its close card is on screen the card
+  // stands in for the banner, and carries the banner's extras.
+  const reminder = closeStatus(today, accounts, balances, payments, closeFromMonth, book)
+  const isReminderMonth = closing && reminder?.month === month
+  const cardStandsIn = view === 'balances' && isReminderMonth
+
+  /** Typed balances belong to the month on screen, so leaving it asks first: save, or discard. */
+  async function mayLeaveMonth(): Promise<boolean> {
+    const n = tableRef.current?.unsavedCount() ?? 0
+    if (n === 0) return true
+    const what = `${n} unsaved balance${n === 1 ? '' : 's'}`
+    if (await dialog.confirm({ title: `Save ${monthLabel(month)} balances first?`, message: `You have ${what}. Save ${n === 1 ? 'it' : 'them'} before leaving ${monthLabel(month)}?`, confirmLabel: 'Save' })) {
+      const saved = (await tableRef.current?.save()) ?? false
+      if (!saved && view !== 'balances') setView('balances') // the table says what went wrong
+      return saved
+    }
+    return dialog.confirm({
+      title: `Discard the ${what}?`,
+      message: `Discard ${n === 1 ? 'it' : 'them'} and leave ${monthLabel(month)}, or cancel to stay and keep typing.`,
+      confirmLabel: 'Discard',
+      tone: 'danger',
+    })
+  }
+
+  async function goToMonth(m: string, toBalances = false) {
+    if (m !== month && !(await mayLeaveMonth())) return
+    if (!toBalances || view === 'balances') return setLinkMonth(m.slice(0, 7))
+    // Tab and month together: two separate link updates would overwrite each other.
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p)
+        next.delete('view')
+        if (m.slice(0, 7) === fallbackMonth) next.delete('month')
+        else next.set('month', m.slice(0, 7))
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  const kpis = (
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <StatCard
+        label={`Net worth · ${monthLabel(month)}`}
+        value={currency(totals.net)}
+        sub={
+          <>
+            {currency(totals.assets)} assets · {currency(totals.debts)} debts
+            {carriedNote && <span className="mt-0.5 block text-amber-400/90">{carriedNote}</span>}
+          </>
+        }
+        accent
+      />
+      <Kpi
+        label="Change from last month"
+        value={monthChange === null ? '—' : signed(monthChange)}
+        tone={monthChange}
+        chip={monthChange !== null && prev!.net !== 0 ? percentFmt(monthChange / Math.abs(prev!.net)) : undefined}
+        chipTone={monthChange}
+        sub={monthChange === null ? 'needs last month’s balances' : undefined}
+      />
+      <Kpi
+        label="Change this year"
+        value={yearChange === null ? '—' : signed(yearChange)}
+        tone={yearChange}
+        sub={yearChange === null ? 'needs a December balance' : `since December ${Number(month.slice(0, 4)) - 1}`}
+      />
+      <Kpi label="Excluding home" value={currency(totals.netExHome)} sub="without home & mortgage" />
+    </div>
+  )
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
       <PageHeader
         title="Net worth"
         subtitle="Everything you own minus everything you owe, month by month."
-        actions={
-          <>
-            <label className="flex items-center gap-2 text-sm text-neutral-400">
-              <span className="hidden sm:inline">Month</span>
-              <input
-                type="month"
-                value={month.slice(0, 7)}
-                max={currentMonth.slice(0, 7)}
-                onChange={(e) => e.target.value && setMonth(`${e.target.value}-01`)}
-                className={`${INPUT} w-auto`}
-              />
-            </label>
-            <Button icon={<Settings2 size={15} />} onClick={() => setManageOpen(true)}>
-              Accounts
-            </Button>
-          </>
-        }
+        actions={<MonthStepper month={month} max={currentMonth} onChange={(m) => void goToMonth(m)} status={monthStatus(month, currentMonth, locked)} />}
       />
 
-      <CloseMonthBanner
-        accounts={accounts}
-        balances={balances}
-        payments={payments}
-        book={book}
-        viewing={month}
-        onOpenMonth={(m) => {
-          setMonth(m)
-          setYear(Number(m.slice(0, 4)))
-        }}
+      <Tabs
+        tabs={[
+          { value: 'balances', label: 'Balances' },
+          { value: 'cashflow', label: 'Cash flow' },
+        ]}
+        value={view}
+        onChange={setView}
       />
 
-      <MonthClosePanel month={month} currentMonth={currentMonth} accounts={accounts} balances={balances} payments={payments} book={book} closeFrom={closeFromMonth} onChanged={load} />
+      {!cardStandsIn && (
+        <CloseMonthBanner
+          accounts={accounts}
+          balances={balances}
+          payments={payments}
+          book={book}
+          closeFrom={closeFromMonth}
+          onChanged={load}
+          viewing={view === 'balances' ? month : undefined}
+          onOpenMonth={(m) => void goToMonth(m, true)}
+        />
+      )}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Kpi label={`Net worth · ${monthLabel(month)}`} value={currency(totals.net)} sub={`${currency(totals.assets)} assets · ${currency(totals.debts)} debts`} accent />
-        <Kpi
-          label="Change from last month"
-          value={monthChange === null ? '—' : signed(monthChange)}
-          tone={monthChange}
-          chip={monthChange !== null && prev!.net !== 0 ? percentFmt(monthChange / Math.abs(prev!.net)) : undefined}
-          chipTone={monthChange}
-          sub={monthChange === null ? 'needs last month’s balances' : undefined}
+      {/* Kept on the page while Cash flow is showing, so balances typed but not saved yet survive a look at the other tab. */}
+      <div className={view === 'balances' ? 'flex flex-col gap-6' : 'hidden'}>
+        {!closing && kpis}
+
+        <MonthClosePanel
+          month={month}
+          currentMonth={currentMonth}
+          accounts={accounts}
+          balances={balances}
+          payments={payments}
+          book={book}
+          closeFrom={closeFromMonth}
+          onChanged={load}
+          onJumpToBalances={(ids) => tableRef.current?.focusFirst(ids)}
+          onJumpToPayments={(ids) => paymentsRef.current?.focusFirst(ids)}
+          onOpenMonth={(m) => void goToMonth(m)}
+          late={isReminderMonth && closeIsLate(today, month)}
+          note={isReminderMonth && Number(today.slice(8, 10)) <= 5 ? `Showing ${monthLabel(month)} until you close it, or through the 5th.` : null}
+          startFrom={isReminderMonth && closeFromMonth === null ? { label: `Start from ${monthLabel(currentMonth, 'short')}`, onClick: () => void startCloseFrom(month) } : undefined}
         />
-        <Kpi
-          label="Change this year"
-          value={yearChange === null ? '—' : signed(yearChange)}
-          tone={yearChange}
-          sub={yearChange === null ? 'needs a December balance' : `since December ${Number(month.slice(0, 4)) - 1}`}
+
+        {/* A new key per month: what's typed belongs to that month and starts clean on the next. */}
+        <BalancesTable
+          key={month}
+          ref={tableRef}
+          month={month}
+          accounts={accounts}
+          balances={balances}
+          portfolioLines={portfolioLines}
+          onSaved={load}
+          onManage={() => setManageOpen(true)}
+          locked={locked}
         />
-        <Kpi label="Excluding home" value={currency(totals.netExHome)} sub="without home & mortgage" />
+
+        <InstallmentsCard ref={paymentsRef} month={month} today={today} accounts={accounts} balances={balances} payments={payments} onChanged={load} locked={locked} />
+
+        <CollapsibleSection
+          storageKey="networth-breakdown-open"
+          title="Breakdown"
+          hint={closing ? 'Headline numbers, net worth by month and what it’s made of' : 'Net worth by month and what it’s made of'}
+        >
+          {view === 'balances' && (
+            <>
+              {closing && kpis}
+              <Card
+                title="Net worth by month"
+                actions={
+                  <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${INPUT_SM} w-auto`} aria-label="Year">
+                    {years.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                }
+              >
+                <NetWorthChart data={bars} />
+              </Card>
+              <NetWorthComposition lines={totals.lines} monthName={monthLabel(month)} />
+            </>
+          )}
+        </CollapsibleSection>
       </div>
 
-      <Card
-        title="Net worth by month"
-        actions={
-          <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${INPUT_SM} w-auto`} aria-label="Year">
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
-        }
-      >
-        <NetWorthChart data={bars} />
-      </Card>
+      {view === 'cashflow' &&
+        (flowsError ? (
+          <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load cash flow: {flowsError}</div>
+        ) : flows === null ? (
+          <div className="text-neutral-500">Loading cash flow…</div>
+        ) : (
+          <CashFlowView
+            month={month}
+            currentMonth={currentMonth}
+            accounts={accounts}
+            balances={balances}
+            portfolios={portfolios}
+            dailyValues={dailyValues}
+            flows={flows}
+            closedMonths={closedMonths}
+            onMonth={(m) => void goToMonth(m)}
+          />
+        ))}
 
-      <NetWorthComposition lines={totals.lines} monthName={monthLabel(month)} />
-
-      <InstallmentsCard month={month} today={centralDateStr(new Date())} accounts={accounts} balances={balances} payments={payments} onChanged={load} locked={book.closedAt.has(month)} />
-
-      <BalancesTable
-        month={month}
-        accounts={accounts}
-        balances={balances}
-        portfolioLines={portfolioLines}
-        onSaved={load}
-        onManage={() => setManageOpen(true)}
-        locked={book.closedAt.has(month)}
-      />
-
-      <Drawer open={manageOpen} onClose={() => setManageOpen(false)} title="Accounts" subtitle="What you own and what you owe" width="max-w-lg">
-        <ManageAccounts accounts={accounts} defaultMonth={month} onChanged={load} />
+      <Drawer open={manageOpen} onClose={() => setManageOpen(false)} title="Manage accounts" subtitle="What you own and what you owe" width="max-w-lg">
+        <ManageAccounts accounts={accounts} month={month} monthLocked={locked} onChanged={load} />
       </Drawer>
     </div>
   )

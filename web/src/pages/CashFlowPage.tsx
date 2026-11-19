@@ -14,16 +14,21 @@ import {
 import { monthCashFlow, type MonthCashFlow } from '../lib/cashflow'
 import { addMonths, monthLabel, monthOf } from '../lib/networth'
 import { centralDateStr } from '../lib/format'
-import { INPUT, INPUT_SM, toneClass } from '../lib/ui'
+import { INPUT_SM, toneClass } from '../lib/ui'
 import { signedCurrency as signed } from '../lib/portfolio'
+import { useUrlState } from '../lib/useUrlState'
+import { isLinkMonth, monthStatus } from '../lib/monthLink'
 import { CloseMonthBanner } from '../components/CloseMonthBanner'
+import { MonthStepper } from '../components/MonthStepper'
 import { PageHeader } from '../components/ui/PageHeader'
 import { StatCard } from '../components/ui/StatCard'
 import { Card } from '../components/ui/Card'
 import { Pill } from '../components/ui/Pill'
 import { EmptyState } from '../components/ui/EmptyState'
 
-type Flow = Pick<PortfolioActivity, 'portfolio_id' | 'kind' | 'external_flow' | 'occurred_on'>
+/** Money in or out of a portfolio, as fetchExternalFlows returns it. */
+export type CashFlowFlow = Pick<PortfolioActivity, 'portfolio_id' | 'kind' | 'external_flow' | 'occurred_on'>
+type Flow = CashFlowFlow
 type Bar = MonthCashFlow & { label: string }
 
 const axisCurrency = (n: number) => (Math.abs(n) >= 1000 ? `$${Math.round(n / 1000)}k` : `$${Math.round(n)}`)
@@ -53,44 +58,34 @@ function KeptTooltip({ active, payload }: { active?: boolean; payload?: { payloa
   )
 }
 
-/** Wealth → Cash flow: what you kept each month and where it went, derived only from your
- * month-end balances and portfolio deposits -- nothing extra to enter. */
-export function CashFlowPage() {
-  const today = centralDateStr(new Date())
-  const currentMonth = monthOf(today)
-  const [month, setMonth] = useState(addMonths(currentMonth, -1))
+/** What you kept each month and where it went, derived only from your month-end balances and
+ * portfolio deposits -- nothing extra to enter. The page that shows it loads the data and owns
+ * the month: Net worth's "Cash flow" tab, or the Cash flow page by itself. */
+export function CashFlowView({
+  month,
+  currentMonth,
+  accounts,
+  balances,
+  portfolios,
+  dailyValues,
+  flows,
+  closedMonths,
+  onMonth,
+}: {
+  month: string
+  currentMonth: string
+  accounts: NetworthAccount[]
+  balances: NetworthBalance[]
+  portfolios: Portfolio[]
+  dailyValues: PortfolioDailyValue[]
+  flows: Flow[]
+  closedMonths: ReadonlySet<string>
+  onMonth: (month: string) => void
+}) {
   const [year, setYear] = useState(Number(currentMonth.slice(0, 4)))
-  const [accounts, setAccounts] = useState<NetworthAccount[] | null>(null)
-  const [balances, setBalances] = useState<NetworthBalance[]>([])
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([])
-  const [dailyValues, setDailyValues] = useState<PortfolioDailyValue[]>([])
-  const [flows, setFlows] = useState<Flow[]>([])
-  const [payments, setPayments] = useState<InstallmentPayment[]>([])
-  const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set())
-  const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(() => {
-    Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchPortfolios(), fetchDailyValues(), fetchExternalFlows(), fetchInstallmentPayments()])
-      .then(([a, b, p, v, f, ip]) => {
-        setAccounts(a)
-        setBalances(b)
-        setPortfolios(p)
-        setDailyValues(v)
-        setFlows(f)
-        setPayments(ip)
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }, [])
-  useEffect(load, [load])
-  useEffect(() => {
-    fetchMonthBook()
-      .then((b) => setClosedMonths(new Set(b.closedAt.keys())))
-      .catch(() => {})
-  }, [])
-
-  const cf = useMemo(() => (accounts ? monthCashFlow(month, accounts, balances, portfolios, dailyValues, flows) : null), [month, accounts, balances, portfolios, dailyValues, flows])
+  const cf = useMemo(() => monthCashFlow(month, accounts, balances, portfolios, dailyValues, flows), [month, accounts, balances, portfolios, dailyValues, flows])
   const bars = useMemo<Bar[]>(() => {
-    if (!accounts) return []
     const out: Bar[] = []
     for (let m = 1; m <= 12; m++) {
       const mo = `${year}-${String(m).padStart(2, '0')}-01`
@@ -102,14 +97,11 @@ export function CashFlowPage() {
     return out
   }, [year, currentMonth, accounts, balances, portfolios, dailyValues, flows])
   const years = useMemo(() => {
-    const first = Math.min(Number(currentMonth.slice(0, 4)), ...(accounts ?? []).map((a) => Number(a.opened_month.slice(0, 4))))
+    const first = Math.min(Number(currentMonth.slice(0, 4)), ...accounts.map((a) => Number(a.opened_month.slice(0, 4))))
     const out: number[] = []
     for (let y = Number(currentMonth.slice(0, 4)); y >= first; y--) out.push(y)
     return out
   }, [accounts, currentMonth])
-
-  if (error) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load cash flow: {error}</div>
-  if (!accounts || !cf) return <div className="text-neutral-500">Loading cash flow…</div>
 
   const inProgress = month === currentMonth
   const maxAbs = Math.max(1, Math.abs(cf.kept), Math.abs(cf.investmentGrowth), Math.abs(cf.otherChanges), Math.abs(cf.netWorthChange))
@@ -120,27 +112,10 @@ export function CashFlowPage() {
   ]
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6">
-      <PageHeader
-        title="Cash flow"
-        subtitle="Worked out from your month-end balances — nothing extra to enter."
-        actions={
-          <input
-            type="month"
-            value={month.slice(0, 7)}
-            max={currentMonth.slice(0, 7)}
-            onChange={(e) => e.target.value && setMonth(`${e.target.value}-01`)}
-            className={`${INPUT} w-auto`}
-            aria-label="Month"
-          />
-        }
-      />
-
-      <CloseMonthBanner accounts={accounts} balances={balances} payments={payments} />
-
+    <>
       {accounts.length === 0 ? (
         <Card>
-          <EmptyState title="Nothing to work from yet">Add your accounts and monthly balances on Net worth — cash flow is worked out from them.</EmptyState>
+          <EmptyState title="Nothing to work from yet">Add your accounts and monthly balances under Net worth › Balances — cash flow is worked out from them.</EmptyState>
         </Card>
       ) : (
         <>
@@ -242,7 +217,7 @@ export function CashFlowPage() {
                     {[...bars].reverse().map((b) => (
                       <tr
                         key={b.month}
-                        onClick={() => setMonth(b.month)}
+                        onClick={() => onMonth(b.month)}
                         className={`cursor-pointer border-b border-(--border) last:border-0 hover:bg-white/2 ${b.month === month ? 'bg-(--accent-soft)/40' : ''}`}
                       >
                         <td className="px-5 py-2.5 font-medium text-neutral-100">{monthLabel(b.month)}</td>
@@ -272,6 +247,74 @@ export function CashFlowPage() {
           </p>
         </>
       )}
+    </>
+  )
+}
+
+/** Wealth → Cash flow as a page of its own. The same content is the "Cash flow" tab on Net
+ * worth; this keeps the old address working. Opens on last month; the month is kept in the
+ * link as ?month=yyyy-mm. */
+export function CashFlowPage() {
+  const today = centralDateStr(new Date())
+  const currentMonth = monthOf(today)
+  const lastMonth = addMonths(currentMonth, -1).slice(0, 7)
+  const [linkMonth, setLinkMonth] = useUrlState('month', lastMonth)
+  const month = `${isLinkMonth(linkMonth) ? linkMonth : lastMonth}-01`
+  const setMonth = (m: string) => setLinkMonth(m.slice(0, 7))
+  const [accounts, setAccounts] = useState<NetworthAccount[] | null>(null)
+  const [balances, setBalances] = useState<NetworthBalance[]>([])
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([])
+  const [dailyValues, setDailyValues] = useState<PortfolioDailyValue[]>([])
+  const [flows, setFlows] = useState<Flow[]>([])
+  const [payments, setPayments] = useState<InstallmentPayment[]>([])
+  const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set())
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(() => {
+    Promise.all([fetchNetworthAccounts(), fetchNetworthBalances(), fetchPortfolios(), fetchDailyValues(), fetchExternalFlows(), fetchInstallmentPayments()])
+      .then(([a, b, p, v, f, ip]) => {
+        setAccounts(a)
+        setBalances(b)
+        setPortfolios(p)
+        setDailyValues(v)
+        setFlows(f)
+        setPayments(ip)
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [])
+  useEffect(load, [load])
+  useEffect(() => {
+    fetchMonthBook()
+      .then((b) => setClosedMonths(new Set(b.closedAt.keys())))
+      .catch(() => {})
+  }, [])
+
+  if (error) return <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 text-red-300">Failed to load cash flow: {error}</div>
+  if (!accounts) return <div className="text-neutral-500">Loading cash flow…</div>
+
+  return (
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <PageHeader
+        title="Cash flow"
+        subtitle="Worked out from your month-end balances — nothing extra to enter."
+        actions={
+          <MonthStepper month={month} max={currentMonth} onChange={setMonth} status={monthStatus(month, currentMonth, closedMonths.has(month))} />
+        }
+      />
+
+      <CloseMonthBanner accounts={accounts} balances={balances} payments={payments} />
+
+      <CashFlowView
+        month={month}
+        currentMonth={currentMonth}
+        accounts={accounts}
+        balances={balances}
+        portfolios={portfolios}
+        dailyValues={dailyValues}
+        flows={flows}
+        closedMonths={closedMonths}
+        onMonth={setMonth}
+      />
     </div>
   )
 }

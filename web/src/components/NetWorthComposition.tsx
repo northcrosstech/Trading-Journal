@@ -5,9 +5,9 @@ import { currency } from '../lib/format'
 import { AllocationDonut } from './WealthCharts'
 import { Card } from './ui/Card'
 
-/** How a month's net worth is made up: a donut of what you own by category, the totals of
- * what you owe by category, and the net. Every category total is listed (e.g. all credit
- * cards together, all 401k accounts together). */
+/** How a month's net worth is made up: a donut of what you own by category and what you owe
+ * by category. Every category total is listed (e.g. all credit cards together, all 401k
+ * accounts together). The overall totals are left to the page's headline figures. */
 export function NetWorthComposition({ lines, monthName }: { lines: NetworthLine[]; monthName: string }) {
   const totals = categoryTotals(lines)
   const assets = totals.filter((t) => !t.debt)
@@ -28,17 +28,13 @@ export function NetWorthComposition({ lines, monthName }: { lines: NetworthLine[
     <Card title="Composition" subtitle={`What makes up your net worth · ${monthName}`}>
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
         <div className="lg:col-span-3">
-          <h3 className="mb-3 flex items-baseline justify-between text-sm font-semibold text-neutral-100">
-            What you own <span className="tabular-nums text-teal-300">{currency(assetTotal)}</span>
-          </h3>
+          <h3 className="mb-3 text-sm font-semibold text-neutral-100">What you own</h3>
           {assets.length === 0 ? <p className="text-sm text-neutral-500">No assets this month.</p> : <AllocationDonut allocation={donut} centerLabel="Assets" noun="Categories" />}
         </div>
 
-        <div className="flex flex-col gap-6 lg:col-span-2">
+        <div className="lg:col-span-2">
           <div>
-            <h3 className="mb-3 flex items-baseline justify-between text-sm font-semibold text-neutral-100">
-              What you owe <span className="tabular-nums text-red-300">−{currency(debtTotal)}</span>
-            </h3>
+            <h3 className="mb-3 text-sm font-semibold text-neutral-100">What you owe</h3>
             {debts.length === 0 ? (
               <p className="text-sm text-neutral-500">No debts this month.</p>
             ) : (
@@ -75,25 +71,9 @@ export function NetWorthComposition({ lines, monthName }: { lines: NetworthLine[
             )}
           </div>
 
-          <div className="rounded-2xl bg-(--card-raised) p-4 text-sm">
-            <div className="flex justify-between py-0.5">
-              <span className="text-neutral-400">Assets</span>
-              <span className="tabular-nums text-neutral-100">{currency(assetTotal)}</span>
-            </div>
-            <div className="flex justify-between py-0.5">
-              <span className="text-neutral-400">Debts</span>
-              <span className="tabular-nums text-red-300">−{currency(debtTotal)}</span>
-            </div>
-            <div className="mt-1 flex justify-between border-t border-(--border) pt-2 text-base font-semibold">
-              <span className="text-white">Net worth</span>
-              <span className="tabular-nums text-white">{currency(assetTotal - debtTotal)}</span>
-            </div>
-            {assetTotal > 0 && (
-              <div className="mt-1 text-xs text-neutral-500">
-                Debt is {((debtTotal / assetTotal) * 100).toFixed(1)}% of what you own
-              </div>
-            )}
-          </div>
+          {assetTotal > 0 && (
+            <p className="mt-4 border-t border-(--border) pt-3 text-xs text-neutral-500">Debt is {((debtTotal / assetTotal) * 100).toFixed(1)}% of what you own</p>
+          )}
         </div>
       </div>
     </Card>

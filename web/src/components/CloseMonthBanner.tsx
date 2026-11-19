@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { CalendarCheck2 } from 'lucide-react'
-import { useAuth } from '../auth/AuthContext'
 import type { InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
 import { EMPTY_BOOK, closeStatus, type MonthBook } from '../lib/cashflow'
-import { addMonths, monthLabel, monthOf } from '../lib/networth'
+import { monthLabel, monthOf } from '../lib/networth'
 import { centralDateStr } from '../lib/format'
-import { fetchCloseFromMonth, fetchMonthBook, setCloseFromMonth } from '../lib/wealthQueries'
-import { useDialog } from '../lib/dialogContext'
-import { useToast } from '../lib/toastContext'
+import { fetchCloseFromMonth, fetchMonthBook } from '../lib/wealthQueries'
+import { closeIsLate, useStartCloseFrom } from '../lib/closeReminder'
 import { Button, ButtonLink } from './ui/Button'
 
 const list = (names: string[]) => (names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} +${names.length - 3} more`)
@@ -23,6 +21,8 @@ export function CloseMonthBanner({
   viewing,
   onOpenMonth,
   book: givenBook,
+  closeFrom: givenCloseFrom,
+  onChanged,
 }: {
   accounts: NetworthAccount[]
   balances: NetworthBalance[]
@@ -33,19 +33,23 @@ export function CloseMonthBanner({
   onOpenMonth?: (month: string) => void
   /** The page's own copy of the closed months, so the banner follows a close at once. */
   book?: MonthBook
+  /** The page's own copy of the month closing starts from (null = not set), so the banner
+   * doesn't load it again. Pass onChanged with it, to reload it after "Start from". */
+  closeFrom?: string | null
+  /** Called after "Start from {this month}" has been saved. */
+  onChanged?: () => void
 }) {
-  const { user } = useAuth()
-  const dialog = useDialog()
-  const toast = useToast()
-  const [closeFrom, setCloseFrom] = useState<string | null | undefined>(undefined)
+  const [ownCloseFrom, setCloseFrom] = useState<string | null | undefined>(undefined)
+  const closeFrom = givenCloseFrom !== undefined ? givenCloseFrom : ownCloseFrom
 
   const [ownBook, setOwnBook] = useState<MonthBook | undefined>(undefined)
   const book = givenBook ?? ownBook
 
   useEffect(() => {
-    fetchCloseFromMonth()
-      .then(setCloseFrom)
-      .catch(() => setCloseFrom(null))
+    if (givenCloseFrom === undefined)
+      fetchCloseFromMonth()
+        .then(setCloseFrom)
+        .catch(() => setCloseFrom(null))
     if (!givenBook)
       fetchMonthBook()
         .then(setOwnBook)
@@ -53,13 +57,22 @@ export function CloseMonthBanner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const startFrom = useStartCloseFrom(
+    useCallback(
+      (m: string) => {
+        setCloseFrom(m)
+        onChanged?.()
+      },
+      [onChanged],
+    ),
+  )
+
   const today = centralDateStr(new Date())
   const thisMonth = monthOf(today)
   if (closeFrom === undefined || !book) return null // don't flash the banner before the settings load
   const status = closeStatus(today, accounts, balances, payments, closeFrom, book)
   if (!status) return null
-  // Past the 15th of the month after it, the close is late.
-  const late = status.month < addMonths(thisMonth, -1) || Number(today.slice(8, 10)) > 15
+  const late = closeIsLate(today, status.month)
   const total = accounts.filter((a) => a.opened_month <= status.month && (a.closed_month === null || status.month < a.closed_month)).length
   const done = total - status.missing.length
   const onClosingMonth = viewing === status.month
@@ -73,24 +86,6 @@ export function CloseMonthBanner({
       : viewing === thisMonth
         ? `Showing ${monthLabel(thisMonth)} since the 5th has passed, but ${monthLabel(status.month)} was never closed.`
         : null
-
-  async function startFromThisMonth() {
-    if (!user) return
-    const ok = await dialog.confirm({
-      title: `Start closing from ${monthLabel(thisMonth)}?`,
-      message: `${monthLabel(status!.month)} and earlier won’t be asked to be closed. Your first close will be ${monthLabel(thisMonth)}, from the 1st of next month. Balances you’ve already entered are kept.`,
-      confirmLabel: `Start from ${monthLabel(thisMonth, 'short')}`,
-    })
-    if (!ok) return
-    try {
-      await setCloseFromMonth(user.id, thisMonth)
-      setCloseFrom(thisMonth)
-      toast(`Month-end close starts from ${monthLabel(thisMonth)}`)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      toast(/wealth_settings/.test(msg) ? 'Run the wealth_settings migration first' : msg, 'error')
-    }
-  }
 
   return (
     <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3.5 ${late ? 'border-amber-400/60 bg-amber-500/15' : 'border-amber-500/25 bg-amber-500/8'}`}>
@@ -118,7 +113,7 @@ export function CloseMonthBanner({
       </div>
       <div className="flex items-center gap-2">
         {closeFrom === null && (
-          <Button size="sm" variant="ghost" className="text-amber-200/80" onClick={startFromThisMonth}>
+          <Button size="sm" variant="ghost" className="text-amber-200/80" onClick={() => startFrom(status.month)}>
             Start from {monthLabel(thisMonth, 'short')}
           </Button>
         )}

@@ -1,24 +1,29 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckCircle2, Info, XCircle } from 'lucide-react'
-import { ToastContext, type ToastTone } from '../../lib/toastContext'
+import { ToastContext, type ToastAction, type ToastTone } from '../../lib/toastContext'
 
-type Toast = { id: number; message: string; tone: ToastTone }
+type Toast = { id: number; message: string; tone: ToastTone; action?: ToastAction }
 
 const ICON = { success: CheckCircle2, error: XCircle, info: Info }
 const COLOR = { success: 'text-emerald-400', error: 'text-red-400', info: 'text-sky-400' }
 
 /** Bottom-right notifications confirming an action ("Bought 10 VOO") or reporting a
- * failure. Success/info fade after 3.5s; errors stay 7s. */
+ * failure. Success/info fade after 3.5s; errors stay 7s; one with a button (Undo) stays 8s. */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const nextId = useRef(1)
 
-  const toast = useCallback((message: string, tone: ToastTone = 'success') => {
-    const id = nextId.current++
-    setToasts((t) => [...t.slice(-3), { id, message, tone }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'error' ? 7000 : 3500)
-  }, [])
+  const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), [])
+
+  const toast = useCallback(
+    (message: string, tone: ToastTone = 'success', action?: ToastAction) => {
+      const id = nextId.current++
+      setToasts((t) => [...t.slice(-3), { id, message, tone, action }])
+      setTimeout(() => dismiss(id), tone === 'error' ? 7000 : action ? 8000 : 3500)
+    },
+    [dismiss],
+  )
 
   return (
     <ToastContext.Provider value={toast}>
@@ -34,7 +39,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 className="ui-pop-in pointer-events-auto flex items-start gap-2.5 rounded-xl border border-(--border-strong) bg-(--card-raised) px-3.5 py-3 text-sm text-neutral-100 shadow-2xl"
               >
                 <Icon size={18} className={`mt-px shrink-0 ${COLOR[t.tone]}`} />
-                <span className="min-w-0">{t.message}</span>
+                <span className="min-w-0 flex-1">{t.message}</span>
+                {t.action && (
+                  <button
+                    onClick={() => {
+                      dismiss(t.id)
+                      t.action!.onClick()
+                    }}
+                    className="-my-1 shrink-0 rounded-md px-2 py-1 text-sm font-semibold text-(--accent-text) transition hover:bg-white/5"
+                  >
+                    {t.action.label}
+                  </button>
+                )}
               </div>
             )
           })}

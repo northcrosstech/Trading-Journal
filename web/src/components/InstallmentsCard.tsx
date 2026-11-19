@@ -1,8 +1,9 @@
-import { CalendarClock, CheckCircle2, Plus } from 'lucide-react'
+import { useImperativeHandle, useRef, useState, type Ref } from 'react'
+import { CalendarClock, CheckCheck, CheckCircle2, Plus } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { InstallmentPayment, NetworthAccount, NetworthBalance } from '../lib/database.types'
 import { markInstallmentPaid, unmarkInstallmentPaid } from '../lib/wealthQueries'
-import { categoryLabel, isDebt, isOpenIn, monthLabel } from '../lib/networth'
+import { addMonths, categoryLabel, isDebt, isOpenIn, monthLabel } from '../lib/networth'
 import { balanceUpTo, daysBetween, durationLabel, expectedPayment, hasPaymentPlan, paymentDueDate, payoff } from '../lib/installments'
 import { currency, dateFmt } from '../lib/format'
 import { parseAmount, useDialog, validators } from '../lib/dialogContext'
@@ -13,6 +14,20 @@ import { Button } from './ui/Button'
 import { Pill } from './ui/Pill'
 import { Menu } from './ui/Menu'
 import { EmptyState } from './ui/EmptyState'
+
+/** "October", without the year. A month's payment falls due the following month, so the
+ * card's title names both. */
+const monthName = (month: string) => {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long' })
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+export type InstallmentsCardHandle = {
+  /** Scrolls to the first of these accounts' payment rows, in list order, and focuses its button. */
+  focusFirst: (accountIds: string[]) => void
+}
 
 /** Monthly payments on debts for the selected month: due date, amount, APR, balance, the
  * payoff estimate, and a paid / due soon / overdue status with Mark paid. A month's payment is
@@ -25,20 +40,26 @@ export function InstallmentsCard({
   payments,
   onChanged,
   locked = false,
+  ref,
 }: {
   month: string
   today: string
   accounts: NetworthAccount[]
   balances: NetworthBalance[]
   payments: InstallmentPayment[]
-  onChanged: () => void
+  /** Reloads the page's data. When it returns a promise, Mark paid stays disabled until it settles. */
+  onChanged: () => void | Promise<void>
   /** The month is closed: its payments can't be marked or unmarked. */
   locked?: boolean
+  ref?: Ref<InstallmentsCardHandle>
 }) {
   const { user } = useAuth()
   const dialog = useDialog()
   const toast = useToast()
   const editPayment = usePaymentSetup(onChanged)
+  const [busy, setBusy] = useState(false)
+  const [flash, setFlash] = useState<string | null>(null)
+  const rowEls = useRef(new Map<string, HTMLTableRowElement>())
 
   const debts = accounts.filter((a) => isDebt(a.category) && isOpenIn(a, month))
   const withPayment = debts.filter(hasPaymentPlan)
@@ -59,43 +80,75 @@ export function InstallmentsCard({
       return { a, due, paid, balance, plan, escrow, principalAndInterest, monthlyInterest, expected, fixed, nothingDue: !fixed && expected === 0 }
     })
     .sort((x, y) => x.due.localeCompare(y.due))
+  type Row = (typeof rows)[number]
 
   const total = rows.reduce((s, r) => s + r.expected, 0)
   const paidTotal = rows.reduce((s, r) => s + (r.paid ? Number(r.paid.amount) : 0), 0)
   const left = rows.filter((r) => !r.paid).reduce((s, r) => s + r.expected, 0)
+  const unpaidRows = rows.filter((r) => !r.paid && !r.nothingDue)
+  // Paid today, unless the due date is more than a month behind (catching up on an old month).
+  const defaultPaidOn = (r: Row) => (daysBetween(r.due, today) > 31 ? r.due : today)
 
-  async function markPaid(r: (typeof rows)[number]) {
+  useImperativeHandle(ref, () => ({
+    focusFirst(accountIds) {
+      const r = rows.find((x) => accountIds.includes(x.a.id))
+      const el = r && rowEls.current.get(r.a.id)
+      if (!r || !el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.querySelector('button')?.focus({ preventScroll: true })
+      // A focused button is easy to miss after a mouse click, so the row lights up briefly too.
+      setFlash(r.a.id)
+      setTimeout(() => setFlash((f) => (f === r.a.id ? null : f)), 1600)
+    },
+  }))
+
+  /** One click: records the expected amount on the default date. Undo sits in the toast. */
+  async function markPaid(todo: Row[]) {
+    if (!user || busy || todo.length === 0) return
+    setBusy(true)
+    const results = await Promise.allSettled(todo.map((r) => markInstallmentPaid(user.id, { accountId: r.a.id, month, amount: r.expected, paidOn: defaultPaidOn(r) })))
+    const marked = todo.filter((_, i) => results[i].status === 'fulfilled')
+    const failed = results.find((x): x is PromiseRejectedResult => x.status === 'rejected')
+    const undo = marked.length > 0 ? { label: 'Undo', onClick: () => void unmark(marked) } : undefined
+    if (failed) toast(todo.length === 1 ? errorText(failed.reason) : `Marked ${marked.length} of ${todo.length} paid. ${errorText(failed.reason)}`, 'error', undo)
+    else toast(todo.length === 1 ? `${todo[0].a.name} marked paid` : `${todo.length} payments marked paid`, 'success', undo)
+    if (marked.length > 0) await onChanged()
+    setBusy(false)
+  }
+
+  /** The row menu's dialog, for a payment that wasn't the expected amount or the default date. */
+  async function editPaid(r: Row) {
     if (!user) return
     const v = await dialog.form({
-      title: `Mark ${r.a.name} paid`,
+      title: r.paid ? `${r.a.name} · payment` : `Mark ${r.a.name} paid`,
       description: `${monthLabel(month)} payment, due ${dateFmt(r.due)}.`,
-      submitLabel: 'Mark paid',
+      submitLabel: r.paid ? 'Save' : 'Mark paid',
       fields: [
-        { name: 'amount', label: 'Amount paid', type: 'number', prefix: '$', defaultValue: String(r.expected), validate: validators.positive },
-        { name: 'on', label: 'Paid on', type: 'date', defaultValue: daysBetween(r.due, today) > 31 ? r.due : today },
+        { name: 'amount', label: 'Amount paid', type: 'number', prefix: '$', defaultValue: String(r.paid ? Number(r.paid.amount) : r.expected), validate: validators.positive },
+        { name: 'on', label: 'Paid on', type: 'date', defaultValue: r.paid ? r.paid.paid_on : defaultPaidOn(r) },
       ],
     })
     if (!v) return
     try {
       await markInstallmentPaid(user.id, { accountId: r.a.id, month, amount: parseAmount(v.amount)!, paidOn: v.on })
-      toast(`${r.a.name} marked paid`)
+      toast(r.paid ? `${r.a.name} payment updated` : `${r.a.name} marked paid`)
       onChanged()
     } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error')
+      toast(errorText(e), 'error')
     }
   }
 
-  async function undo(r: (typeof rows)[number]) {
+  async function unmark(todo: Row[]) {
     try {
-      await unmarkInstallmentPaid(r.a.id, month)
-      toast(`${r.a.name} marked unpaid`)
-      onChanged()
+      await Promise.all(todo.map((r) => unmarkInstallmentPaid(r.a.id, month)))
+      toast(todo.length === 1 ? `${todo[0].a.name} marked unpaid` : `${todo.length} payments marked unpaid`)
     } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error')
+      toast(errorText(e), 'error')
     }
+    onChanged()
   }
 
-  function status(r: (typeof rows)[number]) {
+  function status(r: Row) {
     if (r.paid) return <Pill tone="green"><CheckCircle2 size={12} /> Paid {dateFmt(r.paid.paid_on)}</Pill>
     if (r.nothingDue) return <Pill>Nothing due</Pill>
     if (locked) return <Pill>Not recorded</Pill>
@@ -111,16 +164,23 @@ export function InstallmentsCard({
 
   return (
     <Card
-      title="Monthly payments"
+      title={rows.length > 0 ? `${monthName(month)} statements · due in ${monthName(addMonths(month, 1))}` : 'Monthly payments'}
       subtitle={
         rows.length > 0 ? (
           <>
-            {monthLabel(month)} · {currency(total)} total · <span className="text-emerald-300">{currency(paidTotal)} paid</span> ·{' '}
+            Monthly payments · {currency(total)} total · <span className="text-emerald-300">{currency(paidTotal)} paid</span> ·{' '}
             <span className={left > 0 ? 'text-amber-300' : 'text-neutral-400'}>{currency(left)} left</span>
           </>
         ) : (
           'Track the monthly payment on each debt, when it’s due, and when it’ll be paid off.'
         )
+      }
+      actions={
+        !locked && unpaidRows.length >= 2 ? (
+          <Button size="sm" icon={<CheckCheck size={14} />} onClick={() => markPaid(unpaidRows)} disabled={busy}>
+            Mark all paid
+          </Button>
+        ) : undefined
       }
       flush
     >
@@ -145,7 +205,14 @@ export function InstallmentsCard({
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.a.id} className="border-b border-(--border) last:border-0 hover:bg-white/2">
+                <tr
+                  key={r.a.id}
+                  ref={(el) => {
+                    if (el) rowEls.current.set(r.a.id, el)
+                    else rowEls.current.delete(r.a.id)
+                  }}
+                  className={`border-b border-(--border) transition-colors last:border-0 ${flash === r.a.id ? 'bg-(--accent-soft)' : 'hover:bg-white/2'}`}
+                >
                   <td className="whitespace-nowrap px-5 py-3 font-medium text-neutral-200">{dateFmt(r.due)}</td>
                   <td className="px-3 py-3">
                     <div className="font-medium text-white">{r.a.name}</div>
@@ -190,14 +257,23 @@ export function InstallmentsCard({
                   <td className="px-5 py-3 text-right">
                     <span className="flex items-center justify-end gap-1">
                       {!locked && !r.paid && !r.nothingDue && (
-                        <Button size="sm" variant="primary" onClick={() => markPaid(r)}>
+                        <Button size="sm" variant="primary" onClick={() => markPaid([r])} disabled={busy}>
                           Mark paid
                         </Button>
                       )}
                       <Menu
                         label={`Actions for ${r.a.name}`}
                         items={[
-                          ...(r.paid && !locked ? [{ label: 'Mark unpaid', onClick: () => undo(r) }] : []),
+                          ...(locked
+                            ? []
+                            : r.paid
+                              ? [
+                                  { label: 'Edit amount or date…', onClick: () => editPaid(r) },
+                                  { label: 'Mark unpaid', onClick: () => void unmark([r]) },
+                                ]
+                              : r.nothingDue
+                                ? []
+                                : [{ label: 'Other amount or date…', onClick: () => editPaid(r) }]),
                           { label: 'Payment details…', onClick: () => editPayment(r.a) },
                         ]}
                       />
