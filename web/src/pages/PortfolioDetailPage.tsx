@@ -47,6 +47,7 @@ import { AttentionButton, AttentionStrip, type AttentionItem } from '../componen
 import type { OptionFormInitial } from '../components/OptionTradeForm'
 import { DividendsCard } from '../components/DividendsCard'
 import { IncomeCard } from '../components/IncomeCard'
+import { metalPriceSource } from '../lib/metals'
 import { PageError, PageLoading } from '../components/ui/PageState'
 import { SortTh } from '../components/SortTh'
 import { sortRows, useSort } from '../lib/useSort'
@@ -325,6 +326,11 @@ function HoldingsTable({
                         <span className="ml-1 text-[10px] font-medium text-neutral-500" title="Manual price">
                           MANUAL
                         </span>
+                      )}
+                      {v.priced === 'close' && metalPriceSource(v.holding.symbol) && (
+                        <div className="text-[10px] font-medium text-neutral-500" title={`Spot price per troy ounce, ${metalPriceSource(v.holding.symbol)}`}>
+                          {metalPriceSource(v.holding.symbol)} / oz
+                        </div>
                       )}
                     </>
                   )}

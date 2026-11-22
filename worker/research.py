@@ -234,7 +234,9 @@ def _all_rows(query) -> list[dict]:
 
 
 def research_symbols(client) -> list[str]:
-    """Every ticker held (without a manual price), on anyone's watchlist, or in a position plan."""
+    """Every ticker held (without a manual price), on anyone's watchlist, or in a position plan.
+    Physical metals (GOLD, SILVER) are left out: they have no company fundamentals."""
+    from prices import METAL_SYMBOLS
     held = {h["symbol"] for h in _all_rows(client.table("holdings").select("symbol,manual_price")) if h.get("manual_price") is None}
     try:
         watched = {w["symbol"] for w in _all_rows(client.table("research_watchlist").select("symbol"))}
@@ -244,7 +246,7 @@ def research_symbols(client) -> list[str]:
         watched |= {t["symbol"] for t in _all_rows(client.table("position_targets").select("symbol"))}
     except Exception:  # table not created yet (migration not run)
         pass
-    return sorted(held | watched)
+    return sorted((held | watched) - METAL_SYMBOLS)
 
 
 def run_research(

@@ -145,6 +145,12 @@ These show figures the app already works out, in the place you'd look for them. 
 **The one rule:** shares, average cost and cash change **only through entries** (Activity).
 The holding's pencil edits only a manual price. That's what keeps every number traceable.
 
+**Physical gold and silver:** use the ticker **GOLD** or **SILVER**, with the quantity in troy
+ounces of pure metal (1 oz = 31.1 g) and your cost per ounce, premium included. Enter each
+purchase with **Log → Shares I already own** on its own date. The price is the spot price per
+troy ounce, updated after each day's close: gold from **XAU/USD** (Twelve Data), silver from
+**XAG/USD** (gold-api.com). The pair shows under the price, and research skips both.
+
 | You did | Use | Effect on returns |
 |---|---|---|
 | Put money in / took money out | **Log → Deposit / Withdraw**, or click the **Cash** card | None: it's your money, not a gain |

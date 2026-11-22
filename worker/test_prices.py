@@ -1,7 +1,38 @@
 """Unit tests for the pure parts of prices.py -- no network, no database."""
 import pytest
 
-from prices import chunked, csp_liability, option_value, parse_eod_response, value_portfolio
+from prices import (
+    chunked,
+    csp_liability,
+    option_value,
+    parse_aliased_eod,
+    parse_eod_response,
+    parse_spot_price,
+    value_portfolio,
+)
+
+
+def test_gold_is_requested_as_xau_usd_and_saved_as_gold():
+    body = {
+        "XAU/USD": {"symbol": "XAU/USD", "exchange": "Forex", "datetime": "2026-11-21", "close": "3536.202"},
+        "VOO": {"symbol": "VOO", "datetime": "2026-11-21", "close": "552.10"},
+    }
+    closes, warnings = parse_aliased_eod(["GOLD", "VOO"], body)
+    assert closes == {"GOLD": ("2026-11-21", 3536.202), "VOO": ("2026-11-21", 552.10)}
+    assert warnings == []
+
+
+def test_gold_alone_and_its_failure_name_both():
+    closes, _ = parse_aliased_eod(["GOLD"], {"symbol": "XAU/USD", "datetime": "2026-11-21", "close": "3536.2"})
+    assert closes == {"GOLD": ("2026-11-21", 3536.2)}
+    _, warnings = parse_aliased_eod(["GOLD", "VOO"], {"VOO": {"datetime": "2026-11-21", "close": "1"}})
+    assert warnings[0].startswith("GOLD (XAU/USD):")
+
+
+def test_spot_price():
+    assert parse_spot_price({"symbol": "XAG", "price": 41.080002}) == pytest.approx(41.08, abs=1e-3)
+    assert parse_spot_price({"error": "nope"}) is None
+    assert parse_spot_price({"price": 0}) is None
 
 
 def test_chunked_splits_into_batches():

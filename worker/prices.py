@@ -29,6 +29,14 @@ from rate_limiter import RateLimiter
 
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY")
 EOD_URL = "https://api.twelvedata.com/eod"
+# Physical metals are held under a plain name and priced per troy ounce in US dollars.
+# Gold comes from Twelve Data as the XAU/USD spot pair; silver (XAG/USD) is not on Twelve
+# Data's free plan, so it comes from gold-api.com (free, no key). The web app shows the
+# same pair names next to the price (web/src/lib/metals.ts).
+TWELVEDATA_ALIASES = {"GOLD": "XAU/USD"}
+SPOT_METALS = {"SILVER": "XAG"}
+METAL_SYMBOLS = frozenset(TWELVEDATA_ALIASES) | frozenset(SPOT_METALS)
+SPOT_URL = "https://api.gold-api.com/price/"
 BATCH_SIZE = 8  # free tier: 8 credits per minute
 BATCH_INTERVAL_SECONDS = 61.0
 SPLIT_DROP_RATIO = 0.6  # a close below 60% of the previous one is flagged as a possible split
@@ -73,6 +81,27 @@ def parse_eod_response(symbols: list[str], body: dict) -> tuple[dict[str, tuple[
         except (KeyError, TypeError, ValueError):
             warnings.append(f"{sym}: unreadable price {item!r}")
     return closes, warnings
+
+
+def parse_aliased_eod(symbols: list[str], body: dict) -> tuple[dict[str, tuple[str, float]], list[str]]:
+    """parse_eod_response for a batch whose metals were requested under their Twelve Data
+    pair (GOLD as XAU/USD): closes and warnings come back under the name you hold."""
+    requested = [TWELVEDATA_ALIASES.get(s, s) for s in symbols]
+    back = {TWELVEDATA_ALIASES.get(s, s): s for s in symbols}
+    closes, warnings = parse_eod_response(requested, body)
+    for pair, name in back.items():
+        if pair != name:
+            warnings = [w.replace(f"{pair}:", f"{name} ({pair}):", 1) if w.startswith(f"{pair}:") else w for w in warnings]
+    return {back[k]: v for k, v in closes.items()}, warnings
+
+
+def parse_spot_price(body: dict) -> Optional[float]:
+    """gold-api.com answers {"symbol": "XAG", "price": 41.08, ...}; anything else is no price."""
+    try:
+        price = float(body["price"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return price if price > 0 else None
 
 
 def csp_liability(csp: dict, underlying_close: Optional[float]) -> float:
@@ -149,6 +178,12 @@ def value_portfolio(
 def fetch_eod(symbols: list[str], api_key: str) -> dict:
     query = urllib.parse.urlencode({"symbol": ",".join(symbols), "apikey": api_key})
     with urllib.request.urlopen(f"{EOD_URL}?{query}", timeout=30) as res:
+        return json.loads(res.read().decode())
+
+
+def fetch_spot(code: str) -> dict:
+    req = urllib.request.Request(SPOT_URL + urllib.parse.quote(code), headers={"User-Agent": "portfolio-pricing"})
+    with urllib.request.urlopen(req, timeout=30) as res:
         return json.loads(res.read().decode())
 
 
@@ -240,19 +275,36 @@ def run_pricing(
             ):
                 previous.setdefault(row["symbol"], float(row["close"]))
 
-        if symbols and not api_key:
+        # Silver: spot price from gold-api.com, saved under the value date.
+        for name in [s for s in symbols if s in SPOT_METALS]:
+            code = SPOT_METALS[name]
+            try:
+                price = parse_spot_price(fetch_spot(code))
+            except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                summary.warnings.append(f"{name} ({code}/USD): request failed ({exc})")
+                continue
+            if price is None:
+                summary.warnings.append(f"{name} ({code}/USD): no price from gold-api.com")
+                continue
+            client.table("prices").upsert(
+                [{"symbol": name, "price_date": value_date.isoformat(), "close": price}], on_conflict="symbol,price_date"
+            ).execute()
+            summary.prices_saved += 1
+        td_symbols = [s for s in symbols if s not in SPOT_METALS]
+
+        if td_symbols and not api_key:
             summary.warnings.append("TWELVEDATA_API_KEY is not set -- no new prices fetched")
-        elif symbols:
+        elif td_symbols:
             limiter = RateLimiter(min_interval_seconds=BATCH_INTERVAL_SECONDS)
             limiter._last_call = -BATCH_INTERVAL_SECONDS  # first batch goes immediately
-            for batch in chunked(symbols, BATCH_SIZE):
+            for batch in chunked(td_symbols, BATCH_SIZE):
                 limiter.wait()
                 try:
-                    body = fetch_eod(batch, api_key)
+                    body = fetch_eod([TWELVEDATA_ALIASES.get(s, s) for s in batch], api_key)
                 except (urllib.error.URLError, TimeoutError, ValueError) as exc:
                     summary.warnings.append(f"{','.join(batch)}: request failed ({exc})")
                     continue
-                closes, warnings = parse_eod_response(batch, body)
+                closes, warnings = parse_aliased_eod(batch, body)
                 summary.warnings.extend(warnings)
                 rows = [{"symbol": s, "price_date": d, "close": c} for s, (d, c) in closes.items()]
                 if rows:
