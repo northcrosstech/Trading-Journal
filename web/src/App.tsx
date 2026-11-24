@@ -24,6 +24,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfoliosPage } from './pages/PortfoliosPage'
 import { PortfolioDetailPage } from './pages/PortfolioDetailPage'
+import { MatchBrokerPage } from './pages/MatchBrokerPage'
 
 /** Cash flow is a view of the Net worth page now; old links land there, keeping ?month=. */
 function CashFlowRedirect() {
@@ -74,6 +75,7 @@ function App() {
             <Route path="/cashflow" element={<CashFlowRedirect />} />
             <Route path="/research" element={<ResearchPage />} />
             <Route path="/portfolios" element={<PortfoliosPage />} />
+            <Route path="/portfolios/match" element={<MatchBrokerPage />} />
             <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

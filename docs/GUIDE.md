@@ -188,7 +188,25 @@ Every line is saved together, or none are: if one line has a problem (e.g. selli
 
 **Fees** count: on a buy they're added to your cost (so average cost includes them, like your broker's), on a sale they come off what you receive. The Activity list shows the fill price and the fee.
 
-**Behind on logging?** Each portfolio shows **Last entry** with a date, on its card and above its holdings, so you know where to pick up.
+**Behind on logging?** Each portfolio shows **Last entry** with a date, on its card and above its holdings, so you know where to pick up. Or skip the trade-by-trade logging and use Match my broker below.
+
+### Match my broker
+
+Instead of logging every trade, bring a portfolio in line with your broker from a spreadsheet. Open it from **Match my broker** on the Portfolios page (all portfolios), or from **Log** on a portfolio's page (just that one).
+
+1. **Download.** Tick the portfolios you want and press **Download**. You get one spreadsheet with a row for every stock, option and cash balance the app holds now.
+2. **Edit.** Change the numbers to what your broker shows: shares and average cost for stocks, contracts and average price for options, the balance on the CASH row. Delete rows for things you no longer hold and add rows for new ones. Save as .xlsx or .csv.
+3. **Upload and review.** The app compares the file with what it holds and lists only the differences, grouped by portfolio, then **Log all** saves them.
+
+What it logs:
+
+- **More shares at the broker:** a buy priced so your average cost lands exactly on the broker's. It uses (broker shares × broker average − app shares × app average) ÷ new shares, and shows that working.
+- **Fewer shares:** a sale at today's close (you can change the price). A sale never changes average cost, so if the broker's average moved on a sale (some brokers sell the oldest shares first), the row is marked **Check by hand** and skipped.
+- **New options:** opened at the file's average price. Sold puts are cash-secured puts; sold calls are covered calls.
+- **Options gone from the broker:** you choose how each ended (sold or bought back with a price, expired, exercised, assigned). Ones past their expiry start as Expired.
+- **Cash:** set to the broker's balance last, as a setup / correction, so it always ends at the broker's number.
+
+Only portfolios named in the file change. A row the app can't read is listed with its row number, and its portfolio is skipped until you fix the file, so a typo is never taken as a sale. If saving stops part way, upload the same file again: it only logs what is still different. Every entry lands in Activity and can be undone there.
 
 ### Fixing a mistake
 

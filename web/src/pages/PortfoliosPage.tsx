@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Archive, ChevronRight, Plus, Wallet } from 'lucide-react'
+import { Archive, ChevronRight, Plus, Scale, Wallet } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import type { PortfolioKind } from '../lib/database.types'
 import { createPortfolio, fetchAuditProblems, fetchLastEntries, updatePortfolio } from '../lib/wealthQueries'
@@ -20,7 +20,7 @@ import { HealthCheckCard } from '../components/HealthCheckCard'
 import { BrokerageAllocationCard } from '../components/AllocationCards'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
-import { Button } from '../components/ui/Button'
+import { Button, ButtonLink } from '../components/ui/Button'
 import { Pill } from '../components/ui/Pill'
 import { EmptyState } from '../components/ui/EmptyState'
 import { Tabs } from '../components/ui/Tabs'
@@ -125,9 +125,16 @@ export function PortfoliosPage() {
         title="Portfolios"
         subtitle="All your long-term investments together, valued at each trading day’s close."
         actions={
-          <Button variant="primary" icon={<Plus size={16} />} onClick={newPortfolio}>
-            New portfolio
-          </Button>
+          <>
+            {active.length > 0 && (
+              <ButtonLink to="/portfolios/match" icon={<Scale size={16} />}>
+                Match my broker
+              </ButtonLink>
+            )}
+            <Button variant="primary" icon={<Plus size={16} />} onClick={newPortfolio}>
+              New portfolio
+            </Button>
+          </>
         }
       />
 

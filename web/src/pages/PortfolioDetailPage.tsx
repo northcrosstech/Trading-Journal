@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronDown, MoreHorizontal, Pencil, Plus, Wallet } from 'lucide-react'
 import type { AuditProblem, CspPosition, Holding, OptionPosition, Portfolio, PortfolioActivity, PortfolioDailyValue, PortfolioKind, TickerThesisRow } from '../lib/database.types'
 import {
@@ -428,6 +428,7 @@ function HoldingsTable({
 
 export function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>()
+  const navigate = useNavigate()
   const dialog = useDialog()
   const toast = useToast()
   const [portfolio, setPortfolio] = useState<Portfolio | null | undefined>(undefined)
@@ -874,7 +875,12 @@ export function PortfolioDetailPage() {
               variant="primary"
               icon={<Plus size={16} />}
               groups={[
-                { items: [{ label: 'Buy or sell', hint: 'Shares, one trade or several', onClick: startTrade }] },
+                {
+                  items: [
+                    { label: 'Buy or sell', hint: 'Shares, one trade or several', onClick: startTrade },
+                    ...(p.archived ? [] : [{ label: 'Match my broker', hint: 'Upload your broker’s positions; logs the differences', onClick: () => navigate(`/portfolios/match?p=${p.id}`) }]),
+                  ],
+                },
                 {
                   label: 'Cash',
                   items: [
